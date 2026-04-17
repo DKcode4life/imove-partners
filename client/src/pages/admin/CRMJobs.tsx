@@ -192,8 +192,8 @@ export default function CRMJobsPage() {
   const [search,    setSearch]    = useState('');
   const [dateFrom,  setDateFrom]  = useState('');
   const [dateTo,    setDateTo]    = useState('');
-  const [sortKey,   setSortKey]   = useState<SortKey>('confirmed_move_date');
-  const [sortDir,   setSortDir]   = useState<'asc' | 'desc'>('asc');
+  const [sortKey,   setSortKey]   = useState<SortKey>('id');
+  const [sortDir,   setSortDir]   = useState<'asc' | 'desc'>('desc');
 
   // Modals
   const [newOpen,      setNewOpen]      = useState(false);
