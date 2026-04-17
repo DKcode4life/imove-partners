@@ -581,8 +581,8 @@ export default function CRMDetailPage() {
         {/* ── LEFT (2/3) ──────────────────────────────────────────────────── */}
         <div className="xl:col-span-2 space-y-5">
 
-          {/* A. Client Details */}
-          <Section title="A. Client Details" {...sectionProps('client')}>
+          {/* Client Details */}
+          <Section title="Client Details" {...sectionProps('client')}>
             {editingSection === 'client' ? (
               <div className="space-y-3">
                 <F label="Full Name *">
@@ -621,8 +621,8 @@ export default function CRMDetailPage() {
             )}
           </Section>
 
-          {/* C. Move Details */}
-          <Section title="C. Move Details" {...sectionProps('move')}>
+          {/* Move Details */}
+          <Section title="Move Details" {...sectionProps('move')}>
             {editingSection === 'move' ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -721,8 +721,8 @@ export default function CRMDetailPage() {
             )}
           </Section>
 
-          {/* E. Operational Notes */}
-          <Section title="E. Operational Notes" accent="bg-orange-500" {...sectionProps('ops')}>
+          {/* Operational Notes */}
+          <Section title="Operational Notes" accent="bg-orange-500" {...sectionProps('ops')}>
             {/* Admin Notes — always inline editable */}
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">
@@ -836,8 +836,8 @@ export default function CRMDetailPage() {
         {/* ── RIGHT (1/3) ─────────────────────────────────────────────────── */}
         <div className="space-y-5">
 
-          {/* B. Lead / Referral */}
-          <Section title="B. Lead & Referral" accent="bg-violet-500" {...sectionProps('lead')}>
+          {/* Lead & Referral */}
+          <Section title="Lead & Referral" accent="bg-violet-500" {...sectionProps('lead')}>
             {editingSection === 'lead' ? (
               <div className="space-y-3">
                 <F label="Status">
@@ -909,8 +909,8 @@ export default function CRMDetailPage() {
             )}
           </Section>
 
-          {/* D. Survey / Quote */}
-          <Section title="D. Survey & Quote" accent="bg-amber-500" {...sectionProps('survey')}>
+          {/* Survey */}
+          <Section title="Survey" accent="bg-cyan-500" {...sectionProps('survey')}>
             {editingSection === 'survey' ? (
               <div className="space-y-3">
                 <Toggle value={surveyRequired} onChange={setSurveyRequired} label="Survey required" />
@@ -927,6 +927,24 @@ export default function CRMDetailPage() {
                     </F>
                   </>
                 )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <ReadF label="Survey Required" value={surveyRequired ? 'Yes' : 'No'} />
+                {surveyRequired && (
+                  <>
+                    <ReadF label="Survey Type" value={surveyType} />
+                    <ReadF label="Survey Date" value={fmtDate(surveyDate)} />
+                  </>
+                )}
+              </div>
+            )}
+          </Section>
+
+          {/* Quote */}
+          <Section title="Quote" accent="bg-amber-500" {...sectionProps('quote')}>
+            {editingSection === 'quote' ? (
+              <div className="space-y-3">
                 <F label="Quote Amount (£)">
                   <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
                     value={quoteAmount} onChange={e => setQuoteAmount(e.target.value)} />
@@ -942,13 +960,6 @@ export default function CRMDetailPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                <ReadF label="Survey Required" value={surveyRequired ? 'Yes' : 'No'} />
-                {surveyRequired && (
-                  <>
-                    <ReadF label="Survey Type" value={surveyType} />
-                    <ReadF label="Survey Date" value={fmtDate(surveyDate)} />
-                  </>
-                )}
                 <ReadF label="Quote Amount" value={quoteAmount ? fmt(parseFloat(quoteAmount)) : null} />
                 <ReadF label="Quote Sent Date" value={fmtDate(quoteSentDate)} />
                 <div className="grid grid-cols-3 gap-2 pt-1">
@@ -1044,7 +1055,7 @@ export default function CRMDetailPage() {
         <div className="px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
             <span className="w-1.5 h-4 bg-slate-400 rounded-full flex-shrink-0" />
-            F. Activity Timeline
+            Activity Timeline
           </h2>
         </div>
         <div ref={timelineRef} className="px-5 py-4 max-h-96 overflow-y-auto">
