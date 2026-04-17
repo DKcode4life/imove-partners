@@ -119,12 +119,7 @@ export default function Login() {
           {/* Demo credentials */}
           <div className="mt-6 pt-6 border-t border-slate-100">
             <p className="text-xs font-medium text-slate-500 mb-2">Demo credentials:</p>
-            <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
-              <div className="bg-slate-50 rounded-lg px-3 py-2">
-                <p className="font-semibold text-slate-700 mb-0.5">Admin</p>
-                <p>admin@imove.co.uk</p>
-                <p>admin123</p>
-              </div>
+            <div className="text-xs text-slate-500">
               <div className="bg-slate-50 rounded-lg px-3 py-2">
                 <p className="font-semibold text-slate-700 mb-0.5">Partner</p>
                 <p>john@premierproperties.co.uk</p>
