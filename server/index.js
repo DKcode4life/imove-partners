@@ -1,6 +1,13 @@
 const config = require('./config');
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
+
+// Ensure the data directory exists (required in production before Prisma connects)
+const dataDir = path.join(__dirname, '../data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 const cors = require('cors');
 const prisma = require('./db/prisma');
 const jobRunner = require('./jobs/runner');
