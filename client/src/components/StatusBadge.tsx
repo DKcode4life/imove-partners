@@ -7,6 +7,7 @@ const CONFIG: Record<LeadStatus, { bg: string; text: string; dot: string }> = {
   'Quoted':          { bg: 'bg-amber-50',   text: 'text-amber-700',  dot: 'bg-amber-500' },
   'Quote Declined':  { bg: 'bg-red-50',     text: 'text-red-700',    dot: 'bg-red-500' },
   'Quote Accepted':  { bg: 'bg-orange-50',  text: 'text-orange-700', dot: 'bg-orange-500' },
+  'Job Confirmed':   { bg: 'bg-green-50',   text: 'text-green-700',  dot: 'bg-green-500' },
   'Job Completed':   { bg: 'bg-emerald-50', text: 'text-emerald-700',dot: 'bg-emerald-500' },
   'Commission Paid': { bg: 'bg-green-50',   text: 'text-green-700',  dot: 'bg-green-600' },
 };
