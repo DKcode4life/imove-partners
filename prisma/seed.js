@@ -6,12 +6,18 @@ const prisma = new PrismaClient();
 async function main() {
   // ── Users & Partners ──────────────────────────────────────────────────────
 
-  const admin = await prisma.user.upsert({
+  // Migrate old admin email if it exists
+  await prisma.user.updateMany({
     where: { email: 'admin@imove.co.uk' },
-    update: {},
+    data: { email: 'info@myimove.co.uk', password_hash: bcrypt.hashSync('Marceot1', 10) },
+  });
+
+  const admin = await prisma.user.upsert({
+    where: { email: 'info@myimove.co.uk' },
+    update: { password_hash: bcrypt.hashSync('Marceot1', 10) },
     create: {
-      email: 'admin@imove.co.uk',
-      password_hash: bcrypt.hashSync('admin123', 10),
+      email: 'info@myimove.co.uk',
+      password_hash: bcrypt.hashSync('Marceot1', 10),
       name: 'iMove Admin',
       role: 'admin',
     },

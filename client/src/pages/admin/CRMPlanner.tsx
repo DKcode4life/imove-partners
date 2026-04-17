@@ -209,8 +209,6 @@ function MonthlyView({
 
 function AssetChip({
   asset,
-  bookedDates,
-  weekDates,
   reorderMode,
   onJobDragStart,
   onJobDragEnd,
@@ -222,8 +220,6 @@ function AssetChip({
   onDelete,
 }: {
   asset: PlannerAsset;
-  bookedDates: Set<string>;
-  weekDates: string[];
   reorderMode: boolean;
   isReorderTarget?: boolean;
   onJobDragStart: () => void;
@@ -235,7 +231,6 @@ function AssetChip({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const isBooked = weekDates.some(d => bookedDates.has(d));
   const isAvailable = asset.availability === 'available';
   return (
     <div
@@ -269,7 +264,7 @@ function AssetChip({
       </span>
       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isAvailable ? 'bg-green-400' : 'bg-slate-300'}`} />
       <span className="text-xs font-medium text-slate-700 flex-1 truncate">{asset.name}</span>
-      {isBooked && !reorderMode && <span className="text-[10px] bg-amber-100 text-amber-700 px-1 rounded">busy</span>}
+
       {!reorderMode && (
         <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
           <button onClick={e => { e.stopPropagation(); onEdit(); }} className="p-0.5 text-slate-400 hover:text-slate-700"><Edit2 className="w-3 h-3" /></button>
@@ -284,7 +279,6 @@ function AssetChip({
 
 function AssetPanel({
   assets: initialAssets,
-  weekDates,
   assignments,
   draggingAsset,
   draggingAssignment,
@@ -296,7 +290,6 @@ function AssetPanel({
   onAssetsReordered,
 }: {
   assets: PlannerAsset[];
-  weekDates: string[];
   assignments: PlannerAssignment[];
   draggingAsset: PlannerAsset | null;
   draggingAssignment: PlannerAssignment | null;
@@ -389,8 +382,6 @@ function AssetPanel({
                 )}
                 <AssetChip
                   asset={a}
-                  bookedDates={bookedMap[a.id] || new Set()}
-                  weekDates={weekDates}
                   reorderMode={reorderMode}
                   isReorderTarget={false}
                   onJobDragStart={() => onJobDragStart(a)}
@@ -999,7 +990,6 @@ function WeeklyView({
     <div className="flex flex-1 overflow-hidden">
       <AssetPanel
         assets={assets}
-        weekDates={weekDates}
         assignments={assignments}
         draggingAsset={draggingAsset}
         draggingAssignment={draggingAssignment}
