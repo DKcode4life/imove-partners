@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
+  Navigation, MapPin,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -245,6 +246,13 @@ function ActivityItem({ act }: { act: CrmActivity }) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function fmtDuration(mins: number) {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}min` : `${h}h`;
+}
+
 function fmtDateTime(d: string) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
@@ -340,6 +348,8 @@ export default function CRMDetailPage() {
   const [driver,    setDriver]    = useState('');
   const [vehicle,   setVehicle]   = useState('');
   const [plannerAssignments, setPlannerAssignments] = useState<PlannerAssignment[]>([]);
+  const [routeInfo,    setRouteInfo]    = useState<{ direct: { miles: number; minutes: number } | null; total: { miles: number; minutes: number } | null } | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
 
   const populate = useCallback((j: CrmJob) => {
     setFullName(j.full_name);        setEmail(j.email || '');         setAltEmail(j.alt_email || '');
@@ -384,6 +394,19 @@ export default function CRMDetailPage() {
       .then(r => setPlannerAssignments(r.data))
       .catch(() => {});
   }, [id, navigate, populate]);
+
+  // Fetch route info once job addresses are known
+  useEffect(() => {
+    if (!job) return;
+    const from = [job.from_line1, job.from_line2, job.from_city, job.from_postcode].filter(Boolean).join(', ');
+    const to   = [job.to_line1,   job.to_line2,   job.to_city,   job.to_postcode  ].filter(Boolean).join(', ');
+    if (!from || !to) return;
+    setRouteLoading(true);
+    api.post('/crm/route-info', { from, to })
+      .then(r => setRouteInfo(r.data))
+      .catch(() => setRouteInfo(null))
+      .finally(() => setRouteLoading(false));
+  }, [job?.id]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
@@ -608,12 +631,24 @@ export default function CRMDetailPage() {
                 <ReadF label="Full Name" value={fullName} />
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-3">
-                    <ReadF label="Phone" value={phone} />
-                    <ReadF label="Alternative Phone" value={altPhone} />
+                    <div>
+                      <p className="text-xs font-medium text-slate-400 mb-0.5">Phone</p>
+                      {phone ? <a href={`tel:${phone}`} className="text-sm text-brand-600 hover:underline">{phone}</a> : <span className="italic text-slate-300 text-sm">—</span>}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-400 mb-0.5">Alternative Phone</p>
+                      {altPhone ? <a href={`tel:${altPhone}`} className="text-sm text-brand-600 hover:underline">{altPhone}</a> : <span className="italic text-slate-300 text-sm">—</span>}
+                    </div>
                   </div>
                   <div className="space-y-3">
-                    <ReadF label="Email" value={email} />
-                    <ReadF label="Alternative Email" value={altEmail} />
+                    <div>
+                      <p className="text-xs font-medium text-slate-400 mb-0.5">Email</p>
+                      {email ? <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(email)}`} target="_blank" rel="noreferrer" className="text-sm text-brand-600 hover:underline break-all">{email}</a> : <span className="italic text-slate-300 text-sm">—</span>}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-400 mb-0.5">Alternative Email</p>
+                      {altEmail ? <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(altEmail)}`} target="_blank" rel="noreferrer" className="text-sm text-brand-600 hover:underline break-all">{altEmail}</a> : <span className="italic text-slate-300 text-sm">—</span>}
+                    </div>
                   </div>
                 </div>
                 <ReadF label="Client Notes" value={clientNotes} />
@@ -695,14 +730,18 @@ export default function CRMDetailPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving Out</p>
-                    <p className="text-sm text-slate-800">{fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode) || <span className="italic text-slate-300">—</span>}</p>
+                    {fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode)
+                      ? <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode)!)}`} target="_blank" rel="noreferrer" className="text-sm text-brand-600 hover:underline flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode)}</a>
+                      : <span className="italic text-slate-300 text-sm">—</span>}
                     {propTypeFrom && <p className="text-xs text-slate-500">{propTypeFrom}{floorFrom ? `, Floor ${floorFrom}` : ''}{hasLiftFrom ? ', Lift' : ''}</p>}
                     {bedrooms && <ReadF label="Size" value={bedrooms} />}
                     {parkingNotes && <ReadF label="Parking" value={parkingNotes} />}
                   </div>
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving In</p>
-                    <p className="text-sm text-slate-800">{fmtAddress(toLine1, toLine2, toCity, toPostcode) || <span className="italic text-slate-300">—</span>}</p>
+                    {fmtAddress(toLine1, toLine2, toCity, toPostcode)
+                      ? <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fmtAddress(toLine1, toLine2, toCity, toPostcode)!)}`} target="_blank" rel="noreferrer" className="text-sm text-brand-600 hover:underline flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{fmtAddress(toLine1, toLine2, toCity, toPostcode)}</a>
+                      : <span className="italic text-slate-300 text-sm">—</span>}
                     {propTypeTo && <p className="text-xs text-slate-500">{propTypeTo}{floorTo ? `, Floor ${floorTo}` : ''}{hasLiftTo ? ', Lift' : ''}</p>}
                     {bedroomsTo && <ReadF label="Size" value={bedroomsTo} />}
                     {parkingNotesTo && <ReadF label="Parking" value={parkingNotesTo} />}
@@ -717,6 +756,53 @@ export default function CRMDetailPage() {
                   <ReadF label="Move Type" value={moveType} />
                   <ReadF label="Key Wait" value={isKeyWorker ? 'Yes' : 'No'} />
                 </div>
+                {(fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode) && fmtAddress(toLine1, toLine2, toCity, toPostcode)) && (
+                  <div className="pt-3 border-t border-slate-100 space-y-2">
+                    {routeLoading ? (
+                      <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                        <span className="w-3 h-3 border border-slate-300 border-t-slate-500 rounded-full animate-spin inline-block" />
+                        Calculating distances…
+                      </p>
+                    ) : routeInfo && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {routeInfo.direct && (
+                          <div className="bg-blue-50 rounded-lg px-3 py-2">
+                            <p className="text-[11px] text-slate-500 font-medium mb-0.5">Between properties</p>
+                            <p className="text-sm font-semibold text-slate-800">{routeInfo.direct.miles} mi · ~{fmtDuration(routeInfo.direct.minutes)}</p>
+                          </div>
+                        )}
+                        {routeInfo.total && (
+                          <div className="bg-green-50 rounded-lg px-3 py-2">
+                            <p className="text-[11px] text-slate-500 font-medium mb-0.5">Full route (inc. depot)</p>
+                            <p className="text-sm font-semibold text-slate-800">{routeInfo.total.miles} mi · ~{fmtDuration(routeInfo.total.minutes)}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode) || fmtAddress(toLine1, toLine2, toCity, toPostcode)) && (
+                  <div className="flex gap-2 pt-2">
+                    {fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode) && fmtAddress(toLine1, toLine2, toCity, toPostcode) && (
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode)!)}&destination=${encodeURIComponent(fmtAddress(toLine1, toLine2, toCity, toPostcode)!)}`}
+                        target="_blank" rel="noreferrer"
+                        className="btn-secondary text-xs flex items-center gap-1.5 flex-1 justify-center"
+                      >
+                        <Navigation className="w-3.5 h-3.5" /> Directions
+                      </a>
+                    )}
+                    {fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode) && fmtAddress(toLine1, toLine2, toCity, toPostcode) && (
+                      <a
+                        href={`https://www.google.com/maps/dir/IP28+7AS/${encodeURIComponent(fmtAddress(toLine1, toLine2, toCity, toPostcode)!)}/${encodeURIComponent(fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode)!)}/IP28+7AS`}
+                        target="_blank" rel="noreferrer"
+                        className="btn-secondary text-xs flex items-center gap-1.5 flex-1 justify-center"
+                      >
+                        <MapPin className="w-3.5 h-3.5" /> Total Distance
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </Section>
