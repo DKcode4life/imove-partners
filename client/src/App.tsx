@@ -1,0 +1,65 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+
+import Login from './pages/Login';
+
+// Partner pages
+import PartnerDashboard from './pages/partner/Dashboard';
+import PartnerLeads from './pages/partner/Leads';
+import PartnerSubmitLead from './pages/partner/SubmitLead';
+import PartnerLeadDetail from './pages/partner/LeadDetail';
+import PartnerCommissions from './pages/partner/Commissions';
+import PartnerSettings from './pages/partner/Settings';
+
+// Admin pages
+import AdminDashboard from './pages/admin/Dashboard';
+import AdminAllLeads from './pages/admin/AllLeads';
+import AdminLeadDetail from './pages/admin/LeadDetail';
+import AdminPartners from './pages/admin/Partners';
+import AdminCRM from './pages/admin/CRM';
+import AdminCRMDetail from './pages/admin/CRMDetail';
+import AdminCRMCustomers from './pages/admin/CRMCustomers';
+import AdminCRMCustomerDetail from './pages/admin/CRMCustomerDetail';
+import AdminCRMJobs from './pages/admin/CRMJobs';
+import AdminCRMPlanner from './pages/admin/CRMPlanner';
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+
+          {/* Partner routes */}
+          <Route element={<ProtectedRoute role="partner" />}>
+            <Route path="/partner/dashboard" element={<PartnerDashboard />} />
+            <Route path="/partner/leads" element={<PartnerLeads />} />
+            <Route path="/partner/leads/new" element={<PartnerSubmitLead />} />
+            <Route path="/partner/leads/:id" element={<PartnerLeadDetail />} />
+            <Route path="/partner/commissions" element={<PartnerCommissions />} />
+            <Route path="/partner/settings" element={<PartnerSettings />} />
+          </Route>
+
+          {/* Admin routes */}
+          <Route element={<ProtectedRoute role="admin" />}>
+            <Route path="/admin/dashboard" element={<AdminDashboard />} />
+            <Route path="/admin/leads" element={<AdminAllLeads />} />
+            <Route path="/admin/leads/:id" element={<AdminLeadDetail />} />
+            <Route path="/admin/partners" element={<AdminPartners />} />
+            <Route path="/admin/crm" element={<AdminCRM />} />
+            <Route path="/admin/crm/jobs" element={<AdminCRMJobs />} />
+            <Route path="/admin/crm/planner" element={<AdminCRMPlanner />} />
+            <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
+            <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />
+            <Route path="/admin/crm/:id" element={<AdminCRMDetail />} />
+          </Route>
+
+          {/* Root redirect handled in ProtectedRoute */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}

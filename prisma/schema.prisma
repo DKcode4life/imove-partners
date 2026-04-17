@@ -1,0 +1,510 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Existing entities (migrated from SQLite) ───────────────────────────────
+
+model User {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  password_hash String
+  name          String
+  role          String   // 'admin' | 'partner'
+  avatar        String?
+  created_at    DateTime @default(now())
+
+  partner              Partner?
+  calendar_connections CalendarConnection[]
+  integration_tokens   IntegrationToken[]
+
+  @@map("users")
+}
+
+model Partner {
+  id              Int      @id @default(autoincrement())
+  user_id         Int      @unique
+  agency_name     String
+  phone           String?
+  commission_rate Float    @default(10.0)
+  payment_method  String?
+  bank_account    String?
+  bank_sort_code  String?
+  gift_card_email String?
+  active          Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  leads Lead[]
+
+  @@map("partners")
+}
+
+model Lead {
+  id                    Int      @id @default(autoincrement())
+  partner_id            Int
+  client_name           String
+  current_address       String
+  destination_postcode  String?
+  contact_number        String
+  email                 String
+  estimated_moving_date String?
+  moving_date_type      String?
+  move_type             String?
+  property_type         String?
+  floor_number          String?
+  has_lift              Boolean?
+  property_size         String?
+  notes                 String?
+  move_stage            String?
+  status                String   @default("New Lead")
+  quote_value           Float?
+  commission_rate       Float    @default(10.0)
+  commission_paid       Boolean  @default(false)
+  commission_paid_at    String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @default(now()) @updatedAt
+
+  partner  Partner  @relation(fields: [partner_id], references: [id], onDelete: Cascade)
+  crm_jobs CrmJob[]
+
+  @@map("leads")
+}
+
+model CrmJob {
+  id                      Int      @id @default(autoincrement())
+  lead_id                 Int?
+  customer_id             Int?
+  referred_by_customer_id Int?
+  // Contact
+  full_name               String
+  email                   String?
+  alt_email               String?
+  phone                   String?
+  alt_phone               String?
+  client_notes            String?
+  // Lead / Referral
+  lead_source             String?  @default("Direct Enquiry")
+  estate_agent_name       String?
+  internal_ref            String?
+  status                  String   @default("New Lead")
+  // Move Details — From
+  from_line1              String?
+  from_line2              String?
+  from_city               String?
+  from_postcode           String?
+  // Move Details — To
+  to_line1                String?
+  to_line2                String?
+  to_city                 String?
+  to_postcode             String?
+  // Property
+  property_type_from      String?
+  property_type_to        String?
+  bedrooms                String?
+  parking_notes           String?
+  bedrooms_to             String?
+  parking_notes_to        String?
+  preferred_move_date     String?
+  confirmed_move_date     String?
+  flexibility_notes       String?
+  // Survey / Quote
+  survey_required         Boolean  @default(false)
+  survey_type             String?
+  survey_date             String?
+  quote_amount            Float?
+  quote_sent_date         String?
+  quote_accepted          Boolean  @default(false)
+  deposit_required        Boolean  @default(false)
+  deposit_paid            Boolean  @default(false)
+  // Operations
+  internal_notes          String?
+  special_handling        String?
+  access_restrictions     String?
+  inventory_notes         String?
+  packing_required        Boolean  @default(false)
+  dismantling_required    Boolean  @default(false)
+  storage_required        Boolean  @default(false)
+  // Property extras
+  floor_from              String?
+  has_lift_from           Boolean  @default(false)
+  prop_type_from_other    String?
+  floor_to                String?
+  has_lift_to             Boolean  @default(false)
+  prop_type_to_other      String?
+  // Move type
+  move_type               String?
+  is_key_worker           Boolean  @default(false)
+  // Staff
+  assigned_surveyor       String?
+  assigned_mover          String?
+  assigned_driver         String?
+  assigned_vehicle        String?
+  // Partner
+  partner_commission_rate Float?
+  // Timestamps
+  created_at              DateTime @default(now())
+  updated_at              DateTime @default(now()) @updatedAt
+
+  lead                Lead?        @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  customer            CrmCustomer? @relation("customer_jobs", fields: [customer_id], references: [id], onDelete: SetNull)
+  referred_by         CrmCustomer? @relation("referred_jobs", fields: [referred_by_customer_id], references: [id], onDelete: SetNull)
+  activities          CrmActivity[]
+  planner_assignments PlannerAssignment[]
+  quotes              Quote[]
+  invoices            Invoice[]
+  documents           Document[]
+  calendar_events     CalendarEvent[]
+
+  @@map("crm_jobs")
+}
+
+model CrmActivity {
+  id         Int      @id @default(autoincrement())
+  job_id     Int
+  type       String
+  note       String?
+  created_at DateTime @default(now())
+
+  job CrmJob @relation(fields: [job_id], references: [id], onDelete: Cascade)
+
+  @@map("crm_activities")
+}
+
+model CrmCustomer {
+  id            Int      @id @default(autoincrement())
+  full_name     String
+  email         String?
+  alt_email     String?
+  phone         String?
+  alt_phone     String?
+  address_line1 String?
+  address_line2 String?
+  city          String?
+  postcode      String?
+  notes         String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  jobs      CrmJob[] @relation("customer_jobs")
+  referrals CrmJob[] @relation("referred_jobs")
+
+  @@map("crm_customers")
+}
+
+model PlannerAsset {
+  id             Int      @id @default(autoincrement())
+  type           String   // 'staff' | 'vehicle'
+  name           String
+  role           String?
+  phone          String?
+  make_model     String?
+  registration   String?
+  capacity_notes String?
+  availability   String   @default("available")
+  notes          String?
+  sort_order     Int      @default(0)
+  created_at     DateTime @default(now())
+
+  assignments PlannerAssignment[]
+
+  @@map("planner_assets")
+}
+
+model PlannerEvent {
+  id             Int      @id @default(autoincrement())
+  title          String
+  category       String   @default("Quick Job")
+  customer_name  String?
+  contact_number String?
+  address        String?
+  event_date     String
+  event_time     String?
+  notes          String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  assignments PlannerAssignment[]
+
+  @@map("planner_events")
+}
+
+model PlannerAssignment {
+  id               Int      @id @default(autoincrement())
+  asset_id         Int
+  job_id           Int?
+  event_id         Int?
+  assigned_date    String
+  assigned_role    String?
+  daily_rate       Float?
+  vehicle_asset_id Int?
+  notes            String?
+  created_at       DateTime @default(now())
+
+  asset PlannerAsset  @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  job   CrmJob?       @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  event PlannerEvent? @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@map("planner_assignments")
+}
+
+// ─── New entities ───────────────────────────────────────────────────────────
+
+model Quote {
+  id           Int      @id @default(autoincrement())
+  job_id       Int
+  quote_number String   @unique
+  status       String   @default("draft") // draft | sent | accepted | declined | expired
+  subtotal     Float    @default(0)
+  tax_rate     Float    @default(20.0)
+  tax_amount   Float    @default(0)
+  total        Float    @default(0)
+  valid_until  String?
+  notes        String?
+  sent_at      DateTime?
+  accepted_at  DateTime?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+
+  job      CrmJob      @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  items    QuoteItem[]
+  invoices Invoice[]
+
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id          Int    @id @default(autoincrement())
+  quote_id    Int
+  description String
+  quantity    Float  @default(1)
+  unit_price  Float  @default(0)
+  total       Float  @default(0)
+  sort_order  Int    @default(0)
+
+  quote Quote @relation(fields: [quote_id], references: [id], onDelete: Cascade)
+
+  @@map("quote_items")
+}
+
+model Invoice {
+  id             Int       @id @default(autoincrement())
+  job_id         Int
+  quote_id       Int?
+  invoice_number String    @unique
+  status         String    @default("draft") // draft | sent | paid | overdue | cancelled
+  subtotal       Float     @default(0)
+  tax_rate       Float     @default(20.0)
+  tax_amount     Float     @default(0)
+  total          Float     @default(0)
+  due_date       String?
+  notes          String?
+  sent_at        DateTime?
+  paid_at        DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+
+  job      CrmJob        @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  quote    Quote?        @relation(fields: [quote_id], references: [id], onDelete: SetNull)
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          Int    @id @default(autoincrement())
+  invoice_id  Int
+  description String
+  quantity    Float  @default(1)
+  unit_price  Float  @default(0)
+  total       Float  @default(0)
+  sort_order  Int    @default(0)
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+model Payment {
+  id                Int      @id @default(autoincrement())
+  invoice_id        Int
+  amount            Float
+  method            String   // stripe | bank_transfer | cash | cheque
+  stripe_payment_id String?
+  reference         String?
+  notes             String?
+  paid_at           DateTime @default(now())
+  created_at        DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Document {
+  id          Int      @id @default(autoincrement())
+  job_id      Int
+  name        String
+  type        String   // quote_pdf | invoice_pdf | survey_report | photo | other
+  storage_key String
+  mime_type   String?
+  size_bytes  Int?
+  created_at  DateTime @default(now())
+
+  job CrmJob @relation(fields: [job_id], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model CalendarConnection {
+  id               Int      @id @default(autoincrement())
+  user_id          Int
+  provider         String   @default("google")
+  access_token     String?
+  refresh_token    String?
+  token_expires_at DateTime?
+  calendar_id      String?
+  enabled          Boolean  @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  user   User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  events CalendarEvent[]
+
+  @@map("calendar_connections")
+}
+
+model CalendarEvent {
+  id            Int      @id @default(autoincrement())
+  connection_id Int
+  job_id        Int?
+  external_id   String?
+  title         String
+  description   String?
+  start_time    DateTime
+  end_time      DateTime
+  location      String?
+  synced_at     DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  connection CalendarConnection @relation(fields: [connection_id], references: [id], onDelete: Cascade)
+  job        CrmJob?            @relation(fields: [job_id], references: [id], onDelete: SetNull)
+
+  @@map("calendar_events")
+}
+
+model EmailTemplate {
+  id         Int      @id @default(autoincrement())
+  name       String
+  slug       String   @unique
+  subject    String
+  body_html  String
+  variables  String?  // JSON array of variable names e.g. ["customer_name", "quote_total"]
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  sequence_steps EmailSequenceStep[]
+  email_logs     EmailLog[]
+
+  @@map("email_templates")
+}
+
+model EmailSequence {
+  id            Int      @id @default(autoincrement())
+  name          String
+  trigger_event String   // quote_sent | invoice_sent | job_booked | job_completed
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  steps EmailSequenceStep[]
+
+  @@map("email_sequences")
+}
+
+model EmailSequenceStep {
+  id               Int     @id @default(autoincrement())
+  sequence_id      Int
+  step_order       Int
+  delay_hours      Int     @default(0)
+  template_id      Int?
+  subject_override String?
+  body_override    String?
+
+  sequence EmailSequence  @relation(fields: [sequence_id], references: [id], onDelete: Cascade)
+  template EmailTemplate? @relation(fields: [template_id], references: [id], onDelete: SetNull)
+
+  @@map("email_sequence_steps")
+}
+
+model EmailLog {
+  id          Int      @id @default(autoincrement())
+  job_id      Int?
+  to_email    String
+  subject     String
+  template_id Int?
+  status      String   @default("queued") // queued | sent | failed | bounced
+  sent_at     DateTime?
+  error       String?
+  created_at  DateTime @default(now())
+
+  template EmailTemplate? @relation(fields: [template_id], references: [id], onDelete: SetNull)
+
+  @@map("email_logs")
+}
+
+model IntegrationToken {
+  id               Int       @id @default(autoincrement())
+  user_id          Int
+  provider         String
+  access_token     String
+  refresh_token    String?
+  token_expires_at DateTime?
+  scopes           String?
+  metadata         String?   // JSON
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @default(now()) @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, provider])
+  @@map("integration_tokens")
+}
+
+model WebhookEvent {
+  id           Int       @id @default(autoincrement())
+  provider     String
+  event_type   String
+  payload      String    // JSON
+  status       String    @default("pending") // pending | processed | failed
+  processed_at DateTime?
+  error        String?
+  created_at   DateTime  @default(now())
+
+  @@map("webhook_events")
+}
+
+model BackgroundJob {
+  id            Int       @id @default(autoincrement())
+  type          String
+  payload       String    // JSON
+  status        String    @default("pending") // pending | running | completed | failed | retrying
+  priority      Int       @default(0)
+  attempts      Int       @default(0)
+  max_attempts  Int       @default(3)
+  last_error    String?
+  scheduled_for DateTime  @default(now())
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_at    DateTime  @default(now())
+
+  @@index([status, scheduled_for])
+  @@index([type])
+  @@map("background_jobs")
+}

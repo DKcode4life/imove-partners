@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;color:#1e293b;max-width:600px;margin:0 auto;padding:24px">
+  <h2 style="color:#4f46e5">Your Quotation from iMove</h2>
+
+  <p>Dear {{ customer_name }},</p>
+
+  <p>Thank you for your enquiry. Please find attached your quotation.</p>
+
+  <div style="background:#f1f5f9;padding:16px;border-radius:8px;margin:16px 0">
+    <p style="margin:4px 0"><strong>Quote Ref:</strong> {{ quote_number }}</p>
+    <p style="margin:4px 0"><strong>Total:</strong> {{ quote_total }}</p>
+    <p style="margin:4px 0"><strong>Valid Until:</strong> {{ valid_until }}</p>
+  </div>
+
+  <p>If you would like to proceed or have any questions, please don't hesitate to get in touch.</p>
+
+  <p>Kind regards,<br><strong>The iMove Team</strong></p>
+
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+  <p style="font-size:12px;color:#94a3b8">iMove Partners Ltd — Professional Removals & Relocations</p>
+</body>
+</html>
