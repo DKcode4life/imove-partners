@@ -29,6 +29,8 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/crm',       require('./routes/crm'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/planner',   require('./routes/planner'));
+app.use('/api/settings',  require('./routes/settings'));
+app.use('/api/contracts', require('./routes/contracts'));
 
 app.get('/api/health', async (_req, res) => {
   try {

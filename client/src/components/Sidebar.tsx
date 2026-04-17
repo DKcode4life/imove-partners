@@ -31,6 +31,7 @@ const STATUS_ORDER = [
   'Survey Booked',
   'Quoted',
   'Quote Accepted',
+  'Job Confirmed',
   'Job Completed',
   'Commission Paid',
   'Quote Declined',

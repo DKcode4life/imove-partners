@@ -18,12 +18,12 @@ router.get('/', wrap(async (req, res) => {
       prisma.partner.count({ where: { active: true } }),
       prisma.lead.aggregate({
         _sum: { quote_value: true },
-        where: { status: { in: ['Job Completed', 'Commission Paid'] } },
+        where: { status: { in: ['Job Confirmed', 'Job Completed', 'Commission Paid'] } },
       }),
       prisma.$queryRawUnsafe(
         `SELECT COALESCE(SUM(quote_value * commission_rate / 100.0), 0) AS n
          FROM leads
-         WHERE commission_paid = 0 AND status IN ('Job Completed', 'Commission Paid')`
+         WHERE commission_paid = 0 AND status IN ('Job Confirmed', 'Job Completed', 'Commission Paid')`
       ),
       prisma.lead.count({ where: { created_at: { gte: today, lt: tomorrow } } }),
       prisma.lead.groupBy({ by: ['status'], _count: true }),
@@ -50,8 +50,8 @@ router.get('/', wrap(async (req, res) => {
     const partnerStats = await prisma.$queryRawUnsafe(
       `SELECT p.agency_name, u.name AS user_name,
         COUNT(l.id) AS total_leads,
-        SUM(CASE WHEN l.status IN ('Job Completed','Commission Paid') THEN 1 ELSE 0 END) AS confirmed_jobs,
-        COALESCE(SUM(CASE WHEN l.commission_paid = 0 AND l.status IN ('Job Completed','Commission Paid')
+        SUM(CASE WHEN l.status IN ('Job Confirmed','Job Completed','Commission Paid') THEN 1 ELSE 0 END) AS confirmed_jobs,
+        COALESCE(SUM(CASE WHEN l.commission_paid = 0 AND l.status IN ('Job Confirmed','Job Completed','Commission Paid')
           THEN l.quote_value * l.commission_rate / 100.0 ELSE 0 END), 0) AS owed
       FROM partners p
       JOIN users u ON u.id = p.user_id
@@ -82,14 +82,14 @@ router.get('/', wrap(async (req, res) => {
 
   const [totalLeads, confirmedJobs, earnedAgg, pendingAgg, pipelineAgg, leadsByStatus, recentLeads] = await Promise.all([
     prisma.lead.count({ where: { partner_id: pid } }),
-    prisma.lead.count({ where: { partner_id: pid, status: { in: ['Job Completed', 'Commission Paid'] } } }),
+    prisma.lead.count({ where: { partner_id: pid, status: { in: ['Job Confirmed', 'Job Completed', 'Commission Paid'] } } }),
     prisma.$queryRawUnsafe(
       `SELECT COALESCE(SUM(quote_value * commission_rate / 100.0), 0) AS n
        FROM leads WHERE partner_id = ? AND commission_paid = 1`, pid
     ),
     prisma.$queryRawUnsafe(
       `SELECT COALESCE(SUM(quote_value * commission_rate / 100.0), 0) AS n
-       FROM leads WHERE partner_id = ? AND commission_paid = 0 AND status IN ('Job Completed','Commission Paid')`, pid
+       FROM leads WHERE partner_id = ? AND commission_paid = 0 AND status IN ('Job Confirmed','Job Completed','Commission Paid')`, pid
     ),
     prisma.$queryRawUnsafe(
       `SELECT COALESCE(SUM(quote_value * commission_rate / 100.0), 0) AS n

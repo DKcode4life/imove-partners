@@ -6,25 +6,49 @@ const wrap = require('../lib/async-handler');
 const router = express.Router();
 router.use(authenticate, requireAdmin);
 
+// Ordered pipeline stages (Lost / Cancelled is a special ejection state, kept separate)
 const CRM_STATUSES = [
-  'New Lead', 'Contacted', 'Survey Booked', 'Survey Completed',
-  'Awaiting Quote', 'Quote Sent', 'Quote Accepted',
-  'Booked Move', 'In Progress', 'Completed', 'Lost / Cancelled',
+  'New Lead',
+  'Called V/M',
+  'Contacted',
+  'Survey Physical',
+  'Survey Video',
+  'Quote Sent',
+  'Quote Chased',
+  'Most Likely',
+  'Quote Accepted',
+  'Confirmed No Date',
+  'Confirmed Deposit',
+  'Confirmed Paid',
+  'Completed',
+  'Archived / Review Done',
+  'Lost / Cancelled',
 ];
 
+// Single source of truth: CRM status → Partner Portal status.
+// Many-to-one: multiple granular CRM stages collapse to one simplified partner stage.
 const PORTAL_STATUS_MAP = {
-  'New Lead':          'New Lead',
-  'Contacted':         'Contacted',
-  'Survey Booked':     'Survey Booked',
-  'Survey Completed':  'Survey Booked',
-  'Awaiting Quote':    'Quoted',
-  'Quote Sent':        'Quoted',
-  'Quote Accepted':    'Quote Accepted',
-  'Booked Move':       'Quote Accepted',
-  'In Progress':       'Job Completed',
-  'Completed':         'Job Completed',
-  'Lost / Cancelled':  'Quote Declined',
+  'New Lead':               'New Lead',
+  'Called V/M':             'Contacted',
+  'Contacted':              'Contacted',
+  'Survey Physical':        'Survey Booked',
+  'Survey Video':           'Survey Booked',
+  'Quote Sent':             'Quoted',
+  'Quote Chased':           'Quoted',
+  'Most Likely':            'Quoted',
+  'Quote Accepted':         'Quote Accepted',
+  'Confirmed No Date':      'Quote Accepted',
+  'Confirmed Deposit':      'Job Confirmed',
+  'Confirmed Paid':         'Job Confirmed',
+  'Completed':              'Job Completed',
+  'Archived / Review Done': 'Job Completed',
+  // Lost / Cancelled intentionally omitted — admin handles portal status manually
 };
+
+/** Maps a CRM pipeline status to the simplified Partner Portal stage. */
+function mapCrmStatusToPartnerStatus(crmStatus) {
+  return PORTAL_STATUS_MAP[crmStatus] ?? null;
+}
 
 // GET /api/crm/pending-leads
 router.get('/pending-leads', wrap(async (_req, res) => {
@@ -226,7 +250,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     });
 
     if (existing.lead_id) {
-      const portalStatus = PORTAL_STATUS_MAP[newStatus];
+      const portalStatus = mapCrmStatusToPartnerStatus(newStatus);
       if (portalStatus) {
         try {
           await prisma.lead.update({ where: { id: existing.lead_id }, data: { status: portalStatus } });

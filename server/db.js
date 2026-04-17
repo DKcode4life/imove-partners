@@ -427,8 +427,9 @@ function migrateCustomers() {
     'Quoted':          'Quote Sent',
     'Quote Declined':  'Lost / Cancelled',
     'Quote Accepted':  'Quote Accepted',
-    'Job Completed':   'Completed',
-    'Commission Paid': 'Completed',
+    'Job Confirmed':   'In Progress',
+    'Job Completed':   'Job Completed',
+    'Commission Paid': 'Job Completed',
   };
 
   // ── Step 1: create CRM jobs for portal leads that don't have one ────────────

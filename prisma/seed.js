@@ -82,7 +82,7 @@ async function main() {
   const crmSeedJobs = [
     {
       full_name: 'Tom & Jessica Wheeler', email: 'tom.wheeler@email.com', phone: '07711 001122',
-      lead_source: 'Estate Agent Referral', estate_agent_name: 'Premier Properties', status: 'Booked Move',
+      lead_source: 'Estate Agent Referral', estate_agent_name: 'Premier Properties', status: 'In Progress',
       from_line1: '14 Chestnut Avenue', from_city: 'London', from_postcode: 'SW12 9PQ',
       to_line1: '82 Maple Drive', to_city: 'Guildford', to_postcode: 'GU2 7AB',
       bedrooms: '3-bed', survey_date: '2024-05-02', confirmed_move_date: '2024-05-22',
@@ -106,7 +106,7 @@ async function main() {
     },
     {
       full_name: 'Fatima Al-Hassan', email: 'fatima.h@email.com', phone: '07744 556677',
-      lead_source: 'Word of Mouth', status: 'Completed',
+      lead_source: 'Word of Mouth', status: 'Job Completed',
       from_line1: '102 Elm Road', from_city: 'London', from_postcode: 'SE22 0TG',
       to_line1: '44 Oak Street', to_city: 'Bristol', to_postcode: 'BS1 3BN',
       bedrooms: '1-bed', confirmed_move_date: '2024-04-12', quote_amount: 780, quote_sent_date: '2024-03-28', quote_accepted: true,
@@ -143,8 +143,71 @@ async function main() {
     if (!exists) await prisma.plannerAsset.create({ data: d });
   }
 
+  // ── Company Settings ──────────────────────────────────────────────────────
+
+  const companyDefaults = [
+    { key: 'company_name',         value: 'iMove' },
+    { key: 'company_email',        value: 'info@myimove.co.uk' },
+    { key: 'company_phone',        value: '' },
+    { key: 'company_website',      value: '' },
+    { key: 'company_address',      value: '' },
+    { key: 'company_registration', value: '' },
+  ];
+
+  for (const d of companyDefaults) {
+    await prisma.companySetting.upsert({ where: { key: d.key }, update: {}, create: d });
+  }
+
+  // ── Job Statuses ──────────────────────────────────────────────────────────
+
+  const statusDefaults = [
+    { name: 'New Lead',               color: '#3b82f6', sort_order: 0 },
+    { name: 'Called V/M',             color: '#8b5cf6', sort_order: 1 },
+    { name: 'Contacted',              color: '#7c3aed', sort_order: 2 },
+    { name: 'Survey Physical',        color: '#06b6d4', sort_order: 3 },
+    { name: 'Survey Video',           color: '#0d9488', sort_order: 4 },
+    { name: 'Quote Sent',             color: '#f59e0b', sort_order: 5 },
+    { name: 'Quote Chased',           color: '#f97316', sort_order: 6 },
+    { name: 'Most Likely',            color: '#eab308', sort_order: 7 },
+    { name: 'Quote Accepted',         color: '#10b981', sort_order: 8 },
+    { name: 'Confirmed No Date',      color: '#059669', sort_order: 9 },
+    { name: 'Confirmed Deposit',      color: '#65a30d', sort_order: 10 },
+    { name: 'Confirmed Paid',         color: '#15803d', sort_order: 11 },
+    { name: 'Completed',              color: '#94a3b8', sort_order: 12 },
+    { name: 'Archived / Review Done', color: '#6b7280', sort_order: 13 },
+    { name: 'Lost / Cancelled',       color: '#ef4444', sort_order: 14 },
+  ];
+
+  for (const d of statusDefaults) {
+    await prisma.jobStatus.upsert({ where: { name: d.name }, update: {}, create: d });
+  }
+
+  // ── Lead Sources ──────────────────────────────────────────────────────────
+
+  const leadSourceDefaults = [
+    'Direct Enquiry', 'Estate Agent Referral', 'Website',
+    'Social Media', 'Word of Mouth', 'Google', 'Repeat Customer', 'Other',
+  ];
+
+  for (let i = 0; i < leadSourceDefaults.length; i++) {
+    const name = leadSourceDefaults[i];
+    await prisma.leadSource.upsert({ where: { name }, update: {}, create: { name, sort_order: i } });
+  }
+
+  // ── Move Types ────────────────────────────────────────────────────────────
+
+  const moveTypeDefaults = [
+    'Rental to Rental', 'Rental to Purchase', 'Sale to Purchase', 'Sale to Rental',
+    'Storage to Property', 'Partial Move',
+  ];
+
+  for (let i = 0; i < moveTypeDefaults.length; i++) {
+    const name = moveTypeDefaults[i];
+    await prisma.moveType.upsert({ where: { name }, update: {}, create: { name, sort_order: i } });
+  }
+
   console.log('Seed complete.');
-  console.log('  Admin:   admin@imove.co.uk / admin123');
+  console.log('  Admin:   info@myimove.co.uk / Marceot1');
   console.log('  Partner: john@premierproperties.co.uk / partner123');
   console.log('  Partner: sarah@elitehomes.co.uk / partner123');
 }

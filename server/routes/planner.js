@@ -31,7 +31,7 @@ router.get('/assets', wrap(async (req, res) => {
 }));
 
 router.post('/assets', wrap(async (req, res) => {
-  const { type, name, role, phone, make_model, registration, capacity_notes, availability, notes } = req.body;
+  const { type, name, role, phone, email, make_model, registration, capacity_notes, availability, notes } = req.body;
   if (!type || !name) return res.status(400).json({ error: 'type and name are required' });
 
   const maxRow = await prisma.plannerAsset.aggregate({ _max: { sort_order: true } });
@@ -40,7 +40,7 @@ router.post('/assets', wrap(async (req, res) => {
   const asset = await prisma.plannerAsset.create({
     data: {
       type, name: name.trim(), role: role || null, phone: phone || null,
-      make_model: make_model || null, registration: registration || null,
+      email: email || null, make_model: make_model || null, registration: registration || null,
       capacity_notes: capacity_notes || null, availability: availability || 'available',
       notes: notes || null, sort_order: sortOrder,
     },
@@ -62,7 +62,7 @@ router.put('/assets/reorder', wrap(async (req, res) => {
 
 router.put('/assets/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, role, phone, make_model, registration, capacity_notes, availability, notes } = req.body;
+  const { name, role, phone, email, make_model, registration, capacity_notes, availability, notes } = req.body;
 
   const asset = await prisma.plannerAsset.findUnique({ where: { id } });
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
@@ -71,7 +71,7 @@ router.put('/assets/:id', wrap(async (req, res) => {
     where: { id },
     data: {
       name: name?.trim() ?? asset.name,
-      role: role || null, phone: phone || null,
+      role: role || null, phone: phone || null, email: email || null,
       make_model: make_model || null, registration: registration || null,
       capacity_notes: capacity_notes || null,
       availability: availability ?? asset.availability,
@@ -105,7 +105,7 @@ router.get('/events', wrap(async (req, res) => {
 }));
 
 router.post('/events', wrap(async (req, res) => {
-  const { title, category, customer_name, contact_number, address, event_date, event_time, notes } = req.body;
+  const { title, category, customer_name, contact_number, address, event_date, event_time, notes, contract_id } = req.body;
   if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
 
   const ev = await prisma.plannerEvent.create({
@@ -113,14 +113,16 @@ router.post('/events', wrap(async (req, res) => {
       title: title.trim(), category: category || 'Quick Job',
       customer_name: customer_name || null, contact_number: contact_number || null,
       address: address || null, event_date, event_time: event_time || null, notes: notes || null,
+      contract_id: contract_id ? parseInt(contract_id, 10) : null,
     },
+    include: { contract: { select: { id: true, company_name: true } } },
   });
   res.status(201).json(ev);
 }));
 
 router.put('/events/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { title, category, customer_name, contact_number, address, event_date, event_time, notes } = req.body;
+  const { title, category, customer_name, contact_number, address, event_date, event_time, notes, contract_id } = req.body;
 
   const ev = await prisma.plannerEvent.findUnique({ where: { id } });
   if (!ev) return res.status(404).json({ error: 'Event not found' });
@@ -133,7 +135,9 @@ router.put('/events/:id', wrap(async (req, res) => {
       customer_name: customer_name || null, contact_number: contact_number || null,
       address: address || null, event_date: event_date ?? ev.event_date,
       event_time: event_time || null, notes: notes || null,
+      contract_id: contract_id !== undefined ? (contract_id ? parseInt(contract_id, 10) : null) : ev.contract_id,
     },
+    include: { contract: { select: { id: true, company_name: true } } },
   });
   res.json(updated);
 }));
@@ -259,6 +263,7 @@ router.get('/calendar', wrap(async (req, res) => {
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: startDate, lte: endDate } },
       orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
+      include: { contract: { select: { id: true, company_name: true } } },
     }),
   ]);
 
@@ -273,6 +278,7 @@ router.get('/calendar', wrap(async (req, res) => {
       source: 'event', id: e.id, title: e.title, category: e.category,
       date: isoDate(e.event_date), time: e.event_time,
       address: e.address, phone: e.contact_number, customer_name: e.customer_name,
+      contract_id: e.contract_id, contract_name: e.contract?.company_name || null,
     })),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
@@ -308,6 +314,7 @@ router.get('/week', wrap(async (req, res) => {
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: start, lte: endDate } },
       orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
+      include: { contract: { select: { id: true, company_name: true } } },
     }),
     prisma.plannerAssignment.findMany({
       where: { assigned_date: { gte: start, lte: endDate } },
@@ -345,6 +352,7 @@ router.get('/week', wrap(async (req, res) => {
       date: isoDate(e.event_date), time: e.event_time,
       address: e.address, phone: e.contact_number, customer_name: e.customer_name,
       notes: e.notes, assignments: assignmentsByEvent[e.id] || [],
+      contract_id: e.contract_id, contract_name: e.contract?.company_name || null,
     })),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 

@@ -202,6 +202,7 @@ model PlannerAsset {
   name           String
   role           String?
   phone          String?
+  email          String?
   make_model     String?
   registration   String?
   capacity_notes String?
@@ -225,10 +226,12 @@ model PlannerEvent {
   event_date     String
   event_time     String?
   notes          String?
+  contract_id    Int?
   created_at     DateTime @default(now())
   updated_at     DateTime @default(now()) @updatedAt
 
   assignments PlannerAssignment[]
+  contract    Contract? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
 
   @@map("planner_events")
 }
@@ -507,4 +510,62 @@ model BackgroundJob {
   @@index([status, scheduled_for])
   @@index([type])
   @@map("background_jobs")
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+model CompanySetting {
+  id         Int      @id @default(autoincrement())
+  key        String   @unique
+  value      String?
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("company_settings")
+}
+
+model JobStatus {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  color      String   @default("#64748b")
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+
+  @@map("job_statuses")
+}
+
+model LeadSource {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+
+  @@map("lead_sources")
+}
+
+model MoveType {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+
+  @@map("move_types")
+}
+
+model Contract {
+  id            Int      @id @default(autoincrement())
+  company_name  String
+  contact_name  String?
+  email         String?
+  office_number String?
+  direct_line   String?
+  address       String?
+  description   String?
+  payment_terms String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  planner_events PlannerEvent[]
+
+  @@map("contracts")
 }

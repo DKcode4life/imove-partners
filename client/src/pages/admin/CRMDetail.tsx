@@ -14,17 +14,21 @@ import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, 
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<string, { bg: string; text: string; dot: string }> = {
-  'New Lead':          { bg: 'bg-blue-50',    text: 'text-blue-700',    dot: 'bg-blue-500' },
-  'Contacted':         { bg: 'bg-violet-50',  text: 'text-violet-700',  dot: 'bg-violet-500' },
-  'Survey Booked':     { bg: 'bg-cyan-50',    text: 'text-cyan-700',    dot: 'bg-cyan-500' },
-  'Survey Completed':  { bg: 'bg-teal-50',    text: 'text-teal-700',    dot: 'bg-teal-500' },
-  'Awaiting Quote':    { bg: 'bg-yellow-50',  text: 'text-yellow-800',  dot: 'bg-yellow-500' },
-  'Quote Sent':        { bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
-  'Quote Accepted':    { bg: 'bg-orange-50',  text: 'text-orange-700',  dot: 'bg-orange-500' },
-  'Booked Move':       { bg: 'bg-green-50',   text: 'text-green-700',   dot: 'bg-green-500' },
-  'In Progress':       { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-  'Completed':         { bg: 'bg-slate-100',  text: 'text-slate-600',   dot: 'bg-slate-400' },
-  'Lost / Cancelled':  { bg: 'bg-red-50',     text: 'text-red-700',     dot: 'bg-red-500' },
+  'New Lead':               { bg: 'bg-blue-50',    text: 'text-blue-700',    dot: 'bg-blue-500' },
+  'Called V/M':             { bg: 'bg-violet-50',  text: 'text-violet-700',  dot: 'bg-violet-500' },
+  'Contacted':              { bg: 'bg-purple-50',  text: 'text-purple-700',  dot: 'bg-purple-500' },
+  'Survey Physical':        { bg: 'bg-cyan-50',    text: 'text-cyan-700',    dot: 'bg-cyan-500' },
+  'Survey Video':           { bg: 'bg-teal-50',    text: 'text-teal-700',    dot: 'bg-teal-500' },
+  'Quote Sent':             { bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
+  'Quote Chased':           { bg: 'bg-orange-50',  text: 'text-orange-700',  dot: 'bg-orange-500' },
+  'Most Likely':            { bg: 'bg-yellow-50',  text: 'text-yellow-800',  dot: 'bg-yellow-500' },
+  'Quote Accepted':         { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  'Confirmed No Date':      { bg: 'bg-green-50',   text: 'text-green-700',   dot: 'bg-green-500' },
+  'Confirmed Deposit':      { bg: 'bg-lime-50',    text: 'text-lime-700',    dot: 'bg-lime-500' },
+  'Confirmed Paid':         { bg: 'bg-green-100',  text: 'text-green-800',   dot: 'bg-green-700' },
+  'Completed':              { bg: 'bg-slate-100',  text: 'text-slate-600',   dot: 'bg-slate-400' },
+  'Archived / Review Done': { bg: 'bg-gray-100',   text: 'text-gray-600',    dot: 'bg-gray-400' },
+  'Lost / Cancelled':       { bg: 'bg-red-50',     text: 'text-red-700',     dot: 'bg-red-500' },
 };
 
 function CrmBadge({ status }: { status: string }) {
@@ -56,16 +60,20 @@ const PIPELINE = CRM_STATUSES.filter(s => s !== 'Lost / Cancelled');
 const LOST = 'Lost / Cancelled' as const;
 
 const DOT_CFG: Record<string, { filled: string; ring: string; border: string; label: string }> = {
-  'New Lead':         { filled: 'bg-blue-500 border-blue-500',     ring: 'ring-blue-200',    border: 'border-blue-300',    label: 'text-blue-700' },
-  'Contacted':        { filled: 'bg-violet-500 border-violet-500', ring: 'ring-violet-200',  border: 'border-violet-300',  label: 'text-violet-700' },
-  'Survey Booked':    { filled: 'bg-cyan-500 border-cyan-500',     ring: 'ring-cyan-200',    border: 'border-cyan-300',    label: 'text-cyan-700' },
-  'Survey Completed': { filled: 'bg-teal-500 border-teal-500',     ring: 'ring-teal-200',    border: 'border-teal-300',    label: 'text-teal-700' },
-  'Awaiting Quote':   { filled: 'bg-yellow-500 border-yellow-500', ring: 'ring-yellow-200',  border: 'border-yellow-300',  label: 'text-yellow-700' },
-  'Quote Sent':       { filled: 'bg-amber-500 border-amber-500',   ring: 'ring-amber-200',   border: 'border-amber-300',   label: 'text-amber-700' },
-  'Quote Accepted':   { filled: 'bg-orange-500 border-orange-500', ring: 'ring-orange-200',  border: 'border-orange-300',  label: 'text-orange-700' },
-  'Booked Move':      { filled: 'bg-green-500 border-green-500',   ring: 'ring-green-200',   border: 'border-green-300',   label: 'text-green-700' },
-  'In Progress':      { filled: 'bg-emerald-500 border-emerald-500', ring: 'ring-emerald-200', border: 'border-emerald-300', label: 'text-emerald-700' },
-  'Completed':        { filled: 'bg-slate-400 border-slate-400',   ring: 'ring-slate-200',   border: 'border-slate-300',   label: 'text-slate-600' },
+  'New Lead':               { filled: 'bg-blue-500 border-blue-500',     ring: 'ring-blue-200',    border: 'border-blue-300',    label: 'text-blue-700' },
+  'Called V/M':             { filled: 'bg-violet-500 border-violet-500', ring: 'ring-violet-200',  border: 'border-violet-300',  label: 'text-violet-700' },
+  'Contacted':              { filled: 'bg-purple-500 border-purple-500', ring: 'ring-purple-200',  border: 'border-purple-300',  label: 'text-purple-700' },
+  'Survey Physical':        { filled: 'bg-cyan-500 border-cyan-500',     ring: 'ring-cyan-200',    border: 'border-cyan-300',    label: 'text-cyan-700' },
+  'Survey Video':           { filled: 'bg-teal-500 border-teal-500',     ring: 'ring-teal-200',    border: 'border-teal-300',    label: 'text-teal-700' },
+  'Quote Sent':             { filled: 'bg-amber-500 border-amber-500',   ring: 'ring-amber-200',   border: 'border-amber-300',   label: 'text-amber-700' },
+  'Quote Chased':           { filled: 'bg-orange-500 border-orange-500', ring: 'ring-orange-200',  border: 'border-orange-300',  label: 'text-orange-700' },
+  'Most Likely':            { filled: 'bg-yellow-500 border-yellow-500', ring: 'ring-yellow-200',  border: 'border-yellow-300',  label: 'text-yellow-700' },
+  'Quote Accepted':         { filled: 'bg-emerald-500 border-emerald-500', ring: 'ring-emerald-200', border: 'border-emerald-300', label: 'text-emerald-700' },
+  'Confirmed No Date':      { filled: 'bg-green-500 border-green-500',   ring: 'ring-green-200',   border: 'border-green-300',   label: 'text-green-700' },
+  'Confirmed Deposit':      { filled: 'bg-lime-500 border-lime-500',     ring: 'ring-lime-200',    border: 'border-lime-300',    label: 'text-lime-700' },
+  'Confirmed Paid':         { filled: 'bg-green-700 border-green-700',   ring: 'ring-green-200',   border: 'border-green-400',   label: 'text-green-800' },
+  'Completed':              { filled: 'bg-slate-400 border-slate-400',   ring: 'ring-slate-200',   border: 'border-slate-300',   label: 'text-slate-600' },
+  'Archived / Review Done': { filled: 'bg-gray-400 border-gray-400',     ring: 'ring-gray-200',    border: 'border-gray-300',    label: 'text-gray-600' },
 };
 
 function PipelineBar({ status, saving, onChange }: { status: string; saving: number | null; onChange: (s: CrmStatus) => void }) {

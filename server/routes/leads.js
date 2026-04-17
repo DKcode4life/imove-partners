@@ -8,7 +8,7 @@ router.use(authenticate);
 
 const STATUSES = [
   'New Lead', 'Contacted', 'Survey Booked', 'Quoted',
-  'Quote Declined', 'Quote Accepted', 'Job Completed', 'Commission Paid',
+  'Quote Declined', 'Quote Accepted', 'Job Confirmed', 'Job Completed', 'Commission Paid',
 ];
 
 function enrichLead(lead) {

@@ -1,0 +1,1375 @@
+import { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  Building2, Briefcase, Users, Truck, FileText,
+  Plus, Pencil, Trash2, Check, X, GripVertical,
+  AlertCircle, CheckCircle, Eye, EyeOff, KeyRound,
+  Phone, Mail, CreditCard, StickyNote, MapPin,
+} from 'lucide-react';
+import CRMLayout from '../../components/CRMLayout';
+import Modal from '../../components/Modal';
+import { useAuth } from '../../contexts/AuthContext';
+import api from '../../lib/api';
+import type {
+  CompanySettings, JobStatusSetting, LeadSourceSetting, MoveTypeSetting, PlannerAsset, Contract,
+} from '../../types';
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+function Toast({ message, type, onDone }: { message: string; type: 'success' | 'error'; onDone: () => void }) {
+  useEffect(() => { const t = setTimeout(onDone, 3500); return () => clearTimeout(t); }, [onDone]);
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-xl text-sm font-medium text-white ${type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+      {type === 'success' ? <CheckCircle className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+      {message}
+    </div>
+  );
+}
+
+// ── Color swatch picker ───────────────────────────────────────────────────────
+
+const SWATCHES = [
+  '#3b82f6', '#8b5cf6', '#06b6d4', '#14b8a6',
+  '#eab308', '#f59e0b', '#f97316', '#ef4444',
+  '#22c55e', '#10b981', '#94a3b8', '#64748b',
+  '#1d4ed8', '#7c3aed', '#be185d', '#0369a1',
+  '#dc2626', '#d97706', '#16a34a', '#0f766e',
+];
+
+function ColorSwatch({ color, onChange }: { color: string; onChange: (c: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-6 h-6 rounded-full border-2 border-white shadow ring-1 ring-slate-200 hover:ring-slate-400 transition-all flex-shrink-0"
+        style={{ backgroundColor: color }}
+        title="Change colour"
+      />
+      {open && (
+        <div className="absolute z-30 top-8 left-0 bg-white rounded-xl shadow-lg border border-slate-200 p-2.5 grid grid-cols-5 gap-1.5 w-44">
+          {SWATCHES.map(c => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => { onChange(c); setOpen(false); }}
+              className="w-7 h-7 rounded-full border-2 transition-all hover:scale-110"
+              style={{ backgroundColor: c, borderColor: c === color ? '#1e293b' : 'transparent' }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Simple list (lead sources / move types) ──────────────────────────────────
+
+function SimpleList({
+  endpoint, title, description, addPlaceholder, showToast,
+}: {
+  endpoint: string;
+  title: string;
+  description: string;
+  addPlaceholder: string;
+  showToast: (m: string, t?: 'success' | 'error') => void;
+}) {
+  const [items, setItems] = useState<(LeadSourceSetting | MoveTypeSetting)[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editVal, setEditVal] = useState('');
+  const [addActive, setAddActive] = useState(false);
+  const [addVal, setAddVal] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const fetchItems = useCallback(async () => {
+    setFetchError(false);
+    try {
+      const r = await api.get(endpoint);
+      setItems(r.data);
+    } catch {
+      setFetchError(true);
+    }
+  }, [endpoint]);
+
+  useEffect(() => { fetchItems().finally(() => setLoading(false)); }, [fetchItems]);
+
+  const handleAdd = async () => {
+    if (!addVal.trim()) return;
+    setSaving(true);
+    try {
+      await api.post(endpoint, { name: addVal.trim() });
+      await fetchItems();
+      setAddVal(''); setAddActive(false);
+      showToast('Added successfully');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to add', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleSaveEdit = async (id: number) => {
+    if (!editVal.trim()) return;
+    setSaving(true);
+    try {
+      await api.put(`${endpoint}/${id}`, { name: editVal.trim() });
+      setItems(prev => prev.map(i => i.id === id ? { ...i, name: editVal.trim() } : i));
+      setEditId(null);
+      showToast('Updated');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to update', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await api.delete(`${endpoint}/${id}`);
+      setItems(prev => prev.filter(i => i.id !== id));
+      setConfirmDelete(null);
+      showToast('Deleted');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to delete', 'error');
+    }
+  };
+
+  const handleDragStart = (idx: number, e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+    setTimeout(() => setDragIdx(idx), 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    setDragOverIdx(idx);
+  };
+
+  const handleDrop = async (dropIdx: number) => {
+    if (dragIdx === null || dragIdx === dropIdx) { setDragIdx(null); setDragOverIdx(null); return; }
+    const reordered = [...items];
+    const [moved] = reordered.splice(dragIdx, 1);
+    reordered.splice(dropIdx, 0, moved);
+    setItems(reordered);
+    setDragIdx(null); setDragOverIdx(null);
+    await api.put(`${endpoint}/reorder`, reordered.map((item, i) => ({ id: item.id, sort_order: i })));
+  };
+
+  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null); };
+
+  if (loading) return <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-400 text-center">Loading…</div>;
+  if (fetchError) return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6 text-center">
+      <p className="text-sm text-slate-500">Could not load data — run <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-mono">npm run db:push && npm run db:seed</code> in your terminal then&nbsp;
+        <button onClick={() => { setLoading(true); fetchItems().finally(() => setLoading(false)); }} className="text-blue-600 hover:underline">retry</button>.
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100">
+        <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+        <p className="text-xs text-slate-400 mt-0.5">{description} · drag to reorder</p>
+      </div>
+
+      {items.length === 0 && !addActive && (
+        <p className="px-5 py-4 text-sm text-slate-400 italic">No items yet.</p>
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {items.map((item, idx) => (
+          <div
+            key={item.id}
+            draggable
+            onDragStart={e => handleDragStart(idx, e)}
+            onDragOver={e => handleDragOver(e, idx)}
+            onDrop={() => handleDrop(idx)}
+            onDragEnd={handleDragEnd}
+            className={`group flex items-center gap-2 px-4 py-2.5 select-none transition-colors ${
+              dragOverIdx === idx && dragIdx !== idx ? 'bg-blue-50 border-t-2 border-blue-400' : 'hover:bg-slate-50'
+            } ${dragIdx === idx ? 'opacity-30' : ''}`}
+          >
+            <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing flex-shrink-0" />
+            {editId === item.id ? (
+              <>
+                <input
+                  value={editVal}
+                  onChange={e => setEditVal(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(item.id); if (e.key === 'Escape') setEditId(null); }}
+                  autoFocus
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+                <button onClick={() => handleSaveEdit(item.id)} disabled={saving} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg flex-shrink-0">
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => setEditId(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg flex-shrink-0">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </>
+            ) : confirmDelete === item.id ? (
+              <>
+                <span className="flex-1 text-sm text-slate-500 italic">Delete "{item.name}"?</span>
+                <button onClick={() => handleDelete(item.id)} className="px-2.5 py-1 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 flex-shrink-0">
+                  Delete
+                </button>
+                <button onClick={() => setConfirmDelete(null)} className="px-2.5 py-1 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 flex-shrink-0">
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-sm text-slate-700">{item.name}</span>
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity flex-shrink-0">
+                  <button
+                    onClick={() => { setEditId(item.id); setEditVal(item.name); }}
+                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(item.id)}
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-slate-100 px-4 py-3">
+        {addActive ? (
+          <div className="flex items-center gap-2">
+            <input
+              value={addVal}
+              onChange={e => setAddVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAddVal(''); setAddActive(false); } }}
+              autoFocus
+              placeholder={addPlaceholder}
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            />
+            <button onClick={handleAdd} disabled={saving || !addVal.trim()} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+              Add
+            </button>
+            <button onClick={() => { setAddVal(''); setAddActive(false); }} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setAddActive(true)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg px-2 py-1.5 w-full transition-colors">
+            <Plus className="w-3.5 h-3.5" />
+            Add new
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Statuses section (with drag-and-drop + colour) ────────────────────────────
+
+function StatusesSection({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [statuses, setStatuses] = useState<JobStatusSetting[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('#64748b');
+  const [addActive, setAddActive] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addColor, setAddColor] = useState('#3b82f6');
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const fetchStatuses = useCallback(async () => {
+    setFetchError(false);
+    try {
+      const r = await api.get('/settings/statuses');
+      setStatuses(r.data);
+    } catch {
+      setFetchError(true);
+    }
+  }, []);
+
+  useEffect(() => { fetchStatuses().finally(() => setLoading(false)); }, [fetchStatuses]);
+
+  const handleAdd = async () => {
+    if (!addName.trim()) return;
+    setSaving(true);
+    try {
+      await api.post('/settings/statuses', { name: addName.trim(), color: addColor });
+      await fetchStatuses();
+      setAddName(''); setAddColor('#3b82f6'); setAddActive(false);
+      showToast('Status added');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to add', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleSaveEdit = async (id: number) => {
+    if (!editName.trim()) return;
+    setSaving(true);
+    try {
+      await api.put(`/settings/statuses/${id}`, { name: editName.trim(), color: editColor });
+      setStatuses(prev => prev.map(s => s.id === id ? { ...s, name: editName.trim(), color: editColor } : s));
+      setEditId(null);
+      showToast('Status updated');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to update', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await api.delete(`/settings/statuses/${id}`);
+      setStatuses(prev => prev.filter(s => s.id !== id));
+      setConfirmDelete(null);
+      showToast('Status deleted');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to delete', 'error');
+    }
+  };
+
+  const handleDragStart = (idx: number, e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+    setTimeout(() => setDragIdx(idx), 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    setDragOverIdx(idx);
+  };
+
+  const handleDrop = async (dropIdx: number) => {
+    if (dragIdx === null || dragIdx === dropIdx) { setDragIdx(null); setDragOverIdx(null); return; }
+    const reordered = [...statuses];
+    const [moved] = reordered.splice(dragIdx, 1);
+    reordered.splice(dropIdx, 0, moved);
+    setStatuses(reordered);
+    setDragIdx(null); setDragOverIdx(null);
+    await api.put('/settings/statuses/reorder', reordered.map((s, i) => ({ id: s.id, sort_order: i })));
+  };
+
+  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null); };
+
+  if (loading) return <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-400 text-center">Loading…</div>;
+  if (fetchError) return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6 text-center">
+      <p className="text-sm text-slate-500">Could not load statuses — run <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-mono">npm run db:push && npm run db:seed</code> in your terminal then&nbsp;
+        <button onClick={() => { setLoading(true); fetchStatuses().finally(() => setLoading(false)); }} className="text-blue-600 hover:underline">retry</button>.
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100">
+        <h3 className="text-sm font-semibold text-slate-700">Job Statuses</h3>
+        <p className="text-xs text-slate-400 mt-0.5">Drag to reorder · click the colour dot to change it</p>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {statuses.map((s, idx) => (
+          <div
+            key={s.id}
+            draggable
+            onDragStart={e => handleDragStart(idx, e)}
+            onDragOver={e => handleDragOver(e, idx)}
+            onDrop={() => handleDrop(idx)}
+            onDragEnd={handleDragEnd}
+            className={`group flex items-center gap-3 px-4 py-3 transition-colors select-none ${
+              dragOverIdx === idx && dragIdx !== idx ? 'bg-blue-50 border-t-2 border-blue-400' : 'hover:bg-slate-50'
+            } ${dragIdx === idx ? 'opacity-30' : ''}`}
+          >
+            <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing flex-shrink-0" />
+            {editId === s.id ? (
+              <>
+                <ColorSwatch color={editColor} onChange={setEditColor} />
+                <input
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(s.id); if (e.key === 'Escape') setEditId(null); }}
+                  autoFocus
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+                <button onClick={() => handleSaveEdit(s.id)} disabled={saving} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg flex-shrink-0">
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => setEditId(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg flex-shrink-0">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </>
+            ) : confirmDelete === s.id ? (
+              <>
+                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                <span className="flex-1 text-sm text-slate-500 italic">Delete "{s.name}"?</span>
+                <button onClick={() => handleDelete(s.id)} className="px-2.5 py-1 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 flex-shrink-0">
+                  Delete
+                </button>
+                <button onClick={() => setConfirmDelete(null)} className="px-2.5 py-1 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 flex-shrink-0">
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                <span className="flex-1 text-sm text-slate-700">{s.name}</span>
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity flex-shrink-0">
+                  <button
+                    onClick={() => { setEditId(s.id); setEditName(s.name); setEditColor(s.color); }}
+                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(s.id)}
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-slate-100 px-4 py-3">
+        {addActive ? (
+          <div className="flex items-center gap-2">
+            <ColorSwatch color={addColor} onChange={setAddColor} />
+            <input
+              value={addName}
+              onChange={e => setAddName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAddName(''); setAddActive(false); } }}
+              autoFocus
+              placeholder="New status name"
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            />
+            <button onClick={handleAdd} disabled={saving || !addName.trim()} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0">
+              Add
+            </button>
+            <button onClick={() => { setAddName(''); setAddActive(false); }} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg flex-shrink-0">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setAddActive(true)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg px-2 py-1.5 w-full transition-colors">
+            <Plus className="w-3.5 h-3.5" />
+            Add status
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Company Details tab ───────────────────────────────────────────────────────
+
+function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const EMPTY: CompanySettings = {
+    company_name: '', company_email: '', company_phone: '',
+    company_website: '', company_address: '', company_registration: '',
+  };
+  const [form, setForm] = useState<CompanySettings>(EMPTY);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/settings/company').then(r => setForm(r.data)).finally(() => setLoading(false));
+  }, []);
+
+  const setF = (k: keyof CompanySettings) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.put('/settings/company', form);
+      showToast('Company details saved');
+    } catch {
+      showToast('Failed to save', 'error');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="text-sm text-slate-400 py-8 text-center">Loading…</div>;
+
+  return (
+    <form onSubmit={handleSave} className="max-w-2xl">
+      <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+        <h2 className="text-sm font-semibold text-slate-700">Company Information</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Company Name</label>
+            <input value={form.company_name} onChange={setF('company_name')} placeholder="iMove" className="input-field w-full" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Email Address</label>
+            <input type="email" value={form.company_email} onChange={setF('company_email')} placeholder="info@company.co.uk" className="input-field w-full" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Phone Number</label>
+            <input value={form.company_phone} onChange={setF('company_phone')} placeholder="01234 567890" className="input-field w-full" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Website</label>
+            <input value={form.company_website} onChange={setF('company_website')} placeholder="https://www.company.co.uk" className="input-field w-full" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Company Registration No.</label>
+            <input value={form.company_registration} onChange={setF('company_registration')} placeholder="12345678" className="input-field w-full" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Company Address</label>
+            <textarea
+              value={form.company_address}
+              onChange={setF('company_address')}
+              rows={3}
+              placeholder="123 Business Street, London, EC1A 1BB"
+              className="input-field w-full resize-none"
+            />
+          </div>
+        </div>
+        <div className="pt-1 flex justify-end">
+          <button type="submit" disabled={saving} className="btn-primary">
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+// ── Job Settings tab ──────────────────────────────────────────────────────────
+
+function JobSettingsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <StatusesSection showToast={showToast} />
+      <SimpleList
+        endpoint="/settings/lead-sources"
+        title="Lead Sources"
+        description="Options shown in the Lead Source dropdown when creating or editing a job."
+        addPlaceholder="e.g. Google, Facebook…"
+        showToast={showToast}
+      />
+      <SimpleList
+        endpoint="/settings/move-types"
+        title="Move Types"
+        description="Options shown in the Move Type dropdown on job sheets."
+        addPlaceholder="e.g. Office Move, Partial Move…"
+        showToast={showToast}
+      />
+    </div>
+  );
+}
+
+// ── Staff / Users tab ─────────────────────────────────────────────────────────
+
+interface StaffForm {
+  name: string; role: string; phone: string; email: string; notes: string;
+}
+const EMPTY_STAFF: StaffForm = { name: '', role: '', phone: '', email: '', notes: '' };
+
+function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const { user } = useAuth();
+
+  // Admin password change
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwdError, setPwdError] = useState('');
+  const [pwdSaving, setPwdSaving] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+
+  // Staff CRUD
+  const [staff, setStaff] = useState<PlannerAsset[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<PlannerAsset | null>(null);
+  const [form, setForm] = useState<StaffForm>(EMPTY_STAFF);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<PlannerAsset | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const fetchStaff = useCallback(async () => {
+    const r = await api.get('/planner/assets?type=staff');
+    setStaff(r.data);
+  }, []);
+
+  useEffect(() => { fetchStaff().finally(() => setLoadingStaff(false)); }, [fetchStaff]);
+
+  const openAdd = () => { setEditTarget(null); setForm(EMPTY_STAFF); setFormError(''); setModalOpen(true); };
+  const openEdit = (s: PlannerAsset) => {
+    setEditTarget(s);
+    setForm({ name: s.name, role: s.role || '', phone: s.phone || '', email: s.email || '', notes: s.notes || '' });
+    setFormError(''); setModalOpen(true);
+  };
+
+  const setF = (k: keyof StaffForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) { setFormError('Name is required'); return; }
+    setSubmitting(true); setFormError('');
+    try {
+      if (editTarget) {
+        await api.put(`/planner/assets/${editTarget.id}`, { ...form, type: 'staff' });
+      } else {
+        await api.post('/planner/assets', { ...form, type: 'staff' });
+      }
+      await fetchStaff();
+      setModalOpen(false);
+      showToast(editTarget ? 'Staff member updated' : 'Staff member added');
+    } catch (err: any) {
+      setFormError(err.response?.data?.error || 'Failed to save');
+    } finally { setSubmitting(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/planner/assets/${confirmDelete.id}`);
+      await fetchStaff();
+      setConfirmDelete(null);
+      showToast('Staff member removed');
+    } catch {
+      showToast('Failed to delete', 'error');
+    } finally { setDeleting(false); }
+  };
+
+  const handleChangePwd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pwdForm.next !== pwdForm.confirm) { setPwdError('New passwords do not match'); return; }
+    if (pwdForm.next.length < 8) { setPwdError('Password must be at least 8 characters'); return; }
+    setPwdSaving(true); setPwdError('');
+    try {
+      await api.put('/auth/password', { current_password: pwdForm.current, new_password: pwdForm.next });
+      setPwdOpen(false);
+      setPwdForm({ current: '', next: '', confirm: '' });
+      showToast('Password updated');
+    } catch (err: any) {
+      setPwdError(err.response?.data?.error || 'Failed to update password');
+    } finally { setPwdSaving(false); }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      {/* Admin account block */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h2 className="text-sm font-semibold text-slate-700 mb-4">Admin Account</h2>
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0">
+            {user?.avatar
+              ? <img src={user.avatar} alt={user.name} className="w-full h-full rounded-full object-cover" />
+              : <span className="text-lg font-bold text-slate-200">{user?.name?.charAt(0).toUpperCase()}</span>
+            }
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
+            <p className="text-sm text-slate-500">{user?.email}</p>
+          </div>
+          <button onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setPwdOpen(true); }} className="btn-secondary flex items-center gap-2 text-sm">
+            <KeyRound className="w-4 h-4" />
+            Change Password
+          </button>
+        </div>
+      </div>
+
+      {/* Staff list */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-700">Staff Members</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Staff shown in the weekly planner · future portal logins</p>
+          </div>
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm py-1.5">
+            <Plus className="w-4 h-4" />
+            Add Staff
+          </button>
+        </div>
+
+        {loadingStaff ? (
+          <div className="px-5 py-6 text-sm text-slate-400 text-center">Loading…</div>
+        ) : staff.length === 0 ? (
+          <div className="px-5 py-6 text-sm text-slate-400 italic text-center">No staff members yet.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <tr>
+                <th className="px-5 py-3 text-left">Name</th>
+                <th className="px-4 py-3 text-left">Role</th>
+                <th className="px-4 py-3 text-left">Phone</th>
+                <th className="px-4 py-3 text-left">Email</th>
+                <th className="px-4 py-3 text-left w-20"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {staff.map(s => (
+                <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-5 py-3 font-medium text-slate-800">{s.name}</td>
+                  <td className="px-4 py-3 text-slate-500">{s.role || <span className="italic text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-slate-500">{s.phone || <span className="italic text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-slate-500">{s.email || <span className="italic text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 justify-end">
+                      <button onClick={() => openEdit(s)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => setConfirmDelete(s)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Add / Edit staff modal */}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editTarget ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {formError && (
+            <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{formError}</div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Full Name <span className="text-red-400">*</span></label>
+              <input value={form.name} onChange={setF('name')} placeholder="e.g. Mark Taylor" className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Role / Job Title</label>
+              <input value={form.role} onChange={setF('role')} placeholder="e.g. Driver, Porter" className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Phone</label>
+              <input value={form.phone} onChange={setF('phone')} placeholder="07700 000000" className="input-field w-full" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Email</label>
+              <input type="email" value={form.email} onChange={setF('email')} placeholder="name@email.com" className="input-field w-full" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Notes</label>
+              <textarea value={form.notes} onChange={setF('notes')} rows={2} placeholder="Any notes…" className="input-field w-full resize-none" />
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={submitting} className="btn-primary">
+              {submitting ? 'Saving…' : editTarget ? 'Save Changes' : 'Add Staff Member'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete confirm modal */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Remove Staff Member" size="sm">
+        <p className="text-sm text-slate-600 mb-5">
+          Remove <span className="font-semibold">{confirmDelete?.name}</span>? This will not affect any existing planner assignments.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setConfirmDelete(null)} className="btn-secondary">Cancel</button>
+          <button onClick={handleDelete} disabled={deleting} className="btn-danger">
+            {deleting ? 'Removing…' : 'Remove'}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Change password modal */}
+      <Modal open={pwdOpen} onClose={() => setPwdOpen(false)} title="Change Password" size="sm">
+        <form onSubmit={handleChangePwd} className="space-y-4">
+          {pwdError && (
+            <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{pwdError}</div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Current Password</label>
+            <div className="relative">
+              <input
+                type={showCurrent ? 'text' : 'password'}
+                value={pwdForm.current}
+                onChange={e => setPwdForm(f => ({ ...f, current: e.target.value }))}
+                className="input-field w-full pr-10"
+                placeholder="Current password"
+              />
+              <button type="button" onClick={() => setShowCurrent(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">New Password</label>
+            <div className="relative">
+              <input
+                type={showNext ? 'text' : 'password'}
+                value={pwdForm.next}
+                onChange={e => setPwdForm(f => ({ ...f, next: e.target.value }))}
+                className="input-field w-full pr-10"
+                placeholder="At least 8 characters"
+              />
+              <button type="button" onClick={() => setShowNext(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                {showNext ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={pwdForm.confirm}
+              onChange={e => setPwdForm(f => ({ ...f, confirm: e.target.value }))}
+              className="input-field w-full"
+              placeholder="Repeat new password"
+            />
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" onClick={() => setPwdOpen(false)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={pwdSaving} className="btn-primary">{pwdSaving ? 'Saving…' : 'Update Password'}</button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
+
+// ── Vehicles tab ──────────────────────────────────────────────────────────────
+
+interface VehicleForm {
+  name: string; make_model: string; registration: string; capacity_notes: string; notes: string;
+}
+const EMPTY_VEHICLE: VehicleForm = { name: '', make_model: '', registration: '', capacity_notes: '', notes: '' };
+
+function VehiclesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [vehicles, setVehicles] = useState<PlannerAsset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<PlannerAsset | null>(null);
+  const [form, setForm] = useState<VehicleForm>(EMPTY_VEHICLE);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<PlannerAsset | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const fetchVehicles = useCallback(async () => {
+    const r = await api.get('/planner/assets?type=vehicle');
+    setVehicles(r.data);
+  }, []);
+
+  useEffect(() => { fetchVehicles().finally(() => setLoading(false)); }, [fetchVehicles]);
+
+  const openAdd = () => { setEditTarget(null); setForm(EMPTY_VEHICLE); setFormError(''); setModalOpen(true); };
+  const openEdit = (v: PlannerAsset) => {
+    setEditTarget(v);
+    setForm({
+      name: v.name, make_model: v.make_model || '', registration: v.registration || '',
+      capacity_notes: v.capacity_notes || '', notes: v.notes || '',
+    });
+    setFormError(''); setModalOpen(true);
+  };
+
+  const setF = (k: keyof VehicleForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) { setFormError('Vehicle name is required'); return; }
+    setSubmitting(true); setFormError('');
+    try {
+      if (editTarget) {
+        await api.put(`/planner/assets/${editTarget.id}`, { ...form, type: 'vehicle' });
+      } else {
+        await api.post('/planner/assets', { ...form, type: 'vehicle' });
+      }
+      await fetchVehicles();
+      setModalOpen(false);
+      showToast(editTarget ? 'Vehicle updated' : 'Vehicle added');
+    } catch (err: any) {
+      setFormError(err.response?.data?.error || 'Failed to save');
+    } finally { setSubmitting(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/planner/assets/${confirmDelete.id}`);
+      await fetchVehicles();
+      setConfirmDelete(null);
+      showToast('Vehicle removed');
+    } catch {
+      showToast('Failed to delete', 'error');
+    } finally { setDeleting(false); }
+  };
+
+  return (
+    <div className="max-w-3xl">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-700">Vehicles</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Vehicles shown in the weekly planner · expand later with MOT / service records</p>
+          </div>
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm py-1.5">
+            <Plus className="w-4 h-4" />
+            Add Vehicle
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="px-5 py-6 text-sm text-slate-400 text-center">Loading…</div>
+        ) : vehicles.length === 0 ? (
+          <div className="px-5 py-6 text-sm text-slate-400 italic text-center">No vehicles yet.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <tr>
+                <th className="px-5 py-3 text-left">Name</th>
+                <th className="px-4 py-3 text-left">Make / Model</th>
+                <th className="px-4 py-3 text-left">Registration</th>
+                <th className="px-4 py-3 text-left">Capacity Notes</th>
+                <th className="px-4 py-3 text-left w-20"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {vehicles.map(v => (
+                <tr key={v.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-5 py-3 font-medium text-slate-800">{v.name}</td>
+                  <td className="px-4 py-3 text-slate-500">{v.make_model || <span className="italic text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-slate-500 font-mono text-xs">{v.registration || <span className="italic text-slate-300 font-sans">—</span>}</td>
+                  <td className="px-4 py-3 text-slate-500 max-w-xs truncate">{v.capacity_notes || <span className="italic text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 justify-end">
+                      <button onClick={() => openEdit(v)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => setConfirmDelete(v)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Add / Edit vehicle modal */}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editTarget ? 'Edit Vehicle' : 'Add Vehicle'} size="md">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {formError && (
+            <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{formError}</div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Vehicle Name / Display Label <span className="text-red-400">*</span></label>
+              <input value={form.name} onChange={setF('name')} placeholder="e.g. Renault Master (Large)" className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Make / Model</label>
+              <input value={form.make_model} onChange={setF('make_model')} placeholder="Renault Master" className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Registration</label>
+              <input value={form.registration} onChange={setF('registration')} placeholder="AB12 CDE" className="input-field w-full font-mono" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Capacity / Notes</label>
+              <input value={form.capacity_notes} onChange={setF('capacity_notes')} placeholder="e.g. 3.5T, fits 3-bed" className="input-field w-full" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Internal Notes</label>
+              <textarea value={form.notes} onChange={setF('notes')} rows={2} placeholder="Any notes…" className="input-field w-full resize-none" />
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={submitting} className="btn-primary">
+              {submitting ? 'Saving…' : editTarget ? 'Save Changes' : 'Add Vehicle'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete confirm modal */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Remove Vehicle" size="sm">
+        <p className="text-sm text-slate-600 mb-5">
+          Remove <span className="font-semibold">{confirmDelete?.name}</span>? This will not affect any existing planner assignments.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setConfirmDelete(null)} className="btn-secondary">Cancel</button>
+          <button onClick={handleDelete} disabled={deleting} className="btn-danger">
+            {deleting ? 'Removing…' : 'Remove'}
+          </button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ── Contracts tab ─────────────────────────────────────────────────────────────
+
+interface ContractForm {
+  company_name: string; contact_name: string; email: string;
+  office_number: string; direct_line: string; address: string;
+  description: string; payment_terms: string;
+}
+const EMPTY_CONTRACT: ContractForm = {
+  company_name: '', contact_name: '', email: '',
+  office_number: '', direct_line: '', address: '',
+  description: '', payment_terms: '',
+};
+
+function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Contract | null>(null);
+  const [form, setForm] = useState<ContractForm>(EMPTY_CONTRACT);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<Contract | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const fetchContracts = useCallback(async () => {
+    const r = await api.get('/contracts');
+    setContracts(r.data);
+  }, []);
+
+  useEffect(() => { fetchContracts().finally(() => setLoading(false)); }, [fetchContracts]);
+
+  const openAdd = () => {
+    setEditTarget(null); setForm(EMPTY_CONTRACT); setFormError(''); setModalOpen(true);
+  };
+
+  const openEdit = (c: Contract) => {
+    setEditTarget(c);
+    setForm({
+      company_name: c.company_name, contact_name: c.contact_name || '',
+      email: c.email || '', office_number: c.office_number || '',
+      direct_line: c.direct_line || '', address: c.address || '',
+      description: c.description || '', payment_terms: c.payment_terms || '',
+    });
+    setFormError(''); setModalOpen(true);
+  };
+
+  const setF = (k: keyof ContractForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.company_name.trim()) { setFormError('Company name is required'); return; }
+    setSubmitting(true); setFormError('');
+    try {
+      if (editTarget) {
+        await api.put(`/contracts/${editTarget.id}`, form);
+      } else {
+        await api.post('/contracts', form);
+      }
+      await fetchContracts();
+      setModalOpen(false);
+      showToast(editTarget ? 'Contract updated' : 'Contract created');
+    } catch (err: any) {
+      setFormError(err.response?.data?.error || 'Failed to save');
+    } finally { setSubmitting(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/contracts/${confirmDelete.id}`);
+      await fetchContracts();
+      setConfirmDelete(null);
+      showToast('Contract deleted');
+    } catch {
+      showToast('Failed to delete', 'error');
+    } finally { setDeleting(false); }
+  };
+
+  return (
+    <div className="max-w-4xl">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Contracts</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Company profiles for clients and partners we work with.</p>
+        </div>
+        <button onClick={openAdd} className="btn-primary flex items-center gap-2">
+          <Plus className="w-4 h-4" />
+          Create New Contract
+        </button>
+      </div>
+
+      {/* Contract cards */}
+      {loading ? (
+        <div className="text-sm text-slate-400 py-8 text-center">Loading…</div>
+      ) : contracts.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 border-dashed py-16 text-center">
+          <FileText className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+          <p className="text-sm font-medium text-slate-500">No contracts yet</p>
+          <p className="text-xs text-slate-400 mt-1">Click "Create New Contract" to add your first company profile.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {contracts.map(c => (
+            <div key={c.id} className="bg-white rounded-xl border border-slate-200 p-5 hover:border-slate-300 transition-colors">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  {/* Company name */}
+                  <h3 className="text-base font-semibold text-slate-800">{c.company_name}</h3>
+
+                  {/* Contact / comms row */}
+                  <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-2">
+                    {c.contact_name && (
+                      <span className="flex items-center gap-1.5 text-sm text-slate-600">
+                        <Users className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        {c.contact_name}
+                      </span>
+                    )}
+                    {c.email && (
+                      <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(c.email)}`} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                        <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                        {c.email}
+                      </a>
+                    )}
+                    {c.office_number && (
+                      <a href={`tel:${c.office_number}`} className="flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-800">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        {c.office_number}
+                      </a>
+                    )}
+                    {c.direct_line && (
+                      <a href={`tel:${c.direct_line}`} className="flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-800">
+                        <Phone className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                        {c.direct_line} <span className="text-xs text-slate-400">(direct)</span>
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Address */}
+                  {c.address && (
+                    <div className="flex items-start gap-1.5 mt-2">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}`}
+                        target="_blank" rel="noreferrer"
+                        className="text-sm text-slate-600 hover:text-blue-600 hover:underline"
+                      >
+                        {c.address}
+                      </a>
+                    </div>
+                  )}
+
+                  {/* Payment terms */}
+                  {c.payment_terms && (
+                    <div className="flex items-start gap-1.5 mt-2">
+                      <CreditCard className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <span className="text-sm text-slate-600">{c.payment_terms}</span>
+                    </div>
+                  )}
+
+                  {/* Description */}
+                  {c.description && (
+                    <div className="flex items-start gap-1.5 mt-2">
+                      <StickyNote className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-slate-500 line-clamp-2">{c.description}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => openEdit(c)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setConfirmDelete(c)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create / Edit modal */}
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editTarget ? `Edit — ${editTarget.company_name}` : 'Create New Contract'}
+        size="lg"
+      >
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {formError && (
+            <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{formError}</div>
+          )}
+
+          {/* Company name */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Company Name <span className="text-red-400">*</span></label>
+            <input value={form.company_name} onChange={setF('company_name')} placeholder="e.g. Premier Properties" className="input-field w-full" />
+          </div>
+
+          {/* Contacts + email */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Contact Name</label>
+              <input value={form.contact_name} onChange={setF('contact_name')} placeholder="e.g. Jane Smith" className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Email Address</label>
+              <input type="email" value={form.email} onChange={setF('email')} placeholder="jane@company.co.uk" className="input-field w-full" />
+            </div>
+          </div>
+
+          {/* Phone numbers */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Office Number</label>
+              <input value={form.office_number} onChange={setF('office_number')} placeholder="020 7123 4567" className="input-field w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Direct Line</label>
+              <input value={form.direct_line} onChange={setF('direct_line')} placeholder="07700 000000" className="input-field w-full" />
+            </div>
+          </div>
+
+          {/* Address */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Address / Yard Address</label>
+            <input
+              value={form.address}
+              onChange={setF('address')}
+              placeholder="e.g. 12 Business Park, Newmarket, CB8 7AA"
+              className="input-field w-full"
+            />
+          </div>
+
+          {/* Payment terms */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Payment Terms</label>
+            <input
+              value={form.payment_terms}
+              onChange={setF('payment_terms')}
+              placeholder="e.g. 30 days · invoiced monthly · pays on the 1st"
+              className="input-field w-full"
+            />
+          </div>
+
+          {/* Description / notes */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Description & Notes</label>
+            <textarea
+              value={form.description}
+              onChange={setF('description')}
+              rows={4}
+              placeholder="Where they're based, how we handle them, key contacts, special requirements…"
+              className="input-field w-full resize-none"
+            />
+          </div>
+
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={submitting} className="btn-primary">
+              {submitting ? 'Saving…' : editTarget ? 'Save Changes' : 'Create Contract'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete confirm */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete Contract" size="sm">
+        <p className="text-sm text-slate-600 mb-5">
+          Delete <span className="font-semibold">{confirmDelete?.company_name}</span>? This cannot be undone.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setConfirmDelete(null)} className="btn-secondary">Cancel</button>
+          <button onClick={handleDelete} disabled={deleting} className="btn-danger">
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ── Main Settings page ────────────────────────────────────────────────────────
+
+const TABS = [
+  { label: 'Company Details',  icon: <Building2 className="w-4 h-4" /> },
+  { label: 'Job Settings',     icon: <Briefcase className="w-4 h-4" /> },
+  { label: 'Staff / Users',    icon: <Users className="w-4 h-4" /> },
+  { label: 'Vehicles',         icon: <Truck className="w-4 h-4" /> },
+  { label: 'Contracts',        icon: <FileText className="w-4 h-4" /> },
+];
+
+export default function CRMSettings() {
+  const [activeTab, setActiveTab] = useState(0);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
+
+  return (
+    <CRMLayout>
+      {/* Page header */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
+        <p className="text-sm text-slate-500 mt-1">Manage company information, job configuration, staff, vehicles, and contracts.</p>
+      </div>
+
+      {/* Tab navigation */}
+      <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
+        {TABS.map((tab, idx) => (
+          <button
+            key={tab.label}
+            onClick={() => setActiveTab(idx)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
+              activeTab === idx
+                ? 'text-blue-600 border-blue-600 bg-blue-50/50'
+                : 'text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {activeTab === 0 && <CompanyTab showToast={showToast} />}
+      {activeTab === 1 && <JobSettingsTab showToast={showToast} />}
+      {activeTab === 2 && <StaffTab showToast={showToast} />}
+      {activeTab === 3 && <VehiclesTab showToast={showToast} />}
+      {activeTab === 4 && <ContractsTab showToast={showToast} />}
+
+      {/* Toast */}
+      {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
+    </CRMLayout>
+  );
+}

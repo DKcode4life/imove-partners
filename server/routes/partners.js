@@ -13,9 +13,9 @@ router.get('/', wrap(async (_req, res) => {
     `SELECT p.*,
       u.name AS user_name, u.email AS user_email, u.avatar AS user_avatar,
       COUNT(l.id) AS total_leads,
-      SUM(CASE WHEN l.status IN ('Job Completed','Commission Paid') THEN 1 ELSE 0 END) AS confirmed_jobs,
+      SUM(CASE WHEN l.status IN ('Job Confirmed','Job Completed','Commission Paid') THEN 1 ELSE 0 END) AS confirmed_jobs,
       SUM(CASE WHEN l.commission_paid = 1 THEN l.quote_value * l.commission_rate / 100.0 ELSE 0 END) AS total_paid,
-      SUM(CASE WHEN l.commission_paid = 0 AND l.status IN ('Job Completed','Commission Paid')
+      SUM(CASE WHEN l.commission_paid = 0 AND l.status IN ('Job Confirmed','Job Completed','Commission Paid')
                THEN l.quote_value * l.commission_rate / 100.0 ELSE 0 END) AS commission_owed
     FROM partners p
     JOIN users u ON u.id = p.user_id
@@ -82,13 +82,13 @@ router.get('/:id/commissions', wrap(async (req, res) => {
 
   const [ready, pipeline, paid] = await Promise.all([
     prisma.lead.findMany({
-      where: { partner_id: partnerId, status: 'Job Completed', commission_paid: false },
+      where: { partner_id: partnerId, status: { in: ['Job Confirmed', 'Job Completed'] }, commission_paid: false },
       orderBy: { updated_at: 'desc' },
     }),
     prisma.lead.findMany({
       where: {
         partner_id: partnerId, commission_paid: false,
-        status: { notIn: ['Job Completed', 'Commission Paid', 'Quote Declined'] },
+        status: { notIn: ['Job Confirmed', 'Job Completed', 'Commission Paid', 'Quote Declined'] },
       },
       orderBy: { created_at: 'desc' },
     }),

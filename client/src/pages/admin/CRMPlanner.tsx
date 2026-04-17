@@ -23,20 +23,33 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }>
   'Sundry':          { bg: 'bg-slate-100',   text: 'text-slate-600',   dot: '#94A3B8' },
   'Quick Job':       { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
   // legacy aliases kept for existing records
-  'Move':            { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
-  'Packing Box':     { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
-  'Drop-off':        { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  'Box Drop-off':    { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  'New Lead':        { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
-  'Contacted':       { bg: 'bg-violet-100',  text: 'text-violet-700',  dot: '#8B5CF6' },
-  'Survey Booked':   { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
-  'Survey Completed':{ bg: 'bg-teal-100',    text: 'text-teal-700',    dot: '#0D9488' },
-  'Awaiting Quote':  { bg: 'bg-yellow-100',  text: 'text-yellow-800',  dot: '#EAB308' },
-  'Quote Sent':      { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  'Quote Accepted':  { bg: 'bg-orange-100',  text: 'text-orange-700',  dot: '#F97316' },
-  'Booked Move':     { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
-  'In Progress':     { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: '#10B981' },
-  'Completed':       { bg: 'bg-slate-100',   text: 'text-slate-500',   dot: '#94A3B8' },
+  'Move':             { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
+  'Packing Box':      { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
+  'Drop-off':         { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
+  'Box Drop-off':     { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
+  // Old CRM status names (pre-migration, kept for any surviving records)
+  'Survey Booked':    { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
+  'Survey Completed': { bg: 'bg-teal-100',    text: 'text-teal-700',    dot: '#0D9488' },
+  'Awaiting Quote':   { bg: 'bg-yellow-100',  text: 'text-yellow-800',  dot: '#EAB308' },
+  'In Progress':      { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: '#10B981' },
+  'Booked Move':      { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
+  'Job Completed':    { bg: 'bg-slate-100',   text: 'text-slate-500',   dot: '#94A3B8' },
+  // Current CRM status names
+  'New Lead':               { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
+  'Called V/M':             { bg: 'bg-violet-100',  text: 'text-violet-700',  dot: '#8B5CF6' },
+  'Contacted':              { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#7C3AED' },
+  'Survey Physical':        { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
+  'Survey Video':           { bg: 'bg-teal-100',    text: 'text-teal-700',    dot: '#0D9488' },
+  'Quote Sent':             { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
+  'Quote Chased':           { bg: 'bg-orange-100',  text: 'text-orange-700',  dot: '#F97316' },
+  'Most Likely':            { bg: 'bg-yellow-100',  text: 'text-yellow-800',  dot: '#EAB308' },
+  'Quote Accepted':         { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: '#10B981' },
+  'Confirmed No Date':      { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#059669' },
+  'Confirmed Deposit':      { bg: 'bg-lime-100',    text: 'text-lime-700',    dot: '#65A30D' },
+  'Confirmed Paid':         { bg: 'bg-green-100',   text: 'text-green-800',   dot: '#15803D' },
+  'Completed':              { bg: 'bg-slate-100',   text: 'text-slate-500',   dot: '#94A3B8' },
+  'Archived / Review Done': { bg: 'bg-gray-100',    text: 'text-gray-600',    dot: '#6B7280' },
+  'Lost / Cancelled':       { bg: 'bg-red-100',     text: 'text-red-700',     dot: '#EF4444' },
 };
 
 function catColor(cat: string) {
@@ -715,6 +728,7 @@ function JobCard({
             {(item.to_line1 || item.to_postcode) && (
               <p><span className="text-slate-400">To:</span> {[item.to_line1, item.to_city, item.to_postcode].filter(Boolean).join(', ')}</p>
             )}
+            {item.contract_name && <p><span className="text-slate-400">Contractor:</span> <span className="font-medium text-indigo-700">{item.contract_name}</span></p>}
             {item.address && <p><span className="text-slate-400">Address:</span> {item.address}</p>}
             {item.bedrooms && <p><span className="text-slate-400">Bedrooms:</span> {item.bedrooms}</p>}
             {item.notes && <p><span className="text-slate-400">Notes:</span> {item.notes}</p>}
@@ -1138,8 +1152,8 @@ function WeeklyView({
 
 const EMPTY_QUICK: {
   title: string; category: string; customer_name: string; contact_number: string;
-  address: string; event_date: string; event_time: string; notes: string;
-} = { title: '', category: 'Quick Job', customer_name: '', contact_number: '', address: '', event_date: '', event_time: '', notes: '' };
+  address: string; event_date: string; event_time: string; notes: string; contract_id: string;
+} = { title: '', category: 'Quick Job', customer_name: '', contact_number: '', address: '', event_date: '', event_time: '', notes: '', contract_id: '' };
 
 function QuickJobModal({
   open, onClose, defaultDate, editItem, onSaved,
@@ -1151,8 +1165,13 @@ function QuickJobModal({
   onSaved: (ev: PlannerEvent) => void;
 }) {
   const [form, setForm] = useState({ ...EMPTY_QUICK });
+  const [contracts, setContracts] = useState<{ id: number; company_name: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get('/contracts').then(r => setContracts(r.data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -1166,6 +1185,7 @@ function QuickJobModal({
         event_date: editItem.date || defaultDate,
         event_time: editItem.time || '',
         notes: editItem.notes || '',
+        contract_id: editItem.contract_id ? String(editItem.contract_id) : '',
       });
     } else {
       setForm({ ...EMPTY_QUICK, event_date: defaultDate });
@@ -1181,9 +1201,10 @@ function QuickJobModal({
     if (!form.event_date)   { setError('Date is required'); return; }
     setSaving(true); setError('');
     try {
+      const payload = { ...form, contract_id: form.contract_id ? parseInt(form.contract_id, 10) : null };
       const r = editItem
-        ? await api.put(`/planner/events/${editItem.id}`, form)
-        : await api.post('/planner/events', form);
+        ? await api.put(`/planner/events/${editItem.id}`, payload)
+        : await api.post('/planner/events', payload);
       onSaved(r.data);
       onClose();
     } catch {
@@ -1198,6 +1219,15 @@ function QuickJobModal({
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
+          {contracts.length > 0 && (
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-600 mb-1">Contractor</label>
+              <select className="input" value={form.contract_id} onChange={e => set('contract_id', e.target.value)}>
+                <option value="">— None —</option>
+                {contracts.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="col-span-2">
             <label className="block text-xs font-medium text-slate-600 mb-1">Title *</label>
             <input className="input" placeholder="e.g. Box drop-off for Williams" value={form.title} onChange={e => set('title', e.target.value)} required />
@@ -1422,6 +1452,7 @@ function ItemDetailModal({
         {item.phone && <p className="text-slate-600"><span className="text-slate-400">Phone:</span> {item.phone}</p>}
         {item.from_line1 && <p className="text-slate-600"><span className="text-slate-400">From:</span> {[item.from_line1, item.from_city, item.from_postcode].filter(Boolean).join(', ')}</p>}
         {item.to_line1 && <p className="text-slate-600"><span className="text-slate-400">To:</span> {[item.to_line1, item.to_city, item.to_postcode].filter(Boolean).join(', ')}</p>}
+        {item.contract_name && <p className="text-slate-600"><span className="text-slate-400">Contractor:</span> <span className="font-medium text-indigo-700">{item.contract_name}</span></p>}
         {item.address && <p className="text-slate-600"><span className="text-slate-400">Address:</span> {item.address}</p>}
         {item.notes && <p className="text-slate-600"><span className="text-slate-400">Notes:</span> {item.notes}</p>}
         {item.source === 'job' && (
@@ -1705,6 +1736,7 @@ export default function CRMPlanner() {
           event_date: item.date,
           event_time: item.time || '',
           notes: item.notes || '',
+          contract_id: item.contract_id || null,
         });
       } else {
         await api.post(`/crm/jobs/${item.id}/duplicate`);

@@ -17,6 +17,7 @@ export type LeadStatus =
   | 'Quoted'
   | 'Quote Declined'
   | 'Quote Accepted'
+  | 'Job Confirmed'
   | 'Job Completed'
   | 'Commission Paid';
 
@@ -27,6 +28,7 @@ export const LEAD_STATUSES: LeadStatus[] = [
   'Quoted',
   'Quote Declined',
   'Quote Accepted',
+  'Job Confirmed',
   'Job Completed',
   'Commission Paid',
 ];
@@ -138,21 +140,38 @@ export interface Partner {
 
 export type CrmStatus =
   | 'New Lead'
+  | 'Called V/M'
   | 'Contacted'
-  | 'Survey Booked'
-  | 'Survey Completed'
-  | 'Awaiting Quote'
+  | 'Survey Physical'
+  | 'Survey Video'
   | 'Quote Sent'
+  | 'Quote Chased'
+  | 'Most Likely'
   | 'Quote Accepted'
-  | 'Booked Move'
-  | 'In Progress'
+  | 'Confirmed No Date'
+  | 'Confirmed Deposit'
+  | 'Confirmed Paid'
   | 'Completed'
+  | 'Archived / Review Done'
   | 'Lost / Cancelled';
 
+// Ordered pipeline stages; Lost / Cancelled is a separate ejection state handled by the UI
 export const CRM_STATUSES: CrmStatus[] = [
-  'New Lead', 'Contacted', 'Survey Booked', 'Survey Completed',
-  'Awaiting Quote', 'Quote Sent', 'Quote Accepted',
-  'Booked Move', 'In Progress', 'Completed', 'Lost / Cancelled',
+  'New Lead',
+  'Called V/M',
+  'Contacted',
+  'Survey Physical',
+  'Survey Video',
+  'Quote Sent',
+  'Quote Chased',
+  'Most Likely',
+  'Quote Accepted',
+  'Confirmed No Date',
+  'Confirmed Deposit',
+  'Confirmed Paid',
+  'Completed',
+  'Archived / Review Done',
+  'Lost / Cancelled',
 ];
 
 export const CRM_LEAD_SOURCES = [
@@ -346,6 +365,7 @@ export interface PlannerAsset {
   name: string;
   role?: string;
   phone?: string;
+  email?: string;
   make_model?: string;
   registration?: string;
   capacity_notes?: string;
@@ -365,6 +385,8 @@ export interface PlannerEvent {
   event_date: string;
   event_time?: string;
   notes?: string;
+  contract_id?: number | null;
+  contract_name?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -408,10 +430,59 @@ export interface PlannerCalendarItem {
   packing_required?: boolean | number;
   storage_required?: boolean | number;
   notes?: string;
+  contract_id?: number | null;
+  contract_name?: string | null;
   assignments?: PlannerAssignment[];
 }
 
 export const PLANNER_CATEGORIES = [
-  'Loading', 'Moving', 'Unloading', 'Packing Box', 'Drop-off', 'Box Collection', 'Survey', 'Sundry', 'Quick Job',
+  'Loading', 'Moving', 'Unloading', 'Packing', 'Box Drop off', 'Box Collection', 'Survey', 'Sundry', 'Quick Job',
 ] as const;
 export type PlannerCategory = typeof PLANNER_CATEGORIES[number];
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+export interface CompanySettings {
+  company_name: string;
+  company_email: string;
+  company_phone: string;
+  company_website: string;
+  company_address: string;
+  company_registration: string;
+}
+
+export interface JobStatusSetting {
+  id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface LeadSourceSetting {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface MoveTypeSetting {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface Contract {
+  id: number;
+  company_name: string;
+  contact_name: string | null;
+  email: string | null;
+  office_number: string | null;
+  direct_line: string | null;
+  address: string | null;
+  description: string | null;
+  payment_terms: string | null;
+  created_at: string;
+  updated_at: string;
+}

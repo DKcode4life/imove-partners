@@ -2,25 +2,30 @@ import { useEffect, useState } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, LogOut, ArrowLeftCircle, UserCircle2, ClipboardList, CalendarDays,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Settings,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
-import { CRM_STATUSES } from '../types';
+import type { JobStatusSetting } from '../types';
 
-const STATUS_COLORS: Record<string, string> = {
-  'New Lead':          'bg-blue-500',
-  'Contacted':         'bg-violet-500',
-  'Survey Booked':     'bg-cyan-500',
-  'Survey Completed':  'bg-teal-500',
-  'Awaiting Quote':    'bg-yellow-500',
-  'Quote Sent':        'bg-amber-500',
-  'Quote Accepted':    'bg-orange-500',
-  'Booked Move':       'bg-green-500',
-  'In Progress':       'bg-emerald-500',
-  'Completed':         'bg-slate-400',
-  'Lost / Cancelled':  'bg-red-500',
-};
+// Shown immediately and replaced by API data once loaded
+const FALLBACK_STATUSES: JobStatusSetting[] = [
+  { id:  0, name: 'New Lead',               color: '#3b82f6', sort_order: 0,  created_at: '' },
+  { id:  1, name: 'Called V/M',             color: '#8b5cf6', sort_order: 1,  created_at: '' },
+  { id:  2, name: 'Contacted',              color: '#7c3aed', sort_order: 2,  created_at: '' },
+  { id:  3, name: 'Survey Physical',        color: '#06b6d4', sort_order: 3,  created_at: '' },
+  { id:  4, name: 'Survey Video',           color: '#0d9488', sort_order: 4,  created_at: '' },
+  { id:  5, name: 'Quote Sent',             color: '#f59e0b', sort_order: 5,  created_at: '' },
+  { id:  6, name: 'Quote Chased',           color: '#f97316', sort_order: 6,  created_at: '' },
+  { id:  7, name: 'Most Likely',            color: '#eab308', sort_order: 7,  created_at: '' },
+  { id:  8, name: 'Quote Accepted',         color: '#10b981', sort_order: 8,  created_at: '' },
+  { id:  9, name: 'Confirmed No Date',      color: '#059669', sort_order: 9,  created_at: '' },
+  { id: 10, name: 'Confirmed Deposit',      color: '#65a30d', sort_order: 10, created_at: '' },
+  { id: 11, name: 'Confirmed Paid',         color: '#15803d', sort_order: 11, created_at: '' },
+  { id: 12, name: 'Completed',              color: '#94a3b8', sort_order: 12, created_at: '' },
+  { id: 13, name: 'Archived / Review Done', color: '#6b7280', sort_order: 13, created_at: '' },
+  { id: 14, name: 'Lost / Cancelled',       color: '#ef4444', sort_order: 14, created_at: '' },
+];
 
 const MAIN_NAV = [
   { to: '/admin/crm',           label: 'Overview',   icon: <LayoutDashboard className="w-5 h-5" />, end: true },
@@ -39,6 +44,14 @@ export default function CRMSidebar() {
   );
 
   const [summary, setSummary] = useState<Record<string, number>>({});
+  const [statuses, setStatuses] = useState<JobStatusSetting[]>(FALLBACK_STATUSES);
+
+  // Refresh pipeline statuses on every route change; fall back to hardcoded list on error
+  useEffect(() => {
+    api.get('/settings/statuses')
+      .then(r => { if (r.data?.length) setStatuses(r.data); })
+      .catch(() => {});
+  }, [location.pathname]);
 
   useEffect(() => {
     api.get('/crm/jobs/summary')
@@ -121,14 +134,13 @@ export default function CRMSidebar() {
             <p className="px-3 pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
               Pipeline
             </p>
-            {CRM_STATUSES.map(status => {
-              const count = summary[status] ?? 0;
-              const isActive = isOnOverview && activeStatus === status;
-              const dot = STATUS_COLORS[status] ?? 'bg-slate-400';
+            {statuses.map(s => {
+              const count = summary[s.name] ?? 0;
+              const isActive = isOnOverview && activeStatus === s.name;
               return (
                 <Link
-                  key={status}
-                  to={`/admin/crm?status=${encodeURIComponent(status)}`}
+                  key={s.id}
+                  to={`/admin/crm?status=${encodeURIComponent(s.name)}`}
                   className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
                       ? 'bg-white/10 text-white'
@@ -136,8 +148,8 @@ export default function CRMSidebar() {
                   }`}
                 >
                   <span className="flex items-center gap-2.5 min-w-0">
-                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
-                    <span className="truncate">{status}</span>
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                    <span className="truncate">{s.name}</span>
                   </span>
                   <span className={`ml-2 text-xs font-bold tabular-nums flex-shrink-0 ${
                     isActive ? 'text-white' : count > 0 ? 'text-slate-300' : 'text-slate-600'
@@ -160,6 +172,26 @@ export default function CRMSidebar() {
       )}
 
       {collapsed && <div className="flex-1" />}
+
+      {/* Settings */}
+      <div className={`border-t border-slate-700/60 pt-2 pb-1 ${collapsed ? 'px-1' : 'px-3'}`}>
+        <NavLink
+          to="/admin/crm/settings"
+          title={collapsed ? 'Settings' : undefined}
+          className={({ isActive }) =>
+            `flex items-center rounded-lg text-sm font-medium transition-colors ${
+              collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
+            } ${
+              isActive
+                ? 'bg-white/10 text-white'
+                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            }`
+          }
+        >
+          <Settings className="w-5 h-5" />
+          {!collapsed && 'Settings'}
+        </NavLink>
+      </div>
 
       {/* Bottom: back + user + logout */}
       <div className={`border-t border-slate-700/60 p-2 space-y-0.5 ${collapsed ? 'flex flex-col items-center gap-1' : 'p-3'}`}>

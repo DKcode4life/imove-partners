@@ -12,6 +12,7 @@ const MAIN_STEPS: LeadStatus[] = [
   'Survey Booked',
   'Quoted',
   'Quote Accepted',
+  'Job Confirmed',
   'Job Completed',
   'Commission Paid',
 ];
