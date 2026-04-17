@@ -16,15 +16,16 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }>
   'Loading':         { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
   'Moving':          { bg: 'bg-indigo-100',  text: 'text-indigo-700',  dot: '#6366F1' },
   'Unloading':       { bg: 'bg-sky-100',     text: 'text-sky-700',     dot: '#0EA5E9' },
-  'Packing Box':     { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
-  'Drop-off':        { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
+  'Packing':         { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
+  'Box Drop off':    { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
   'Box Collection':  { bg: 'bg-orange-100',  text: 'text-orange-700',  dot: '#F97316' },
   'Survey':          { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
   'Sundry':          { bg: 'bg-slate-100',   text: 'text-slate-600',   dot: '#94A3B8' },
   'Quick Job':       { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
   // legacy aliases kept for existing records
   'Move':            { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
-  'Packing':         { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
+  'Packing Box':     { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
+  'Drop-off':        { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
   'Box Drop-off':    { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
   'New Lead':        { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
   'Contacted':       { bg: 'bg-violet-100',  text: 'text-violet-700',  dot: '#8B5CF6' },
@@ -238,10 +239,12 @@ function AssetChip({
       onDragStart={e => {
         if (reorderMode) {
           e.dataTransfer.effectAllowed = 'move';
-          onReorderDragStart();
+          e.dataTransfer.setData('text/plain', String(asset.id));
+          setTimeout(() => onReorderDragStart(), 0);
         } else if (isAvailable) {
           e.dataTransfer.effectAllowed = 'copy';
-          onJobDragStart();
+          e.dataTransfer.setData('text/plain', String(asset.id));
+          setTimeout(() => onJobDragStart(), 0);
         } else {
           e.preventDefault();
         }
@@ -466,7 +469,7 @@ function AssignmentChip({
     <span
       data-assignment-chip
       draggable={!!onDragStart}
-      onDragStart={e => { e.stopPropagation(); onDragStart?.(); }}
+      onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity select-none ${
         onDragStart ? 'cursor-grab active:cursor-grabbing active:opacity-50' : ''
@@ -519,7 +522,7 @@ function StaffAssignmentRow({
     <div
       data-assignment-chip
       draggable={!!onDragStart}
-      onDragStart={e => { e.stopPropagation(); onDragStart?.(); }}
+      onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
       className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-xs select-none ${onDragStart ? 'cursor-grab active:cursor-grabbing active:opacity-50' : ''}`}
     >
@@ -639,7 +642,8 @@ function JobCard({
         // Don't trigger card drag if dragging an assignment chip inside
         if ((e.target as HTMLElement).closest('[data-assignment-chip]')) { e.preventDefault(); return; }
         e.dataTransfer.effectAllowed = 'move';
-        onCardDragStart();
+        e.dataTransfer.setData('text/plain', '1');
+        setTimeout(() => onCardDragStart(), 0);
       }}
       onDragEnd={onCardDragEnd}
       className={`rounded-lg border transition-all duration-150 cursor-grab active:cursor-grabbing active:opacity-70 ${
