@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "concurrently \"nodemon server/index.js\" \"cd client && npm run dev\"",
     "start": "node server/index.js",
+    "build": "cd client && npm install && npm run build",
+    "postinstall": "prisma generate",
     "install:all": "npm install && cd client && npm install",
     "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",
@@ -23,11 +25,11 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^6.19.3"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "nodemon": "^3.1.0",
-    "prisma": "^6.19.3"
+    "nodemon": "^3.1.0"
   }
 }

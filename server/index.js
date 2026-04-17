@@ -1,4 +1,5 @@
 const config = require('./config');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const prisma = require('./db/prisma');
@@ -9,7 +10,7 @@ const syncCustomers = require('./lib/sync-customers');
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: config.env === 'production' ? true : ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
 }));
 app.use(express.json({ limit: '5mb' }));
@@ -30,6 +31,14 @@ app.get('/api/health', async (_req, res) => {
     res.status(500).json({ status: 'error', database: 'disconnected' });
   }
 });
+
+// Serve built React app in production (must come after all API routes)
+if (config.env === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/dist')));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '../client/dist', 'index.html'));
+  });
+}
 
 // Global error handler for async route errors
 app.use((err, _req, res, _next) => {
