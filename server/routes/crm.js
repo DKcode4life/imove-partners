@@ -390,4 +390,86 @@ router.post('/import/:leadId', wrap(async (req, res) => {
   res.status(201).json({ ...job, activities });
 }));
 
+// ── Route distance/time calculation ──────────────────────────────────────────
+
+const DEPOT_POSTCODE = 'IP28 7AS';
+
+// Google Maps Directions API — matches Google Maps exactly
+async function googleRoute(stops) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return null;
+  try {
+    const origin      = encodeURIComponent(stops[0]);
+    const destination = encodeURIComponent(stops[stops.length - 1]);
+    const waypoints   = stops.slice(1, -1).map(encodeURIComponent).join('|');
+    let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${key}&region=gb`;
+    if (waypoints) url += `&waypoints=${waypoints}`;
+    const r    = await fetch(url);
+    const data = await r.json();
+    if (data.status !== 'OK' || !data.routes?.length) return null;
+    const legs    = data.routes[0].legs;
+    const metres  = legs.reduce((s, l) => s + l.distance.value, 0);
+    const seconds = legs.reduce((s, l) => s + l.duration.value, 0);
+    return {
+      miles:   parseFloat((metres / 1609.344).toFixed(1)),
+      minutes: Math.round(seconds / 60),
+    };
+  } catch { return null; }
+}
+
+// OSRM fallback (OpenStreetMap) — used when no Google API key is configured
+async function geocodeAddress(address) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address + ', UK')}&format=json&limit=1&countrycodes=gb`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'iMove-Partner-Portal/1.0 info@myimove.co.uk' } });
+    const data = await r.json();
+    if (!data?.length) return null;
+    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  } catch { return null; }
+}
+
+async function osrmRoute(coords) {
+  try {
+    const coordStr = coords.map(c => `${c.lon},${c.lat}`).join(';');
+    const r    = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=false`);
+    const data = await r.json();
+    if (data.code !== 'Ok' || !data.routes?.length) return null;
+    return {
+      miles:   parseFloat((data.routes[0].distance / 1609.344).toFixed(1)),
+      minutes: Math.round(data.routes[0].duration / 60),
+    };
+  } catch { return null; }
+}
+
+// POST /api/crm/route-info  { from, to }
+router.post('/route-info', wrap(async (req, res) => {
+  const { from, to } = req.body;
+  if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+
+  // Try Google Maps first (exact match with Google Maps links)
+  if (process.env.GOOGLE_MAPS_API_KEY) {
+    const [direct, total] = await Promise.all([
+      googleRoute([from, to]),
+      googleRoute([DEPOT_POSTCODE, to, from, DEPOT_POSTCODE]),
+    ]);
+    return res.json({ direct, total });
+  }
+
+  // Fallback: OSRM via OpenStreetMap (free, no key, slightly different distances)
+  const depotCoord = await geocodeAddress(DEPOT_POSTCODE);
+  await new Promise(r => setTimeout(r, 1100));
+  const fromCoord = await geocodeAddress(from);
+  await new Promise(r => setTimeout(r, 1100));
+  const toCoord = await geocodeAddress(to);
+
+  if (!fromCoord || !toCoord) return res.status(422).json({ error: 'Could not geocode addresses' });
+
+  const [direct, total] = await Promise.all([
+    osrmRoute([fromCoord, toCoord]),
+    depotCoord ? osrmRoute([depotCoord, toCoord, fromCoord, depotCoord]) : Promise.resolve(null),
+  ]);
+
+  res.json({ direct, total });
+}));
+
 module.exports = router;
