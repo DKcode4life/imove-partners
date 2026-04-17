@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, CalendarDays, Plus, Users, Truck,
-  X, Edit2, Trash2, CheckCircle, AlertCircle, Save, GripVertical, Copy,
+  X, Edit2, Trash2, CheckCircle, AlertCircle, Save, GripVertical, Copy, ArrowUpRight,
 } from 'lucide-react';
 import CRMSidebar from '../../components/CRMSidebar';
 import Modal from '../../components/Modal';
@@ -617,6 +617,7 @@ function JobCard({
   onEditEvent,
   onDeleteEvent,
   onDuplicate,
+  onConvertToJob,
   navigate,
 }: {
   cardKey: string;
@@ -640,9 +641,11 @@ function JobCard({
   onEditEvent?: () => void;
   onDeleteEvent?: () => void;
   onDuplicate: () => void;
+  onConvertToJob?: () => void;
   navigate: (path: string) => void;
 }) {
   const c = catColor(item.category);
+  const isSurveyEvent = item.source === 'event' && item.category === 'Survey';
   const staffAssignments   = (item.assignments || []).filter(a => a.asset_type === 'staff');
   const vehicleAssignments = (item.assignments || []).filter(a => a.asset_type === 'vehicle');
   const driverAssignments  = staffAssignments.filter(a => (a.assigned_role ?? a.asset_role) === 'driver');
@@ -866,6 +869,15 @@ function JobCard({
                   >
                     <Trash2 className="w-3 h-3" />Delete
                   </button>
+                  {isSurveyEvent && (
+                    <button
+                      onClick={e => { e.stopPropagation(); onConvertToJob?.(); }}
+                      className="flex items-center gap-1 text-[10px] font-medium text-cyan-600 hover:text-cyan-800 transition-colors"
+                      title="Create a CRM job from this survey"
+                    >
+                      <ArrowUpRight className="w-3 h-3" />Convert to job
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -914,6 +926,7 @@ function WeeklyView({
   onEditEvent,
   onDeleteEvent,
   onDuplicate,
+  onConvertToJob,
   navigate,
 }: {
   weekDates: string[];
@@ -942,6 +955,7 @@ function WeeklyView({
   onEditEvent: (item: PlannerCalendarItem) => void;
   onDeleteEvent: (item: PlannerCalendarItem) => void;
   onDuplicate: (item: PlannerCalendarItem) => void;
+  onConvertToJob: (item: PlannerCalendarItem) => void;
   navigate: (path: string) => void;
 }) {
   const itemsByDate: Record<string, PlannerCalendarItem[]> = {};
@@ -1121,6 +1135,7 @@ function WeeklyView({
                           onEditEvent={item.source === 'event' ? () => onEditEvent(item) : undefined}
                           onDeleteEvent={item.source === 'event' ? () => onDeleteEvent(item) : undefined}
                           onDuplicate={() => onDuplicate(item)}
+                          onConvertToJob={item.source === 'event' && item.category === 'Survey' ? () => onConvertToJob(item) : undefined}
                           navigate={navigate}
                         />
                         {/* Gap after each item */}
@@ -1748,6 +1763,26 @@ export default function CRMPlanner() {
     }
   }
 
+  async function handleConvertToJob(item: PlannerCalendarItem) {
+    const fullName = item.customer_name?.trim() || item.title;
+    try {
+      const r = await api.post('/crm/jobs', {
+        full_name: fullName,
+        phone: item.phone || null,
+        from_line1: item.address || null,
+        survey_required: true,
+        survey_type: 'In Person',
+        survey_date: item.date,
+        client_notes: item.notes || null,
+        status: 'Survey Physical',
+      });
+      showToast(`CRM job created for "${fullName}"`, 'success');
+      navigate(`/admin/crm/${r.data.id}`);
+    } catch {
+      showToast('Failed to create CRM job', 'error');
+    }
+  }
+
   async function handleDeleteEvent(item: PlannerCalendarItem) {
     if (!window.confirm(`Delete "${item.title}"?`)) return;
     try {
@@ -1888,6 +1923,7 @@ export default function CRMPlanner() {
             onEditEvent={item => { setEditEvent(item); setShowQuickJob(true); }}
             onDeleteEvent={handleDeleteEvent}
             onDuplicate={handleDuplicate}
+            onConvertToJob={handleConvertToJob}
             navigate={navigate}
           />
         )}
