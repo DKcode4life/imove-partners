@@ -472,7 +472,7 @@ export default function CRMCustomerDetail() {
       </div>
 
       {/* ── New Storage Job Modal ───────────────────────────────────────── */}
-      <Modal isOpen={storageOpen} onClose={() => setStorageOpen(false)} title="New Storage Job">
+      <Modal open={storageOpen} onClose={() => setStorageOpen(false)} title="New Storage Job">
         <form onSubmit={handleCreateStorage} className="space-y-4">
           <div className="p-3 rounded-lg bg-orange-50 border border-orange-100 text-sm text-orange-800">
             Creates a storage job in the CRM pipeline linked to <strong>{customer.full_name}</strong>.
@@ -523,7 +523,7 @@ export default function CRMCustomerDetail() {
       </Modal>
 
       {/* Delete Modal */}
-      <Modal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete Customer">
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete Customer">
         <p className="text-sm text-slate-600 mb-5">
           Are you sure you want to permanently delete <strong>{customer.full_name}</strong>? Their linked jobs will not be deleted.
         </p>

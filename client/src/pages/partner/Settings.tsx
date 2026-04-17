@@ -45,7 +45,7 @@ interface PartnerProfile {
   gift_card_email: string;
 }
 
-function SaveStatus({ status }: { status: 'idle' | 'saving' | 'saved' | 'error'; error?: string }) {
+function SaveStatus({ status, error }: { status: 'idle' | 'saving' | 'saved' | 'error'; error?: string }) {
   if (status === 'idle') return null;
   if (status === 'saving') return <span className="text-xs text-slate-400">Saving…</span>;
   if (status === 'saved') return (

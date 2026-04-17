@@ -76,7 +76,7 @@ function PipelineBar({
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const isLost  = status === LOST;
-  const mainIdx = PIPELINE.indexOf(status as CrmStatus);
+  const mainIdx = PIPELINE.indexOf(status as never);
   const pct     = mainIdx >= 0 ? (mainIdx / (PIPELINE.length - 1)) * 100 : 0;
 
   return (
