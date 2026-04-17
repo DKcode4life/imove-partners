@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Save, Trash2, CheckCircle, AlertCircle,
-  PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X,
+  ArrowLeft, Trash2, CheckCircle, AlertCircle,
+  PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -67,13 +67,7 @@ const DOT_CFG: Record<string, { filled: string; ring: string; border: string; la
   'Completed':        { filled: 'bg-slate-400 border-slate-400',   ring: 'ring-slate-200',   border: 'border-slate-300',   label: 'text-slate-600' },
 };
 
-function PipelineBar({
-  status, saving, onChange,
-}: {
-  status: string;
-  saving: number | null;
-  onChange: (s: CrmStatus) => void;
-}) {
+function PipelineBar({ status, saving, onChange }: { status: string; saving: number | null; onChange: (s: CrmStatus) => void }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const isLost  = status === LOST;
   const mainIdx = PIPELINE.indexOf(status as never);
@@ -81,21 +75,17 @@ function PipelineBar({
 
   return (
     <div className="card px-5 pt-4 pb-3 mb-6">
-      {/* Main pipeline */}
       <div className="relative px-2 pb-7">
-        {/* Track — sits at 8px from top, matching center of 16px dot area */}
         <div className="absolute left-2 right-2 bg-slate-200 h-0.5" style={{ top: 7 }} />
         {!isLost && (
           <div className="absolute left-2 bg-slate-300 h-0.5 transition-all duration-300" style={{ top: 7, width: `${pct}%` }} />
         )}
-        {/* Dots + labels */}
         <div className="relative flex justify-between">
           {PIPELINE.map((s, i) => {
             const isActive  = s === status;
             const isPast    = !isLost && i < mainIdx;
             const isSaving  = saving === i;
             const cfg       = DOT_CFG[s] ?? DOT_CFG['Completed'];
-            // Show label if this dot is active OR currently hovered (both can show at once)
             const showLabel = i === mainIdx || i === hovered;
             const labelAlign = i === 0 ? 'left-0' : i === PIPELINE.length - 1 ? 'right-0' : 'left-1/2 -translate-x-1/2';
             return (
@@ -103,19 +93,10 @@ function PipelineBar({
                 onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
                 <button type="button" onClick={() => onChange(s)}
                   className={`rounded-full border-2 transition-all duration-150 flex items-center justify-center
-                    ${isActive
-                      ? `w-4 h-4 ${cfg.filled} ring-[3px] ${cfg.ring}`
-                      : isPast
-                        ? `w-3 h-3 ${cfg.filled} hover:scale-125`
-                        : `w-3 h-3 bg-white ${cfg.border} hover:scale-125`}`}>
-                  {isSaving && (
-                    <span className="w-2 h-2 border border-white border-t-transparent rounded-full animate-spin" />
-                  )}
+                    ${isActive ? `w-4 h-4 ${cfg.filled} ring-[3px] ${cfg.ring}` : isPast ? `w-3 h-3 ${cfg.filled} hover:scale-125` : `w-3 h-3 bg-white ${cfg.border} hover:scale-125`}`}>
+                  {isSaving && <span className="w-2 h-2 border border-white border-t-transparent rounded-full animate-spin" />}
                 </button>
-                {/* Label — always visible for active, visible on hover for others */}
-                <div className={`absolute top-5 whitespace-nowrap text-xs font-medium transition-opacity duration-100 ${labelAlign}
-                  ${showLabel ? 'opacity-100' : 'opacity-0 pointer-events-none'}
-                  ${isActive ? cfg.label : 'text-slate-500'}`}>
+                <div className={`absolute top-5 whitespace-nowrap text-xs font-medium transition-opacity duration-100 ${labelAlign} ${showLabel ? 'opacity-100' : 'opacity-0 pointer-events-none'} ${isActive ? cfg.label : 'text-slate-500'}`}>
                   {s}
                 </div>
               </div>
@@ -123,17 +104,10 @@ function PipelineBar({
           })}
         </div>
       </div>
-
-      {/* Lost / Cancelled */}
       <div className="flex justify-end mt-3 pt-3 border-t border-slate-100">
         <button type="button" onClick={() => onChange(LOST)}
-          className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
-            ${isLost
-              ? 'bg-red-600 border-red-600 text-white'
-              : 'border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-500'}`}>
-          {saving === -1
-            ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin inline-block" />
-            : isLost ? '✕ Lost / Cancelled' : 'Mark as Lost / Cancelled'}
+          className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${isLost ? 'bg-red-600 border-red-600 text-white' : 'border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-500'}`}>
+          {saving === -1 ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin inline-block" /> : isLost ? '✕ Lost / Cancelled' : 'Mark as Lost / Cancelled'}
         </button>
       </div>
     </div>
@@ -144,14 +118,8 @@ function PipelineBar({
 
 const FLOOR_OPTS = ['G', '1', '2', '3', '4', '5+'];
 
-function PropertyBlock({
-  label, type, onTypeChange,
-  floor, onFloorChange,
-  hasLift, onHasLiftChange,
-  otherText, onOtherTextChange,
-}: {
-  label: string;
-  type: string; onTypeChange: (v: string) => void;
+function PropertyBlock({ label, type, onTypeChange, floor, onFloorChange, hasLift, onHasLiftChange, otherText, onOtherTextChange }: {
+  label: string; type: string; onTypeChange: (v: string) => void;
   floor: string; onFloorChange: (v: string) => void;
   hasLift: boolean; onHasLiftChange: (v: boolean) => void;
   otherText: string; onOtherTextChange: (v: string) => void;
@@ -161,7 +129,7 @@ function PropertyBlock({
   return (
     <div className="space-y-2">
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
-      <select className="input" value={type} onChange={e => { onTypeChange(e.target.value); }}>
+      <select className="input" value={type} onChange={e => onTypeChange(e.target.value)}>
         <option value="">Property type…</option>
         {CRM_PROPERTY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
       </select>
@@ -170,12 +138,8 @@ function PropertyBlock({
           <p className="text-xs text-slate-500">Floor</p>
           <div className="flex items-center gap-1.5 flex-wrap">
             {FLOOR_OPTS.map(f => (
-              <button key={f} type="button"
-                onClick={() => onFloorChange(floor === f ? '' : f)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
-                  ${floor === f
-                    ? 'bg-brand-600 border-brand-600 text-white'
-                    : 'bg-white border-slate-200 text-slate-600 hover:border-brand-300'}`}>
+              <button key={f} type="button" onClick={() => onFloorChange(floor === f ? '' : f)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${floor === f ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-brand-300'}`}>
                 {f}
               </button>
             ))}
@@ -184,8 +148,7 @@ function PropertyBlock({
         </div>
       )}
       {isOther && (
-        <input type="text" className="input" placeholder="Describe property type…"
-          value={otherText} onChange={e => onOtherTextChange(e.target.value)} />
+        <input type="text" className="input" placeholder="Describe property type…" value={otherText} onChange={e => onOtherTextChange(e.target.value)} />
       )}
     </div>
   );
@@ -205,13 +168,43 @@ function Toast({ message, type, onDone }: { message: string; type: 'success' | '
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
-function Section({ title, accent = 'bg-brand-500', children }: { title: string; accent?: string; children: React.ReactNode }) {
+function Section({ title, accent = 'bg-brand-500', children, editing, onEdit, onSave, onCancel, saving }: {
+  title: string; accent?: string; children: React.ReactNode;
+  editing?: boolean; onEdit?: () => void; onSave?: () => void; onCancel?: () => void; saving?: boolean;
+}) {
   return (
     <div className="card p-5">
-      <h2 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
-        <span className={`w-1.5 h-4 rounded-full flex-shrink-0 ${accent}`} />{title}
-      </h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+          <span className={`w-1.5 h-4 rounded-full flex-shrink-0 ${accent}`} />{title}
+        </h2>
+        {onEdit && !editing && (
+          <button type="button" onClick={onEdit}
+            className="flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-brand-600 transition-colors">
+            <Pencil className="w-3.5 h-3.5" /> Edit
+          </button>
+        )}
+        {editing && (
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={onCancel} className="btn-secondary text-xs py-1 px-2.5">Cancel</button>
+            <button type="button" onClick={onSave} disabled={saving} className="btn-primary text-xs py-1 px-2.5">
+              {saving ? 'Saving…' : <><Save className="w-3 h-3" /> Save</>}
+            </button>
+          </div>
+        )}
+      </div>
       {children}
+    </div>
+  );
+}
+
+// ── Read-only field ───────────────────────────────────────────────────────────
+
+function ReadF({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-slate-400 mb-0.5">{label}</p>
+      <p className="text-sm text-slate-800">{value || <span className="italic text-slate-300">—</span>}</p>
     </div>
   );
 }
@@ -228,8 +221,8 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 // ── Activity timeline ─────────────────────────────────────────────────────────
 
 const ACT_CFG = {
-  created:       { icon: <PlusCircle  className="w-3.5 h-3.5" />, color: 'text-emerald-600 bg-emerald-50' },
-  status_change: { icon: <RefreshCw   className="w-3.5 h-3.5" />, color: 'text-blue-600 bg-blue-50' },
+  created:       { icon: <PlusCircle    className="w-3.5 h-3.5" />, color: 'text-emerald-600 bg-emerald-50' },
+  status_change: { icon: <RefreshCw    className="w-3.5 h-3.5" />, color: 'text-blue-600 bg-blue-50' },
   note:          { icon: <MessageSquare className="w-3.5 h-3.5" />, color: 'text-slate-500 bg-slate-100' },
 };
 
@@ -243,10 +236,7 @@ function ActivityItem({ act }: { act: CrmActivity }) {
       <div className="flex-1 pb-4 border-b border-slate-50 last:border-0 last:pb-0">
         <p className="text-sm text-slate-700">{act.note}</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          {new Date(act.created_at).toLocaleDateString('en-GB', {
-            day: 'numeric', month: 'short', year: 'numeric',
-            hour: '2-digit', minute: '2-digit',
-          })}
+          {new Date(act.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </p>
       </div>
     </div>
@@ -256,9 +246,11 @@ function ActivityItem({ act }: { act: CrmActivity }) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDateTime(d: string) {
-  return new Date(d).toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function fmtDate(d: string | null | undefined) {
+  if (!d) return '—';
+  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 function fmt(n: number | null) {
   if (n == null) return '—';
@@ -274,7 +266,6 @@ export default function CRMDetailPage() {
   const [job,        setJob]        = useState<CrmJob | null>(null);
   const [activities, setActivities] = useState<CrmActivity[]>([]);
   const [loading,    setLoading]    = useState(true);
-  const [saving,     setSaving]     = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting,   setDeleting]   = useState(false);
   const [noteText,        setNoteText]        = useState('');
@@ -288,23 +279,22 @@ export default function CRMDetailPage() {
   const [deletingAdminNoteId,  setDeletingAdminNoteId]  = useState<number | null>(null);
   const [toast,           setToast]          = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pipelineSaving,  setPipelineSaving]  = useState<number | null>(null);
+  const [editingSection,  setEditingSection]  = useState<string | null>(null);
+  const [sectionSaving,   setSectionSaving]   = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // ── All editable fields ────────────────────────────────────────────────────
-  // A. Contact
   const [fullName,     setFullName]     = useState('');
   const [email,        setEmail]        = useState('');
   const [altEmail,     setAltEmail]     = useState('');
   const [phone,        setPhone]        = useState('');
   const [altPhone,     setAltPhone]     = useState('');
   const [clientNotes,  setClientNotes]  = useState('');
-  // B. Lead / Referral
   const [leadSource,             setLeadSource]             = useState('');
   const [estateAgent,            setEstateAgent]            = useState('');
   const [internalRef,            setInternalRef]            = useState('');
   const [partnerCommissionRate,  setPartnerCommissionRate]  = useState<string>('');
   const [status,         setStatus]         = useState<CrmStatus>('New Lead');
-  // C. Move
   const [fromLine1,      setFromLine1]      = useState('');
   const [fromLine2,      setFromLine2]      = useState('');
   const [fromCity,       setFromCity]       = useState('');
@@ -330,7 +320,6 @@ export default function CRMDetailPage() {
   const [floorTo,        setFloorTo]        = useState('');
   const [hasLiftTo,      setHasLiftTo]      = useState(false);
   const [propTypeToOther,   setPropTypeToOther]   = useState('');
-  // D. Survey / Quote
   const [surveyRequired,  setSurveyRequired]  = useState(false);
   const [surveyType,       setSurveyType]       = useState('');
   const [surveyDate,       setSurveyDate]       = useState('');
@@ -339,7 +328,6 @@ export default function CRMDetailPage() {
   const [quoteAccepted,    setQuoteAccepted]    = useState(false);
   const [depositRequired,  setDepositRequired]  = useState(false);
   const [depositPaid,      setDepositPaid]      = useState(false);
-  // E. Operations
   const [internalNotes,    setInternalNotes]    = useState('');
   const [specialHandling,  setSpecialHandling]  = useState('');
   const [accessRestrict,   setAccessRestrict]   = useState('');
@@ -347,12 +335,10 @@ export default function CRMDetailPage() {
   const [packingReq,       setPackingReq]       = useState(false);
   const [dismantlingReq,   setDismantlingReq]   = useState(false);
   const [storageReq,       setStorageReq]       = useState(false);
-  // Staff
   const [surveyor,  setSurveyor]  = useState('');
   const [mover,     setMover]     = useState('');
   const [driver,    setDriver]    = useState('');
   const [vehicle,   setVehicle]   = useState('');
-  // Planner assignments (read from planner API)
   const [plannerAssignments, setPlannerAssignments] = useState<PlannerAssignment[]>([]);
 
   const populate = useCallback((j: CrmJob) => {
@@ -401,7 +387,7 @@ export default function CRMDetailPage() {
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
-  // ── Save ────────────────────────────────────────────────────────────────────
+  // ── Save payload ───────────────────────────────────────────────────────────
 
   const buildSavePayload = () => ({
     full_name: fullName.trim(), email: email || null, alt_email: altEmail || null,
@@ -409,9 +395,7 @@ export default function CRMDetailPage() {
     lead_source: job!.lead_id ? job!.lead_source : (leadSource || null),
     estate_agent_name: job!.lead_id ? job!.estate_agent_name : (estateAgent || null),
     internal_ref: internalRef || null, status,
-    partner_commission_rate: job!.lead_id
-      ? job!.partner_commission_rate
-      : (partnerCommissionRate ? parseFloat(partnerCommissionRate) : null),
+    partner_commission_rate: job!.lead_id ? job!.partner_commission_rate : (partnerCommissionRate ? parseFloat(partnerCommissionRate) : null),
     from_line1: fromLine1 || null, from_line2: fromLine2 || null,
     from_city: fromCity || null, from_postcode: fromPostcode || null,
     to_line1: toLine1 || null, to_line2: toLine2 || null,
@@ -438,16 +422,22 @@ export default function CRMDetailPage() {
     assigned_driver: driver || null, assigned_vehicle: vehicle || null,
   });
 
-  const handleSave = async () => {
+  const handleSaveSection = async () => {
     if (!fullName.trim()) { showToast('Full name is required', 'error'); return; }
-    setSaving(true);
+    setSectionSaving(true);
     try {
       const res = await api.put(`/crm/jobs/${id}`, buildSavePayload());
       setJob(res.data);
       setActivities(res.data.activities || []);
+      setEditingSection(null);
       showToast('Changes saved');
     } catch { showToast('Failed to save changes', 'error'); }
-    finally { setSaving(false); }
+    finally { setSectionSaving(false); }
+  };
+
+  const handleCancelSection = () => {
+    if (job) populate(job);
+    setEditingSection(null);
   };
 
   // ── Delete ──────────────────────────────────────────────────────────────────
@@ -489,7 +479,7 @@ export default function CRMDetailPage() {
     finally { setAddingNote(false); }
   };
 
-  // ── Add admin note ──────────────────────────────────────────────────────────
+  // ── Admin notes ─────────────────────────────────────────────────────────────
 
   const handleAddAdminNote = async () => {
     if (!adminNoteInput.trim()) return;
@@ -523,7 +513,7 @@ export default function CRMDetailPage() {
     finally { setDeletingAdminNoteId(null); }
   };
 
-  // ── Loading / error ──────────────────────────────────────────────────────────
+  // ── Loading ──────────────────────────────────────────────────────────────────
 
   if (loading) return (
     <CRMLayout>
@@ -533,6 +523,20 @@ export default function CRMDetailPage() {
     </CRMLayout>
   );
   if (!job) return null;
+
+  const sectionProps = (key: string) => ({
+    editing: editingSection === key,
+    onEdit: () => setEditingSection(key),
+    onSave: handleSaveSection,
+    onCancel: handleCancelSection,
+    saving: sectionSaving,
+  });
+
+  // ── Address display helper ─────────────────────────────────────────────────
+  const fmtAddress = (l1: string, l2: string, city: string, pc: string) => {
+    const parts = [l1, l2, city, pc].filter(Boolean);
+    return parts.length ? parts.join(', ') : null;
+  };
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -564,17 +568,10 @@ export default function CRMDetailPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setDeleteOpen(true)}
-            className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200">
-            <Trash2 className="w-4 h-4" /> Delete
-          </button>
-          <button onClick={handleSave} className="btn-primary" disabled={saving}>
-            {saving
-              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</>
-              : <><Save className="w-4 h-4" /> Save Changes</>}
-          </button>
-        </div>
+        <button onClick={() => setDeleteOpen(true)}
+          className="btn-secondary text-red-600 hover:bg-red-50 hover:border-red-200">
+          <Trash2 className="w-4 h-4" /> Delete
+        </button>
       </div>
 
       <PipelineBar status={status} saving={pipelineSaving} onChange={handlePipelineChange} />
@@ -585,230 +582,253 @@ export default function CRMDetailPage() {
         <div className="xl:col-span-2 space-y-5">
 
           {/* A. Client Details */}
-          <Section title="A. Client Details">
-            <div className="space-y-3">
-              <F label="Full Name *">
-                <input type="text" className="input" value={fullName} onChange={e => setFullName(e.target.value)} />
-              </F>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-3">
-                  <F label="Phone"><input type="tel" className="input" placeholder="—" value={phone} onChange={e => setPhone(e.target.value)} /></F>
-                  <F label="Alternative Phone"><input type="tel" className="input" placeholder="—" value={altPhone} onChange={e => setAltPhone(e.target.value)} /></F>
+          <Section title="A. Client Details" {...sectionProps('client')}>
+            {editingSection === 'client' ? (
+              <div className="space-y-3">
+                <F label="Full Name *">
+                  <input type="text" className="input" value={fullName} onChange={e => setFullName(e.target.value)} />
+                </F>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-3">
+                    <F label="Phone"><input type="tel" className="input" placeholder="—" value={phone} onChange={e => setPhone(e.target.value)} /></F>
+                    <F label="Alternative Phone"><input type="tel" className="input" placeholder="—" value={altPhone} onChange={e => setAltPhone(e.target.value)} /></F>
+                  </div>
+                  <div className="space-y-3">
+                    <F label="Email"><input type="email" className="input" placeholder="—" value={email} onChange={e => setEmail(e.target.value)} /></F>
+                    <F label="Alternative Email"><input type="email" className="input" placeholder="—" value={altEmail} onChange={e => setAltEmail(e.target.value)} /></F>
+                  </div>
                 </div>
-                <div className="space-y-3">
-                  <F label="Email"><input type="email" className="input" placeholder="—" value={email} onChange={e => setEmail(e.target.value)} /></F>
-                  <F label="Alternative Email"><input type="email" className="input" placeholder="—" value={altEmail} onChange={e => setAltEmail(e.target.value)} /></F>
-                </div>
+                <F label="Client Notes">
+                  <textarea className="input resize-none" rows={2} placeholder="Anything worth noting about this client…"
+                    value={clientNotes} onChange={e => setClientNotes(e.target.value)} />
+                </F>
               </div>
-              <F label="Client Notes">
-                <textarea className="input resize-none" rows={2} placeholder="Anything worth noting about this client…"
-                  value={clientNotes} onChange={e => setClientNotes(e.target.value)} />
-              </F>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                <ReadF label="Full Name" value={fullName} />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-3">
+                    <ReadF label="Phone" value={phone} />
+                    <ReadF label="Alternative Phone" value={altPhone} />
+                  </div>
+                  <div className="space-y-3">
+                    <ReadF label="Email" value={email} />
+                    <ReadF label="Alternative Email" value={altEmail} />
+                  </div>
+                </div>
+                <ReadF label="Client Notes" value={clientNotes} />
+              </div>
+            )}
           </Section>
 
           {/* C. Move Details */}
-          <Section title="C. Move Details">
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving Out</p>
-                  <input type="text" className="input" placeholder="Address line 1" value={fromLine1} onChange={e => setFromLine1(e.target.value)} />
-                  <input type="text" className="input" placeholder="Address line 2" value={fromLine2} onChange={e => setFromLine2(e.target.value)} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="text" className="input" placeholder="City" value={fromCity} onChange={e => setFromCity(e.target.value)} />
-                    <input type="text" className="input" placeholder="Postcode" value={fromPostcode} onChange={e => setFromPostcode(e.target.value)} />
+          <Section title="C. Move Details" {...sectionProps('move')}>
+            {editingSection === 'move' ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving Out</p>
+                    <input type="text" className="input" placeholder="Address line 1" value={fromLine1} onChange={e => setFromLine1(e.target.value)} />
+                    <input type="text" className="input" placeholder="Address line 2" value={fromLine2} onChange={e => setFromLine2(e.target.value)} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="text" className="input" placeholder="City" value={fromCity} onChange={e => setFromCity(e.target.value)} />
+                      <input type="text" className="input" placeholder="Postcode" value={fromPostcode} onChange={e => setFromPostcode(e.target.value)} />
+                    </div>
+                    <PropertyBlock label="Property Details"
+                      type={propTypeFrom} onTypeChange={v => { setPropTypeFrom(v); if (v !== 'Apartment / Flat') { setFloorFrom(''); setHasLiftFrom(false); } if (v !== 'Other') setPropTypeFromOther(''); }}
+                      floor={floorFrom} onFloorChange={setFloorFrom}
+                      hasLift={hasLiftFrom} onHasLiftChange={setHasLiftFrom}
+                      otherText={propTypeFromOther} onOtherTextChange={setPropTypeFromOther} />
+                    <select className="input" value={bedrooms} onChange={e => setBedrooms(e.target.value)}>
+                      <option value="">Bedrooms / Size…</option>
+                      {CRM_BEDROOM_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    <input type="text" className="input" placeholder="Parking / access notes…" value={parkingNotes} onChange={e => setParkingNotes(e.target.value)} />
                   </div>
-                  <PropertyBlock
-                    label="Property Details"
-                    type={propTypeFrom} onTypeChange={v => { setPropTypeFrom(v); if (v !== 'Apartment / Flat') { setFloorFrom(''); setHasLiftFrom(false); } if (v !== 'Other') setPropTypeFromOther(''); }}
-                    floor={floorFrom} onFloorChange={setFloorFrom}
-                    hasLift={hasLiftFrom} onHasLiftChange={setHasLiftFrom}
-                    otherText={propTypeFromOther} onOtherTextChange={setPropTypeFromOther}
-                  />
-                  <select className="input" value={bedrooms} onChange={e => setBedrooms(e.target.value)}>
-                    <option value="">Bedrooms / Size…</option>
-                    {CRM_BEDROOM_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                  <input type="text" className="input" placeholder="Parking / access notes…" value={parkingNotes} onChange={e => setParkingNotes(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving In</p>
-                  <input type="text" className="input" placeholder="Address line 1" value={toLine1} onChange={e => setToLine1(e.target.value)} />
-                  <input type="text" className="input" placeholder="Address line 2" value={toLine2} onChange={e => setToLine2(e.target.value)} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="text" className="input" placeholder="City" value={toCity} onChange={e => setToCity(e.target.value)} />
-                    <input type="text" className="input" placeholder="Postcode" value={toPostcode} onChange={e => setToPostcode(e.target.value)} />
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving In</p>
+                    <input type="text" className="input" placeholder="Address line 1" value={toLine1} onChange={e => setToLine1(e.target.value)} />
+                    <input type="text" className="input" placeholder="Address line 2" value={toLine2} onChange={e => setToLine2(e.target.value)} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="text" className="input" placeholder="City" value={toCity} onChange={e => setToCity(e.target.value)} />
+                      <input type="text" className="input" placeholder="Postcode" value={toPostcode} onChange={e => setToPostcode(e.target.value)} />
+                    </div>
+                    <PropertyBlock label="Property Details"
+                      type={propTypeTo} onTypeChange={v => { setPropTypeTo(v); if (v !== 'Apartment / Flat') { setFloorTo(''); setHasLiftTo(false); } if (v !== 'Other') setPropTypeToOther(''); }}
+                      floor={floorTo} onFloorChange={setFloorTo}
+                      hasLift={hasLiftTo} onHasLiftChange={setHasLiftTo}
+                      otherText={propTypeToOther} onOtherTextChange={setPropTypeToOther} />
+                    <select className="input" value={bedroomsTo} onChange={e => setBedroomsTo(e.target.value)}>
+                      <option value="">Bedrooms / Size…</option>
+                      {CRM_BEDROOM_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    <input type="text" className="input" placeholder="Parking / access notes…" value={parkingNotesTo} onChange={e => setParkingNotesTo(e.target.value)} />
                   </div>
-                  <PropertyBlock
-                    label="Property Details"
-                    type={propTypeTo} onTypeChange={v => { setPropTypeTo(v); if (v !== 'Apartment / Flat') { setFloorTo(''); setHasLiftTo(false); } if (v !== 'Other') setPropTypeToOther(''); }}
-                    floor={floorTo} onFloorChange={setFloorTo}
-                    hasLift={hasLiftTo} onHasLiftChange={setHasLiftTo}
-                    otherText={propTypeToOther} onOtherTextChange={setPropTypeToOther}
-                  />
-                  <select className="input" value={bedroomsTo} onChange={e => setBedroomsTo(e.target.value)}>
-                    <option value="">Bedrooms / Size…</option>
-                    {CRM_BEDROOM_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                  <input type="text" className="input" placeholder="Parking / access notes…" value={parkingNotesTo} onChange={e => setParkingNotesTo(e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <F label="Preferred Move Date">
+                    <input type="date" className="input" value={prefMoveDate} onChange={e => setPrefMoveDate(e.target.value)} />
+                  </F>
+                  <F label="Confirmed Move Date">
+                    <input type="date" className="input" value={confMoveDate} onChange={e => setConfMoveDate(e.target.value)} />
+                  </F>
+                </div>
+                <F label="Flexibility Notes">
+                  <input type="text" className="input" placeholder="e.g. Can move +/- 2 weeks either side"
+                    value={flexNotes} onChange={e => setFlexNotes(e.target.value)} />
+                </F>
+                <div className="border-t border-slate-100 pt-3 space-y-3">
+                  <F label="Move Type">
+                    <select className="input" value={moveType} onChange={e => setMoveType(e.target.value)}>
+                      <option value="">Select…</option>
+                      <option value="Rental to Rental">Rental to Rental</option>
+                      <option value="Rental to Purchase">Rental to Purchase</option>
+                      <option value="Sale to Rental">Sale to Rental</option>
+                      <option value="Sale to Purchase">Sale to Purchase</option>
+                    </select>
+                  </F>
+                  <Toggle value={isKeyWorker} onChange={setIsKeyWorker} label="Key Wait" />
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <F label="Preferred Move Date">
-                  <input type="date" className="input" value={prefMoveDate} onChange={e => setPrefMoveDate(e.target.value)} />
-                </F>
-                <F label="Confirmed Move Date">
-                  <input type="date" className="input" value={confMoveDate} onChange={e => setConfMoveDate(e.target.value)} />
-                </F>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving Out</p>
+                    <p className="text-sm text-slate-800">{fmtAddress(fromLine1, fromLine2, fromCity, fromPostcode) || <span className="italic text-slate-300">—</span>}</p>
+                    {propTypeFrom && <p className="text-xs text-slate-500">{propTypeFrom}{floorFrom ? `, Floor ${floorFrom}` : ''}{hasLiftFrom ? ', Lift' : ''}</p>}
+                    {bedrooms && <ReadF label="Size" value={bedrooms} />}
+                    {parkingNotes && <ReadF label="Parking" value={parkingNotes} />}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Moving In</p>
+                    <p className="text-sm text-slate-800">{fmtAddress(toLine1, toLine2, toCity, toPostcode) || <span className="italic text-slate-300">—</span>}</p>
+                    {propTypeTo && <p className="text-xs text-slate-500">{propTypeTo}{floorTo ? `, Floor ${floorTo}` : ''}{hasLiftTo ? ', Lift' : ''}</p>}
+                    {bedroomsTo && <ReadF label="Size" value={bedroomsTo} />}
+                    {parkingNotesTo && <ReadF label="Parking" value={parkingNotesTo} />}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <ReadF label="Preferred Move Date" value={fmtDate(prefMoveDate)} />
+                  <ReadF label="Confirmed Move Date" value={fmtDate(confMoveDate)} />
+                </div>
+                {flexNotes && <ReadF label="Flexibility Notes" value={flexNotes} />}
+                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-slate-100">
+                  <ReadF label="Move Type" value={moveType} />
+                  <ReadF label="Key Wait" value={isKeyWorker ? 'Yes' : 'No'} />
+                </div>
               </div>
-
-              <F label="Flexibility Notes">
-                <input type="text" className="input" placeholder="e.g. Can move +/- 2 weeks either side"
-                  value={flexNotes} onChange={e => setFlexNotes(e.target.value)} />
-              </F>
-
-              <div className="border-t border-slate-100 pt-3 space-y-3">
-                <F label="Move Type">
-                  <select className="input" value={moveType} onChange={e => setMoveType(e.target.value)}>
-                    <option value="">Select…</option>
-                    <option value="Rental to Rental">Rental to Rental</option>
-                    <option value="Rental to Purchase">Rental to Purchase</option>
-                    <option value="Sale to Rental">Sale to Rental</option>
-                    <option value="Sale to Purchase">Sale to Purchase</option>
-                  </select>
-                </F>
-                <Toggle value={isKeyWorker} onChange={setIsKeyWorker} label="Key Wait" />
-              </div>
-            </div>
+            )}
           </Section>
 
           {/* E. Operational Notes */}
-          <Section title="E. Operational Notes" accent="bg-orange-500">
-            <div className="space-y-4">
-
-              {/* Admin Notes */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="label mb-0">Admin Notes</label>
-                  {!showAdminInput && (
-                    <button type="button" onClick={() => setShowAdminInput(true)}
-                      className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1">
-                      <PlusCircle className="w-3.5 h-3.5" /> Add
-                    </button>
-                  )}
-                </div>
-
-                {/* Existing admin notes */}
-                {activities.filter(a => a.type === 'admin_note').length > 0 && (
-                  <div className="space-y-2 mb-3">
-                    {activities.filter(a => a.type === 'admin_note').map(a => (
-                      <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
-                        {editingAdminNoteId === a.id ? (
-                          <div className="space-y-2">
-                            <textarea
-                              className="input resize-none w-full text-sm"
-                              rows={3}
-                              value={editingAdminNoteText}
-                              onChange={e => setEditingAdminNoteText(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSaveAdminNote(a.id); }}
-                              autoFocus
-                            />
-                            <div className="flex gap-2">
-                              <button type="button" onClick={() => handleSaveAdminNote(a.id)}
-                                disabled={savingAdminNoteId === a.id || !editingAdminNoteText.trim()}
-                                className="btn-primary text-xs py-1.5 px-3">
-                                {savingAdminNoteId === a.id ? 'Saving…' : 'Save'}
+          <Section title="E. Operational Notes" accent="bg-orange-500" {...sectionProps('ops')}>
+            {/* Admin Notes — always inline editable */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="label mb-0">Admin Notes</label>
+                {!showAdminInput && (
+                  <button type="button" onClick={() => setShowAdminInput(true)}
+                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1">
+                    <PlusCircle className="w-3.5 h-3.5" /> Add
+                  </button>
+                )}
+              </div>
+              {activities.filter(a => a.type === 'admin_note').length > 0 && (
+                <div className="space-y-2 mb-3">
+                  {activities.filter(a => a.type === 'admin_note').map(a => (
+                    <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
+                      {editingAdminNoteId === a.id ? (
+                        <div className="space-y-2">
+                          <textarea className="input resize-none w-full text-sm" rows={3}
+                            value={editingAdminNoteText} onChange={e => setEditingAdminNoteText(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSaveAdminNote(a.id); }} autoFocus />
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => handleSaveAdminNote(a.id)}
+                              disabled={savingAdminNoteId === a.id || !editingAdminNoteText.trim()}
+                              className="btn-primary text-xs py-1.5 px-3">
+                              {savingAdminNoteId === a.id ? 'Saving…' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => setEditingAdminNoteId(null)} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm text-slate-800 flex-1">{a.note}</p>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button type="button" onClick={() => { setEditingAdminNoteId(a.id); setEditingAdminNoteText(a.note || ''); }}
+                                className="p-1 rounded hover:bg-amber-100 text-slate-400 hover:text-slate-600 transition-colors">
+                                <Pencil className="w-3.5 h-3.5" />
                               </button>
-                              <button type="button" onClick={() => setEditingAdminNoteId(null)}
-                                className="btn-secondary text-xs py-1.5 px-3">
-                                Cancel
+                              <button type="button" onClick={() => handleDeleteAdminNote(a.id)} disabled={deletingAdminNoteId === a.id}
+                                className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors">
+                                {deletingAdminNoteId === a.id
+                                  ? <span className="w-3.5 h-3.5 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" />
+                                  : <X className="w-3.5 h-3.5" />}
                               </button>
                             </div>
                           </div>
-                        ) : (
-                          <>
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-sm text-slate-800 flex-1">{a.note}</p>
-                              <div className="flex items-center gap-1 flex-shrink-0">
-                                <button type="button"
-                                  onClick={() => { setEditingAdminNoteId(a.id); setEditingAdminNoteText(a.note || ''); }}
-                                  className="p-1 rounded hover:bg-amber-100 text-slate-400 hover:text-slate-600 transition-colors">
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                                <button type="button"
-                                  onClick={() => handleDeleteAdminNote(a.id)}
-                                  disabled={deletingAdminNoteId === a.id}
-                                  className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors">
-                                  {deletingAdminNoteId === a.id
-                                    ? <span className="w-3.5 h-3.5 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" />
-                                    : <X className="w-3.5 h-3.5" />}
-                                </button>
-                              </div>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-1">
-                              {new Date(a.created_at).toLocaleDateString('en-GB', {
-                                day: 'numeric', month: 'short', year: 'numeric',
-                                hour: '2-digit', minute: '2-digit',
-                              })}
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add input */}
-                {showAdminInput && (
-                  <div className="space-y-2">
-                    <textarea
-                      className="input resize-none w-full"
-                      rows={3}
-                      placeholder="Type admin note…"
-                      value={adminNoteInput}
-                      onChange={e => setAdminNoteInput(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAddAdminNote(); }}
-                      autoFocus
-                    />
-                    <div className="flex gap-2">
-                      <button type="button" onClick={handleAddAdminNote} disabled={addingAdminNote || !adminNoteInput.trim()}
-                        className="btn-primary text-xs py-1.5 px-3">
-                        {addingAdminNote ? 'Adding…' : 'Add'}
-                      </button>
-                      <button type="button" onClick={() => { setShowAdminInput(false); setAdminNoteInput(''); }}
-                        className="btn-secondary text-xs py-1.5 px-3">
-                        Cancel
-                      </button>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </>
+                      )}
                     </div>
-                  </div>
-                )}
-
-                {activities.filter(a => a.type === 'admin_note').length === 0 && !showAdminInput && (
-                  <p className="text-xs text-slate-400 italic">No admin notes yet.</p>
-                )}
-              </div>
-
-              <div className="border-t border-slate-100 pt-3 space-y-3">
-                <F label="Staff Notes">
-                  <textarea className="input resize-none" rows={3} placeholder="Staff-only notes not shown to client…"
-                    value={internalNotes} onChange={e => setInternalNotes(e.target.value)} />
-                </F>
-                <F label="Special Handling Requirements">
-                  <textarea className="input resize-none" rows={2} placeholder="Piano, artwork, antiques, fragile items…"
-                    value={specialHandling} onChange={e => setSpecialHandling(e.target.value)} />
-                </F>
-                <F label="Access Restrictions">
-                  <textarea className="input resize-none" rows={2} placeholder="Narrow driveway, parking permit zone, building access times…"
-                    value={accessRestrict} onChange={e => setAccessRestrict(e.target.value)} />
-                </F>
-                <div className="grid grid-cols-3 gap-3 pt-1">
-                  <Toggle value={packingReq}     onChange={setPackingReq}     label="Packing" />
-                  <Toggle value={dismantlingReq} onChange={setDismantlingReq} label="Dismantling" />
-                  <Toggle value={storageReq}     onChange={setStorageReq}     label="Storage" />
+                  ))}
                 </div>
-              </div>
+              )}
+              {showAdminInput && (
+                <div className="space-y-2">
+                  <textarea className="input resize-none w-full" rows={3} placeholder="Type admin note…"
+                    value={adminNoteInput} onChange={e => setAdminNoteInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAddAdminNote(); }} autoFocus />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleAddAdminNote} disabled={addingAdminNote || !adminNoteInput.trim()} className="btn-primary text-xs py-1.5 px-3">
+                      {addingAdminNote ? 'Adding…' : 'Add'}
+                    </button>
+                    <button type="button" onClick={() => { setShowAdminInput(false); setAdminNoteInput(''); }} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
+                  </div>
+                </div>
+              )}
+              {activities.filter(a => a.type === 'admin_note').length === 0 && !showAdminInput && (
+                <p className="text-xs text-slate-400 italic">No admin notes yet.</p>
+              )}
+            </div>
+
+            <div className="border-t border-slate-100 pt-3 space-y-3">
+              {editingSection === 'ops' ? (
+                <>
+                  <F label="Staff Notes">
+                    <textarea className="input resize-none" rows={3} placeholder="Staff-only notes not shown to client…"
+                      value={internalNotes} onChange={e => setInternalNotes(e.target.value)} />
+                  </F>
+                  <F label="Special Handling Requirements">
+                    <textarea className="input resize-none" rows={2} placeholder="Piano, artwork, antiques, fragile items…"
+                      value={specialHandling} onChange={e => setSpecialHandling(e.target.value)} />
+                  </F>
+                  <F label="Access Restrictions">
+                    <textarea className="input resize-none" rows={2} placeholder="Narrow driveway, parking permit zone, building access times…"
+                      value={accessRestrict} onChange={e => setAccessRestrict(e.target.value)} />
+                  </F>
+                  <div className="grid grid-cols-3 gap-3 pt-1">
+                    <Toggle value={packingReq}     onChange={setPackingReq}     label="Packing" />
+                    <Toggle value={dismantlingReq} onChange={setDismantlingReq} label="Dismantling" />
+                    <Toggle value={storageReq}     onChange={setStorageReq}     label="Storage" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <ReadF label="Staff Notes" value={internalNotes} />
+                  <ReadF label="Special Handling" value={specialHandling} />
+                  <ReadF label="Access Restrictions" value={accessRestrict} />
+                  <div className="grid grid-cols-3 gap-3 pt-1">
+                    <ReadF label="Packing"      value={packingReq     ? 'Yes' : 'No'} />
+                    <ReadF label="Dismantling"  value={dismantlingReq ? 'Yes' : 'No'} />
+                    <ReadF label="Storage"      value={storageReq     ? 'Yes' : 'No'} />
+                  </div>
+                </>
+              )}
             </div>
           </Section>
         </div>
@@ -817,156 +837,165 @@ export default function CRMDetailPage() {
         <div className="space-y-5">
 
           {/* B. Lead / Referral */}
-          <Section title="B. Lead & Referral" accent="bg-violet-500">
-            <div className="space-y-3">
-              <F label="Status">
-                <select className="input" value={status} onChange={e => setStatus(e.target.value as CrmStatus)}>
-                  {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </F>
-              <F label="Lead Source">
-                {job.lead_id ? (
-                  <div className="input bg-slate-50 text-slate-600 flex items-center justify-between cursor-not-allowed select-none">
-                    <span>{leadSource || '—'}</span>
-                    <span className="text-xs text-slate-400 font-medium ml-2">Partner Portal</span>
-                  </div>
-                ) : (
-                  <select className="input" value={leadSource} onChange={e => setLeadSource(e.target.value)}>
-                    <option value="">Select…</option>
-                    {CRM_LEAD_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+          <Section title="B. Lead & Referral" accent="bg-violet-500" {...sectionProps('lead')}>
+            {editingSection === 'lead' ? (
+              <div className="space-y-3">
+                <F label="Status">
+                  <select className="input" value={status} onChange={e => setStatus(e.target.value as CrmStatus)}>
+                    {CRM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                )}
-              </F>
-              <F label="Referring Estate Agent">
-                {job.lead_id ? (
-                  <div className="input bg-slate-50 text-slate-600 flex items-center justify-between cursor-not-allowed select-none">
-                    <span>{estateAgent || '—'}</span>
-                    <span className="text-xs text-slate-400 font-medium ml-2">Locked</span>
-                  </div>
-                ) : (
-                  <input type="text" className="input" placeholder="Agency name"
-                    value={estateAgent} onChange={e => setEstateAgent(e.target.value)} />
-                )}
-              </F>
-              <F label="Internal Reference / Job ID">
-                <input type="text" className="input" placeholder="e.g. CRM-0012"
-                  value={internalRef} onChange={e => setInternalRef(e.target.value)} />
-              </F>
-
-              {/* Commission panel — only shown for estate agent referrals */}
-              {leadSource === 'Estate Agent Referral' && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
-                      Commission Due
-                    </p>
-                    {partnerCommissionRate && job?.quote_amount ? (
-                      <span className="text-sm font-bold text-amber-800">
-                        £{((job.quote_amount * parseFloat(partnerCommissionRate)) / 100).toFixed(2)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
+                </F>
+                <F label="Lead Source">
+                  {job.lead_id ? (
+                    <div className="input bg-slate-50 text-slate-600 flex items-center justify-between cursor-not-allowed select-none">
+                      <span>{leadSource || '—'}</span>
+                      <span className="text-xs text-slate-400 font-medium ml-2">Partner Portal</span>
+                    </div>
+                  ) : (
+                    <select className="input" value={leadSource} onChange={e => setLeadSource(e.target.value)}>
+                      <option value="">Select…</option>
+                      {CRM_LEAD_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  )}
+                </F>
+                <F label="Referring Estate Agent">
+                  {job.lead_id ? (
+                    <div className="input bg-slate-50 text-slate-600 flex items-center justify-between cursor-not-allowed select-none">
+                      <span>{estateAgent || '—'}</span>
+                      <span className="text-xs text-slate-400 font-medium ml-2">Locked</span>
+                    </div>
+                  ) : (
+                    <input type="text" className="input" placeholder="Agency name" value={estateAgent} onChange={e => setEstateAgent(e.target.value)} />
+                  )}
+                </F>
+                <F label="Internal Reference / Job ID">
+                  <input type="text" className="input" placeholder="e.g. CRM-0012" value={internalRef} onChange={e => setInternalRef(e.target.value)} />
+                </F>
+                {leadSource === 'Estate Agent Referral' && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Commission Due</p>
                     <div className="flex-1">
-                      <label className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
-                        Commission Rate (%)
-                        {job.lead_id && <span className="text-amber-500 font-normal normal-case tracking-normal">· set by partner portal</span>}
-                      </label>
+                      <label className="text-xs text-amber-700 font-medium">Commission Rate (%)</label>
                       {job.lead_id ? (
                         <div className="input mt-1 bg-amber-100/60 text-amber-900 font-semibold cursor-not-allowed select-none">
                           {partnerCommissionRate ? `${partnerCommissionRate}%` : '—'}
                         </div>
                       ) : (
-                        <input
-                          type="number"
-                          min="0" max="100" step="0.5"
-                          className="input mt-1 bg-white"
-                          placeholder="e.g. 10"
-                          value={partnerCommissionRate}
-                          onChange={e => setPartnerCommissionRate(e.target.value)}
-                        />
+                        <input type="number" min="0" max="100" step="0.5" className="input mt-1 bg-white" placeholder="e.g. 10"
+                          value={partnerCommissionRate} onChange={e => setPartnerCommissionRate(e.target.value)} />
                       )}
                     </div>
-                    {estateAgent && (
-                      <div className="flex-1">
-                        <p className="text-xs text-amber-700 font-medium">Agency</p>
-                        <p className="text-sm font-semibold text-amber-900 mt-1 truncate">{estateAgent}</p>
-                      </div>
-                    )}
                   </div>
-                  {partnerCommissionRate && job?.quote_amount && (
-                    <p className="text-xs text-amber-600">
-                      {partnerCommissionRate}% of £{job.quote_amount.toLocaleString()} quote
-                      {' '}= <strong>£{((job.quote_amount * parseFloat(partnerCommissionRate)) / 100).toFixed(2)}</strong> owed to {estateAgent || 'agent'}
-                    </p>
-                  )}
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs font-medium text-slate-400 mb-1">Status</p>
+                  <CrmBadge status={status} />
                 </div>
-              )}
-            </div>
+                <ReadF label="Lead Source" value={leadSource} />
+                <ReadF label="Referring Estate Agent" value={estateAgent} />
+                <ReadF label="Internal Reference" value={internalRef} />
+                {leadSource === 'Estate Agent Referral' && partnerCommissionRate && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-xs font-semibold text-amber-800 mb-1">Commission Due</p>
+                    <p className="text-sm font-bold text-amber-900">{partnerCommissionRate}%
+                      {job?.quote_amount ? ` = £${((job.quote_amount * parseFloat(partnerCommissionRate)) / 100).toFixed(2)}` : ''}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </Section>
 
           {/* D. Survey / Quote */}
-          <Section title="D. Survey & Quote" accent="bg-amber-500">
-            <div className="space-y-3">
-              <Toggle value={surveyRequired} onChange={setSurveyRequired} label="Survey required" />
-              {surveyRequired && (
-                <>
-                  <F label="Survey Type">
-                    <select className="input" value={surveyType} onChange={e => setSurveyType(e.target.value)}>
-                      <option value="">Select…</option>
-                      {CRM_SURVEY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </F>
-                  <F label="Survey Date">
-                    <input type="date" className="input" value={surveyDate} onChange={e => setSurveyDate(e.target.value)} />
-                  </F>
-                </>
-              )}
-              <F label="Quote Amount (£)">
-                <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
-                  value={quoteAmount} onChange={e => setQuoteAmount(e.target.value)} />
-              </F>
-              <F label="Quote Sent Date">
-                <input type="date" className="input" value={quoteSentDate} onChange={e => setQuoteSentDate(e.target.value)} />
-              </F>
-              <div className="space-y-2.5 pt-1">
-                <Toggle value={quoteAccepted}   onChange={setQuoteAccepted}   label="Quote accepted" />
-                <Toggle value={depositRequired} onChange={setDepositRequired} label="Deposit required" />
-                <Toggle value={depositPaid}     onChange={setDepositPaid}     label="Deposit paid" />
+          <Section title="D. Survey & Quote" accent="bg-amber-500" {...sectionProps('survey')}>
+            {editingSection === 'survey' ? (
+              <div className="space-y-3">
+                <Toggle value={surveyRequired} onChange={setSurveyRequired} label="Survey required" />
+                {surveyRequired && (
+                  <>
+                    <F label="Survey Type">
+                      <select className="input" value={surveyType} onChange={e => setSurveyType(e.target.value)}>
+                        <option value="">Select…</option>
+                        {CRM_SURVEY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </F>
+                    <F label="Survey Date">
+                      <input type="date" className="input" value={surveyDate} onChange={e => setSurveyDate(e.target.value)} />
+                    </F>
+                  </>
+                )}
+                <F label="Quote Amount (£)">
+                  <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
+                    value={quoteAmount} onChange={e => setQuoteAmount(e.target.value)} />
+                </F>
+                <F label="Quote Sent Date">
+                  <input type="date" className="input" value={quoteSentDate} onChange={e => setQuoteSentDate(e.target.value)} />
+                </F>
+                <div className="space-y-2.5 pt-1">
+                  <Toggle value={quoteAccepted}   onChange={setQuoteAccepted}   label="Quote accepted" />
+                  <Toggle value={depositRequired} onChange={setDepositRequired} label="Deposit required" />
+                  <Toggle value={depositPaid}     onChange={setDepositPaid}     label="Deposit paid" />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                <ReadF label="Survey Required" value={surveyRequired ? 'Yes' : 'No'} />
+                {surveyRequired && (
+                  <>
+                    <ReadF label="Survey Type" value={surveyType} />
+                    <ReadF label="Survey Date" value={fmtDate(surveyDate)} />
+                  </>
+                )}
+                <ReadF label="Quote Amount" value={quoteAmount ? fmt(parseFloat(quoteAmount)) : null} />
+                <ReadF label="Quote Sent Date" value={fmtDate(quoteSentDate)} />
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  <ReadF label="Quote Accepted"  value={quoteAccepted   ? 'Yes' : 'No'} />
+                  <ReadF label="Deposit Req."    value={depositRequired ? 'Yes' : 'No'} />
+                  <ReadF label="Deposit Paid"    value={depositPaid     ? 'Yes' : 'No'} />
+                </div>
+              </div>
+            )}
           </Section>
 
           {/* Staff Assignment */}
-          <Section title="Staff Assignment" accent="bg-slate-400">
-            <div className="space-y-3">
-              <F label="Assigned Surveyor">
-                <input type="text" className="input" placeholder="Name" value={surveyor} onChange={e => setSurveyor(e.target.value)} />
-              </F>
-              <F label="Assigned Mover / Crew Lead">
-                <input type="text" className="input" placeholder="Name" value={mover} onChange={e => setMover(e.target.value)} />
-              </F>
-              <div className="grid grid-cols-2 gap-2">
-                <F label="Driver">
-                  <input type="text" className="input" placeholder="Name" value={driver} onChange={e => setDriver(e.target.value)} />
+          <Section title="Staff Assignment" accent="bg-slate-400" {...sectionProps('staff')}>
+            {editingSection === 'staff' ? (
+              <div className="space-y-3">
+                <F label="Assigned Surveyor">
+                  <input type="text" className="input" placeholder="Name" value={surveyor} onChange={e => setSurveyor(e.target.value)} />
                 </F>
-                <F label="Vehicle">
-                  <input type="text" className="input" placeholder="Reg / Type" value={vehicle} onChange={e => setVehicle(e.target.value)} />
+                <F label="Assigned Mover / Crew Lead">
+                  <input type="text" className="input" placeholder="Name" value={mover} onChange={e => setMover(e.target.value)} />
                 </F>
+                <div className="grid grid-cols-2 gap-2">
+                  <F label="Driver">
+                    <input type="text" className="input" placeholder="Name" value={driver} onChange={e => setDriver(e.target.value)} />
+                  </F>
+                  <F label="Vehicle">
+                    <input type="text" className="input" placeholder="Reg / Type" value={vehicle} onChange={e => setVehicle(e.target.value)} />
+                  </F>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                <ReadF label="Assigned Surveyor" value={surveyor} />
+                <ReadF label="Assigned Mover / Crew Lead" value={mover} />
+                <div className="grid grid-cols-2 gap-2">
+                  <ReadF label="Driver" value={driver} />
+                  <ReadF label="Vehicle" value={vehicle} />
+                </div>
+              </div>
+            )}
 
-            {/* Planner assignments */}
             {plannerAssignments.length > 0 && (
               <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                  Planner Assignments
-                </p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Planner Assignments</p>
                 <div className="space-y-1.5">
                   {plannerAssignments.map(a => (
-                    <div key={a.id} className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium ${
-                      a.asset_type === 'staff' ? 'bg-indigo-50 text-indigo-700' : 'bg-teal-50 text-teal-700'
-                    }`}>
+                    <div key={a.id} className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium ${a.asset_type === 'staff' ? 'bg-indigo-50 text-indigo-700' : 'bg-teal-50 text-teal-700'}`}>
                       <div className="flex items-center gap-2">
                         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.asset_type === 'staff' ? 'bg-indigo-400' : 'bg-teal-400'}`} />
                         <span>{a.asset_name}</span>
@@ -975,15 +1004,10 @@ export default function CRMDetailPage() {
                           {new Date(a.assigned_date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                         </span>
                       </div>
-                      <button
-                        onClick={async () => {
-                          try {
-                            await api.delete(`/planner/assignments/${a.id}`);
-                            setPlannerAssignments(prev => prev.filter(x => x.id !== a.id));
-                          } catch { /* silent */ }
-                        }}
-                        className="opacity-50 hover:opacity-100 ml-2"
-                      >
+                      <button onClick={async () => {
+                        try { await api.delete(`/planner/assignments/${a.id}`); setPlannerAssignments(prev => prev.filter(x => x.id !== a.id)); }
+                        catch { /* silent */ }
+                      }} className="opacity-50 hover:opacity-100 ml-2">
                         <X className="w-3 h-3" />
                       </button>
                     </div>
@@ -1012,17 +1036,10 @@ export default function CRMDetailPage() {
               )}
             </div>
           </Section>
-
-          {/* Save shortcut */}
-          <button onClick={handleSave} className="btn-primary w-full justify-center" disabled={saving}>
-            {saving
-              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</>
-              : <><Save className="w-4 h-4" /> Save Changes</>}
-          </button>
         </div>
       </div>
 
-      {/* ── F. Activity Timeline (full width) ────────────────────────────── */}
+      {/* ── F. Activity Timeline ──────────────────────────────────────────── */}
       <div className="card mt-6">
         <div className="px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
@@ -1030,7 +1047,6 @@ export default function CRMDetailPage() {
             F. Activity Timeline
           </h2>
         </div>
-
         <div ref={timelineRef} className="px-5 py-4 max-h-96 overflow-y-auto">
           {activities.filter(a => a.type !== 'admin_note').length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-6">No activity recorded yet.</p>
@@ -1040,26 +1056,13 @@ export default function CRMDetailPage() {
             </div>
           )}
         </div>
-
-        {/* Add note */}
         <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
           <div className="flex gap-2">
-            <input
-              type="text"
-              className="input flex-1"
-              placeholder="Add a note to the timeline…"
-              value={noteText}
-              onChange={e => setNoteText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddNote(); } }}
-            />
-            <button
-              onClick={handleAddNote}
-              className="btn-secondary flex-shrink-0"
-              disabled={!noteText.trim() || addingNote}
-            >
-              {addingNote
-                ? <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
-                : <Send className="w-4 h-4" />}
+            <input type="text" className="input flex-1" placeholder="Add a note to the timeline…"
+              value={noteText} onChange={e => setNoteText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddNote(); } }} />
+            <button onClick={handleAddNote} className="btn-secondary flex-shrink-0" disabled={!noteText.trim() || addingNote}>
+              {addingNote ? <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
             </button>
           </div>
           <p className="text-xs text-slate-400 mt-1.5">Press Enter to submit · Status changes are logged automatically</p>
@@ -1069,15 +1072,11 @@ export default function CRMDetailPage() {
       {/* Delete modal */}
       <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete CRM Record" size="sm">
         <div className="py-2">
-          <p className="text-sm text-slate-600 mb-1">
-            Delete <span className="font-semibold text-slate-900">{job.full_name}</span>?
-          </p>
+          <p className="text-sm text-slate-600 mb-1">Delete <span className="font-semibold text-slate-900">{job.full_name}</span>?</p>
           <p className="text-sm text-slate-400 mb-6">All activity history will also be permanently removed.</p>
           <div className="flex gap-3 justify-end">
             <button className="btn-secondary" onClick={() => setDeleteOpen(false)}>Cancel</button>
-            <button className="btn-danger" onClick={handleDelete} disabled={deleting}>
-              {deleting ? 'Deleting…' : 'Delete Record'}
-            </button>
+            <button className="btn-danger" onClick={handleDelete} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete Record'}</button>
           </div>
         </div>
       </Modal>
