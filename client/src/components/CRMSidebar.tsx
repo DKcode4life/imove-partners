@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
+import { getSurface, surfaceUrl } from '../lib/surface';
 import type { JobStatusSetting } from '../types';
 
 // Shown immediately and replaced by API data once loaded
@@ -71,6 +72,23 @@ export default function CRMSidebar() {
     logout();
     navigate('/login');
   };
+
+  const surface = getSurface();
+  const [switchingToPartners, setSwitchingToPartners] = useState(false);
+
+  // On crm.*, the Partner Portal lives on a different subdomain. Issue a
+  // one-shot handoff token and bounce so the admin lands already signed in.
+  async function switchToPartners() {
+    if (switchingToPartners) return;
+    setSwitchingToPartners(true);
+    try {
+      const r = await api.post('/auth/handoff');
+      const dest = surfaceUrl('partners', `/auth/handoff?t=${encodeURIComponent(r.data.token)}`);
+      window.location.assign(dest);
+    } catch {
+      window.location.assign(surfaceUrl('partners', '/admin/dashboard'));
+    }
+  }
 
   const toggle = () => {
     setCollapsed(c => {
@@ -195,16 +213,30 @@ export default function CRMSidebar() {
 
       {/* Bottom: back + user + logout */}
       <div className={`border-t border-slate-700/60 p-2 space-y-0.5 ${collapsed ? 'flex flex-col items-center gap-1' : 'p-3'}`}>
-        <Link
-          to="/admin/dashboard"
-          title={collapsed ? 'Partner Portal' : undefined}
-          className={`flex items-center rounded-lg text-sm font-medium text-slate-400 hover:bg-white/5 hover:text-white transition-colors ${
-            collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'
-          }`}
-        >
-          <ArrowLeftCircle className="w-5 h-5" />
-          {!collapsed && 'Partner Portal'}
-        </Link>
+        {surface === 'crm' ? (
+          <button
+            onClick={switchToPartners}
+            disabled={switchingToPartners}
+            title={collapsed ? 'Partner Portal' : undefined}
+            className={`w-full flex items-center rounded-lg text-sm font-medium text-slate-400 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-60 ${
+              collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'
+            }`}
+          >
+            <ArrowLeftCircle className="w-5 h-5" />
+            {!collapsed && (switchingToPartners ? 'Switching…' : 'Partner Portal')}
+          </button>
+        ) : (
+          <Link
+            to="/admin/dashboard"
+            title={collapsed ? 'Partner Portal' : undefined}
+            className={`flex items-center rounded-lg text-sm font-medium text-slate-400 hover:bg-white/5 hover:text-white transition-colors ${
+              collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'
+            }`}
+          >
+            <ArrowLeftCircle className="w-5 h-5" />
+            {!collapsed && 'Partner Portal'}
+          </Link>
+        )}
 
         {!collapsed ? (
           <div className="flex items-center gap-3 px-2 py-2 mt-1">
