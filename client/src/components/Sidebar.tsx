@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, ClipboardList, Users, LogOut, PoundSterling, Settings, Briefcase, ChevronLeft, ChevronRight,
+  LayoutDashboard, ClipboardList, Users, LogOut, PoundSterling, Settings, Briefcase, ChevronLeft, ChevronRight, ArrowLeftRight,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
+import { getSurface, surfaceUrl } from '../lib/surface';
 
 interface NavItem {
   to: string;
@@ -22,7 +23,6 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
   { to: '/admin/leads',     label: 'All Leads',  icon: <ClipboardList className="w-5 h-5" /> },
   { to: '/admin/partners',  label: 'Partners',   icon: <Users className="w-5 h-5" /> },
-  { to: '/admin/crm',       label: 'iMove CRM',  icon: <Briefcase className="w-5 h-5" /> },
 ];
 
 const STATUS_ORDER = [
@@ -64,6 +64,24 @@ export default function Sidebar() {
     logout();
     navigate('/login');
   };
+
+  const surface = getSurface();
+  const [switching, setSwitching] = useState<null | 'partners' | 'crm'>(null);
+
+  // Hands the admin off to the sibling subdomain with a one-shot token, so they
+  // arrive already signed in. Falls back to a plain redirect on failure.
+  async function switchSurface(target: 'partners' | 'crm') {
+    if (switching) return;
+    setSwitching(target);
+    try {
+      const r = await api.post('/auth/handoff');
+      const dest = surfaceUrl(target, `/auth/handoff?t=${encodeURIComponent(r.data.token)}`);
+      window.location.assign(dest);
+    } catch {
+      const fallbackPath = target === 'crm' ? '/admin/crm' : '/admin/dashboard';
+      window.location.assign(surfaceUrl(target, fallbackPath));
+    }
+  }
 
   const toggle = () => {
     setCollapsed(c => {
@@ -163,6 +181,55 @@ export default function Sidebar() {
 
       {/* User info + logout */}
       <div className={`border-t border-slate-100 p-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'p-3'}`}>
+        {/* Surface-aware switch (admin only).
+            - crm.*       → "Partners Portal" handoff button
+            - partners.*  → "iMove CRM" handoff button
+            - unknown/dev → in-app NavLink to /admin/crm (legacy single domain) */}
+        {user?.role === 'admin' && surface === 'crm' && (
+          <button
+            onClick={() => switchSurface('partners')}
+            disabled={switching !== null}
+            title={collapsed ? 'Switch to Partners Portal' : undefined}
+            className={`w-full flex items-center rounded-lg text-sm font-medium transition-colors mb-1 disabled:opacity-60 ${
+              collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'
+            } text-slate-500 hover:bg-slate-50 hover:text-slate-900`}
+          >
+            <ArrowLeftRight className="w-5 h-5" />
+            {!collapsed && (switching === 'partners' ? 'Switching…' : 'Partners Portal')}
+          </button>
+        )}
+        {user?.role === 'admin' && surface === 'partners' && (
+          <button
+            onClick={() => switchSurface('crm')}
+            disabled={switching !== null}
+            title={collapsed ? 'Switch to iMove CRM' : undefined}
+            className={`w-full flex items-center rounded-lg text-sm font-medium transition-colors mb-1 disabled:opacity-60 ${
+              collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'
+            } text-slate-500 hover:bg-slate-50 hover:text-slate-900`}
+          >
+            <Briefcase className="w-5 h-5" />
+            {!collapsed && (switching === 'crm' ? 'Switching…' : 'iMove CRM')}
+          </button>
+        )}
+        {user?.role === 'admin' && surface === 'unknown' && (
+          <NavLink
+            to="/admin/crm"
+            title={collapsed ? 'iMove CRM' : undefined}
+            className={({ isActive }) =>
+              `flex items-center rounded-lg text-sm font-medium transition-colors mb-1 ${
+                collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2'
+              } ${
+                isActive
+                  ? 'bg-brand-50 text-brand-700'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+              }`
+            }
+          >
+            <Briefcase className="w-5 h-5" />
+            {!collapsed && 'iMove CRM'}
+          </NavLink>
+        )}
+
         {/* Settings — partner only */}
         {user?.role === 'partner' && (
           <NavLink

@@ -9,11 +9,34 @@ for (const key of required) {
   }
 }
 
+// Comma-separated list of allowed CORS origins in production.
+// Defaults cover the two myimove.co.uk subdomains; override via CORS_ORIGINS to extend.
+const PROD_DEFAULT_ORIGINS = [
+  'https://partners.myimove.co.uk',
+  'https://crm.myimove.co.uk',
+];
+const DEV_DEFAULT_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+function parseOrigins(raw, fallback) {
+  if (!raw) return fallback;
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+const env = process.env.NODE_ENV || 'development';
+
 module.exports = {
-  env: process.env.NODE_ENV || 'development',
+  env,
   port: parseInt(process.env.PORT || '3001', 10),
   databaseUrl: process.env.DATABASE_URL,
   jwtSecret: process.env.JWT_SECRET,
+
+  corsOrigins: parseOrigins(
+    process.env.CORS_ORIGINS,
+    env === 'production' ? PROD_DEFAULT_ORIGINS : DEV_DEFAULT_ORIGINS,
+  ),
 
   email: {
     provider: process.env.EMAIL_PROVIDER || '',

@@ -2,10 +2,21 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { getSurface, surfaceUrl } from '../lib/surface';
+import { defaultLandingFor } from '../lib/landing';
+
+const SURFACE_COPY = {
+  partners: { title: 'Partner Portal', subtitle: 'Sign in to your partner account' },
+  crm: { title: 'iMove CRM', subtitle: 'Sign in to manage operations' },
+  unknown: { title: 'Partner Portal', subtitle: 'Sign in to your account' },
+} as const;
 
 export default function Login() {
-  const { login, user, loading } = useAuth();
+  const { login, logout, user, loading } = useAuth();
   const navigate = useNavigate();
+
+  const surface = getSurface();
+  const copy = SURFACE_COPY[surface];
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,10 +24,20 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!loading && user) {
-      navigate(user.role === 'admin' ? '/admin/dashboard' : '/partner/dashboard', { replace: true });
+    if (loading || !user) return;
+    // Partners are not allowed on crm.*; bounce them to partners.*.
+    if (surface === 'crm' && user.role === 'partner') {
+      logout();
+      window.location.assign(surfaceUrl('partners', '/login'));
+      return;
     }
-  }, [user, loading, navigate]);
+    const dest = defaultLandingFor(user.role);
+    if (/^https?:\/\//.test(dest)) {
+      window.location.assign(dest);
+    } else {
+      navigate(dest, { replace: true });
+    }
+  }, [user, loading, navigate, surface, logout]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,13 +71,13 @@ export default function Login() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-900 leading-none">iMove</h1>
-              <p className="text-xs text-slate-400 leading-none mt-0.5">Partner Portal</p>
+              <p className="text-xs text-slate-400 leading-none mt-0.5">{copy.title}</p>
             </div>
           </div>
 
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-slate-900">Welcome back</h2>
-            <p className="text-sm text-slate-500 mt-1">Sign in to your partner account</p>
+            <p className="text-sm text-slate-500 mt-1">{copy.subtitle}</p>
           </div>
 
           {error && (
@@ -116,17 +137,36 @@ export default function Login() {
             </button>
           </form>
 
-          {/* Demo credentials */}
-          <div className="mt-6 pt-6 border-t border-slate-100">
-            <p className="text-xs font-medium text-slate-500 mb-2">Demo credentials:</p>
-            <div className="text-xs text-slate-500">
-              <div className="bg-slate-50 rounded-lg px-3 py-2">
-                <p className="font-semibold text-slate-700 mb-0.5">Partner</p>
-                <p>john@premierproperties.co.uk</p>
-                <p>partner123</p>
+          {/* Demo credentials — partner-only surface */}
+          {surface !== 'crm' && (
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <p className="text-xs font-medium text-slate-500 mb-2">Demo credentials:</p>
+              <div className="text-xs text-slate-500">
+                <div className="bg-slate-50 rounded-lg px-3 py-2">
+                  <p className="font-semibold text-slate-700 mb-0.5">Partner</p>
+                  <p>john@premierproperties.co.uk</p>
+                  <p>partner123</p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Cross-surface hint */}
+          {surface === 'crm' && (
+            <div className="mt-6 pt-6 border-t border-slate-100 text-xs text-slate-500">
+              Looking for the Partner Portal?{' '}
+              <a href={surfaceUrl('partners', '/login')} className="text-brand-600 font-semibold hover:underline">
+                Go to partners.myimove.co.uk
+              </a>
+            </div>
+          )}
+          {surface === 'partners' && (
+            <div className="mt-4 text-xs text-slate-500 text-center">
+              <a href={surfaceUrl('crm', '/login')} className="text-slate-400 hover:text-slate-600 hover:underline">
+                Admins: open iMove CRM →
+              </a>
+            </div>
+          )}
         </div>
 
         <p className="text-center text-xs text-white/40 mt-4">

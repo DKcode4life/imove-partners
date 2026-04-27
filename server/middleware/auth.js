@@ -8,12 +8,19 @@ function authenticate(req, res, next) {
   }
 
   const token = authHeader.slice(7);
+  let claims;
   try {
-    req.user = jwt.verify(token, config.jwtSecret);
-    next();
+    claims = jwt.verify(token, config.jwtSecret);
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
+  // Handoff tokens are short-lived and meant only for /api/auth/exchange,
+  // never to authenticate a normal API request.
+  if (claims.handoff) {
+    return res.status(401).json({ error: 'Handoff token cannot be used as a session' });
+  }
+  req.user = claims;
+  next();
 }
 
 function requireAdmin(req, res, next) {

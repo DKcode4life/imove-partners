@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserRole } from '../types';
+import { defaultLandingFor } from '../lib/landing';
 
 interface Props {
   role: UserRole;
@@ -23,9 +25,23 @@ export default function ProtectedRoute({ role }: Props) {
   if (!user) return <Navigate to="/login" replace />;
 
   if (user.role !== role) {
-    // Redirect to the correct dashboard
-    return <Navigate to={user.role === 'admin' ? '/admin/dashboard' : '/partner/dashboard'} replace />;
+    return <RoleMismatchRedirect role={user.role} />;
   }
 
   return <Outlet />;
+}
+
+// Renders nothing while bouncing the user to their natural landing surface.
+// If the destination is an absolute URL (cross-subdomain), use a hard
+// navigation; otherwise use SPA navigation.
+function RoleMismatchRedirect({ role }: { role: UserRole }) {
+  const dest = defaultLandingFor(role);
+  const isAbsolute = /^https?:\/\//.test(dest);
+
+  useEffect(() => {
+    if (isAbsolute) window.location.assign(dest);
+  }, [dest, isAbsolute]);
+
+  if (isAbsolute) return null;
+  return <Navigate to={dest} replace />;
 }

@@ -17,7 +17,12 @@ const syncCustomers = require('./lib/sync-customers');
 const app = express();
 
 app.use(cors({
-  origin: config.env === 'production' ? true : ['http://localhost:5173', 'http://localhost:3000'],
+  origin: (origin, cb) => {
+    // Allow same-origin / non-CORS requests (server-side, curl, native apps)
+    if (!origin) return cb(null, true);
+    if (config.corsOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '5mb' }));

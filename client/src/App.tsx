@@ -1,8 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import { getSurface } from './lib/surface';
 
 import Login from './pages/Login';
+import AuthHandoff from './pages/AuthHandoff';
 
 // Partner pages
 import PartnerDashboard from './pages/partner/Dashboard';
@@ -26,35 +28,54 @@ import AdminCRMPlanner from './pages/admin/CRMPlanner';
 import AdminCRMSettings from './pages/admin/CRMSettings';
 
 export default function App() {
+  // Subdomain-aware route gating:
+  //   partners.* → Partner Portal pages + admin partner-management pages
+  //   crm.*      → CRM pages only
+  //   anything else (localhost, legacy single domain) → everything (dev fallback)
+  const surface = getSurface();
+  const showPartnerPortal = surface !== 'crm';
+  const showCrm = surface !== 'partners';
+
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/auth/handoff" element={<AuthHandoff />} />
 
           {/* Partner routes */}
-          <Route element={<ProtectedRoute role="partner" />}>
-            <Route path="/partner/dashboard" element={<PartnerDashboard />} />
-            <Route path="/partner/leads" element={<PartnerLeads />} />
-            <Route path="/partner/leads/new" element={<PartnerSubmitLead />} />
-            <Route path="/partner/leads/:id" element={<PartnerLeadDetail />} />
-            <Route path="/partner/commissions" element={<PartnerCommissions />} />
-            <Route path="/partner/settings" element={<PartnerSettings />} />
-          </Route>
+          {showPartnerPortal && (
+            <Route element={<ProtectedRoute role="partner" />}>
+              <Route path="/partner/dashboard" element={<PartnerDashboard />} />
+              <Route path="/partner/leads" element={<PartnerLeads />} />
+              <Route path="/partner/leads/new" element={<PartnerSubmitLead />} />
+              <Route path="/partner/leads/:id" element={<PartnerLeadDetail />} />
+              <Route path="/partner/commissions" element={<PartnerCommissions />} />
+              <Route path="/partner/settings" element={<PartnerSettings />} />
+            </Route>
+          )}
 
-          {/* Admin routes */}
+          {/* Admin routes — split by surface */}
           <Route element={<ProtectedRoute role="admin" />}>
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/leads" element={<AdminAllLeads />} />
-            <Route path="/admin/leads/:id" element={<AdminLeadDetail />} />
-            <Route path="/admin/partners" element={<AdminPartners />} />
-            <Route path="/admin/crm" element={<AdminCRM />} />
-            <Route path="/admin/crm/jobs" element={<AdminCRMJobs />} />
-            <Route path="/admin/crm/planner" element={<AdminCRMPlanner />} />
-            <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
-            <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />
-            <Route path="/admin/crm/settings" element={<AdminCRMSettings />} />
-            <Route path="/admin/crm/:id" element={<AdminCRMDetail />} />
+            {showPartnerPortal && (
+              <>
+                <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                <Route path="/admin/leads" element={<AdminAllLeads />} />
+                <Route path="/admin/leads/:id" element={<AdminLeadDetail />} />
+                <Route path="/admin/partners" element={<AdminPartners />} />
+              </>
+            )}
+            {showCrm && (
+              <>
+                <Route path="/admin/crm" element={<AdminCRM />} />
+                <Route path="/admin/crm/jobs" element={<AdminCRMJobs />} />
+                <Route path="/admin/crm/planner" element={<AdminCRMPlanner />} />
+                <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
+                <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />
+                <Route path="/admin/crm/settings" element={<AdminCRMSettings />} />
+                <Route path="/admin/crm/:id" element={<AdminCRMDetail />} />
+              </>
+            )}
           </Route>
 
           {/* Root redirect handled in ProtectedRoute */}

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -7,6 +8,23 @@ const { authenticate } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 
 const router = express.Router();
+
+// Single-use jti tracking for handoff tokens. Bounded by token expiry (60s);
+// we keep entries for 5 min as a safety buffer, then drop them.
+const usedHandoffJti = new Set();
+const HANDOFF_JTI_TTL_MS = 5 * 60 * 1000;
+
+function buildSessionPayload(user, partner) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    avatar: user.avatar || null,
+    partnerId: partner?.id ?? null,
+    agencyName: partner?.agency_name ?? null,
+  };
+}
 
 // POST /api/auth/login
 router.post('/login', wrap(async (req, res) => {
@@ -26,18 +44,61 @@ router.post('/login', wrap(async (req, res) => {
     }
   }
 
-  const payload = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    avatar: user.avatar || null,
-    partnerId: partner?.id ?? null,
-    agencyName: partner?.agency_name ?? null,
-  };
+  const payload = buildSessionPayload(user, partner);
 
   const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
   res.json({ token, user: payload });
+}));
+
+// POST /api/auth/handoff
+// Authenticated. Issues a short-lived single-use JWT so an admin can cross
+// from one subdomain (crm.* / partners.*) to the other without re-logging in.
+router.post('/handoff', authenticate, wrap(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can hand off between surfaces' });
+  }
+  const handoffPayload = {
+    id: req.user.id,
+    handoff: true,
+    jti: crypto.randomBytes(16).toString('hex'),
+  };
+  const token = jwt.sign(handoffPayload, config.jwtSecret, { expiresIn: '60s' });
+  res.json({ token });
+}));
+
+// POST /api/auth/exchange
+// Public. Accepts a handoff token, returns a normal session token.
+router.post('/exchange', wrap(async (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'Missing handoff token' });
+
+  let claims;
+  try {
+    claims = jwt.verify(token, config.jwtSecret);
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired handoff token' });
+  }
+  if (!claims.handoff || !claims.jti || !claims.id) {
+    return res.status(400).json({ error: 'Not a handoff token' });
+  }
+  if (usedHandoffJti.has(claims.jti)) {
+    return res.status(401).json({ error: 'Handoff token already used' });
+  }
+  usedHandoffJti.add(claims.jti);
+  const t = setTimeout(() => usedHandoffJti.delete(claims.jti), HANDOFF_JTI_TTL_MS);
+  if (typeof t.unref === 'function') t.unref();
+
+  const user = await prisma.user.findUnique({ where: { id: claims.id } });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  let partner = null;
+  if (user.role === 'partner') {
+    partner = await prisma.partner.findUnique({ where: { user_id: user.id } });
+  }
+
+  const payload = buildSessionPayload(user, partner);
+  const sessionToken = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
+  res.json({ token: sessionToken, user: payload });
 }));
 
 // GET /api/auth/me
