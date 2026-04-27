@@ -484,17 +484,21 @@ function AssignmentChip({
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity select-none ${
-        onDragStart ? 'cursor-grab active:cursor-grabbing active:opacity-50' : ''
-      } ${a.asset_type === 'staff' ? 'bg-indigo-100 text-indigo-700' : 'bg-teal-100 text-teal-700'}`}
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold transition-all duration-150 select-none border shadow-sm ${
+        onDragStart ? 'cursor-grab active:cursor-grabbing active:scale-95 hover:shadow-md hover:-translate-y-px' : ''
+      } ${
+        a.asset_type === 'staff'
+          ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 border-indigo-200/70'
+          : 'bg-gradient-to-br from-teal-50 to-teal-100 text-teal-700 border-teal-200/70'
+      }`}
     >
-      <GripVertical className="w-2.5 h-2.5 opacity-30" />
+      <GripVertical className="w-2.5 h-2.5 opacity-40" />
       {a.asset_type === 'staff' ? <Users className="w-3 h-3" /> : <Truck className="w-3 h-3" />}
-      {a.asset_name}
-      {a.asset_role && <span className="text-[10px] opacity-60 ml-0.5 capitalize">({a.asset_role})</span>}
+      <span className="tracking-tight">{a.asset_name}</span>
+      {a.asset_role && <span className="text-[10px] opacity-60 ml-0.5 capitalize font-medium">({a.asset_role})</span>}
       <button
         onClick={e => { e.stopPropagation(); onRemove(); }}
-        className="ml-0.5 opacity-60 hover:opacity-100"
+        className="ml-0.5 opacity-50 hover:opacity-100 hover:text-red-500 transition-colors"
       >
         <X className="w-2.5 h-2.5" />
       </button>
@@ -537,11 +541,11 @@ function StaffAssignmentRow({
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
-      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-xs select-none ${onDragStart ? 'cursor-grab active:cursor-grabbing active:opacity-50' : ''}`}
+      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-gradient-to-r from-indigo-50 via-indigo-50/80 to-white border border-indigo-200/70 shadow-sm text-xs select-none transition-all duration-150 ${onDragStart ? 'cursor-grab active:cursor-grabbing active:scale-[0.98] hover:shadow-md hover:border-indigo-300' : ''}`}
     >
-      <GripVertical className="w-3 h-3 text-indigo-200 flex-shrink-0" />
-      <Users className="w-3 h-3 text-indigo-400 flex-shrink-0" />
-      <span className="font-medium text-indigo-700 flex-1 min-w-0 truncate">{a.asset_name}</span>
+      <GripVertical className="w-3 h-3 text-indigo-300 flex-shrink-0" />
+      <Users className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+      <span className="font-semibold text-indigo-800 flex-1 min-w-0 truncate tracking-tight">{a.asset_name}</span>
 
       {/* Daily rate badge / editor */}
       {editingRate ? (
@@ -561,9 +565,9 @@ function StaffAssignmentRow({
         <button
           onClick={e => { e.stopPropagation(); setRateInput(String(a.daily_rate ?? '')); setEditingRate(true); }}
           title="Click to edit daily rate"
-          className="flex items-center gap-0.5 flex-shrink-0 text-[10px] bg-white border border-indigo-100 rounded px-1.5 py-0.5 text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+          className="flex items-center gap-0.5 flex-shrink-0 text-[10px] font-semibold bg-white border border-indigo-200/60 shadow-sm rounded-md px-1.5 py-0.5 text-slate-700 hover:border-indigo-400 hover:text-indigo-700 hover:shadow transition-all tabular-nums"
         >
-          {a.daily_rate != null ? `£${a.daily_rate}/day` : <span className="text-slate-400 italic">+rate</span>}
+          {a.daily_rate != null ? `£${a.daily_rate}/day` : <span className="text-slate-400 italic font-normal">+rate</span>}
           <Edit2 className="w-2.5 h-2.5 opacity-40 ml-0.5" />
         </button>
       )}
@@ -662,25 +666,39 @@ function JobCard({
         setTimeout(() => onCardDragStart(), 0);
       }}
       onDragEnd={onCardDragEnd}
-      className={`rounded-lg border transition-all duration-150 cursor-grab active:cursor-grabbing active:opacity-70 ${
-        isExpanded ? 'border-indigo-300 shadow-md' : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
-      } bg-white overflow-hidden`}
+      className={`group relative rounded-xl border bg-gradient-to-br from-white via-white to-slate-50/60 transition-all duration-200 cursor-grab active:cursor-grabbing active:scale-[0.98] overflow-hidden backdrop-blur-sm ${
+        isExpanded
+          ? 'border-indigo-200/80 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.18),0_2px_6px_-2px_rgba(15,23,42,0.06)] ring-1 ring-indigo-100'
+          : 'border-slate-200/70 shadow-[0_1px_2px_0_rgba(15,23,42,0.04)] hover:border-slate-300 hover:shadow-[0_6px_16px_-6px_rgba(15,23,42,0.18),0_2px_4px_-2px_rgba(15,23,42,0.06)] hover:-translate-y-px'
+      }`}
     >
+      {/* Top category accent stripe */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[3px]"
+        style={{ background: `linear-gradient(90deg, ${c.dot}, ${c.dot}cc 60%, ${c.dot}55)` }}
+      />
+
       {/* Header (always visible) */}
       <button
         onClick={onToggle}
-        className="w-full text-left px-3 py-2.5 flex items-start gap-2"
+        className="w-full text-left px-3 pt-3 pb-2.5 flex items-start gap-2"
       >
-        <span className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ background: c.dot }} />
+        <span
+          className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ring-2 ring-white shadow-[0_0_0_1px_rgba(15,23,42,0.06)]"
+          style={{ background: c.dot, boxShadow: `0 0 0 1px rgba(15,23,42,0.06), 0 0 8px ${c.dot}55` }}
+        />
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-slate-800 truncate">{item.title}</p>
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          <p className="text-[13px] font-semibold text-slate-900 truncate tracking-tight leading-snug">{item.title}</p>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <CatBadge cat={item.category} size="xs" />
-            {item.time && <span className="text-[10px] text-slate-400">{item.time}</span>}
+            {item.time && (
+              <span className="text-[10px] font-medium text-slate-500 tabular-nums tracking-tight">{item.time}</span>
+            )}
             {(staffAssignments.length + vehicleAssignments.length) > 0 && (
-              <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100/80 rounded-full px-1.5 py-0.5 tabular-nums">
                 <Users className="w-2.5 h-2.5" />{staffAssignments.length}
-                <Truck className="w-2.5 h-2.5 ml-0.5" />{vehicleAssignments.length}
+                <span className="text-slate-300">·</span>
+                <Truck className="w-2.5 h-2.5" />{vehicleAssignments.length}
               </span>
             )}
           </div>
@@ -689,31 +707,31 @@ function JobCard({
 
       {/* Mini drop targets shown on collapsed card when a drag is in flight */}
       {hasActiveDrag && !isExpanded && (
-        <div className="flex gap-1 px-2 pb-2">
+        <div className="flex gap-1.5 px-2.5 pb-2.5">
           <div
             onDragOver={e => { e.preventDefault(); onDragOver('staff'); }}
             onDragLeave={onDragLeave}
             onDrop={e => { e.preventDefault(); onDropStaff(); }}
-            className={`flex-1 h-7 rounded border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-medium transition-colors ${
+            className={`flex-1 h-8 rounded-lg border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-semibold transition-all duration-150 ${
               dragOverZone === `${cardKey}|staff`
-                ? 'border-indigo-400 bg-indigo-50 text-indigo-600'
-                : 'border-slate-200 text-slate-400 hover:border-slate-300'
+                ? 'border-indigo-400 bg-gradient-to-br from-indigo-50 to-indigo-100/70 text-indigo-700 ring-2 ring-indigo-200/60 scale-[1.02]'
+                : 'border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40'
             }`}
           >
-            <Users className="w-2.5 h-2.5" />
+            <Users className="w-3 h-3" />
             {dragOverZone === `${cardKey}|staff` ? 'Drop here' : 'Staff'}
           </div>
           <div
             onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
             onDragLeave={onDragLeave}
             onDrop={e => { e.preventDefault(); onDropVehicle(); }}
-            className={`flex-1 h-7 rounded border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-medium transition-colors ${
+            className={`flex-1 h-8 rounded-lg border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-semibold transition-all duration-150 ${
               dragOverZone === `${cardKey}|vehicle`
-                ? 'border-teal-400 bg-teal-50 text-teal-600'
-                : 'border-slate-200 text-slate-400 hover:border-slate-300'
+                ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-teal-100/70 text-teal-700 ring-2 ring-teal-200/60 scale-[1.02]'
+                : 'border-slate-200 text-slate-400 hover:border-teal-300 hover:text-teal-500 hover:bg-teal-50/40'
             }`}
           >
-            <Truck className="w-2.5 h-2.5" />
+            <Truck className="w-3 h-3" />
             {dragOverZone === `${cardKey}|vehicle` ? 'Drop here' : 'Van'}
           </div>
         </div>
@@ -721,41 +739,47 @@ function JobCard({
 
       {/* Expanded detail */}
       {isExpanded && (
-        <div className="px-3 pb-3 space-y-3 border-t border-slate-100">
+        <div className="px-3 pb-3 space-y-3 border-t border-slate-100/80 bg-gradient-to-b from-slate-50/40 to-transparent">
           {/* Info grid */}
-          <div className="pt-2 space-y-1.5 text-xs text-slate-600">
-            {item.phone && <p><span className="text-slate-400">Phone:</span> {item.phone}</p>}
+          <div className="pt-2.5 space-y-1.5 text-[11px] text-slate-600 leading-relaxed">
+            {item.phone && <p><span className="text-slate-400 font-medium">Phone</span> <span className="text-slate-700 ml-1 tabular-nums">{item.phone}</span></p>}
             {(item.from_line1 || item.from_postcode) && (
-              <p><span className="text-slate-400">From:</span> {[item.from_line1, item.from_city, item.from_postcode].filter(Boolean).join(', ')}</p>
+              <p><span className="text-slate-400 font-medium">From</span> <span className="text-slate-700 ml-1">{[item.from_line1, item.from_city, item.from_postcode].filter(Boolean).join(', ')}</span></p>
             )}
             {(item.to_line1 || item.to_postcode) && (
-              <p><span className="text-slate-400">To:</span> {[item.to_line1, item.to_city, item.to_postcode].filter(Boolean).join(', ')}</p>
+              <p><span className="text-slate-400 font-medium">To</span> <span className="text-slate-700 ml-1">{[item.to_line1, item.to_city, item.to_postcode].filter(Boolean).join(', ')}</span></p>
             )}
-            {item.contract_name && <p><span className="text-slate-400">Contractor:</span> <span className="font-medium text-indigo-700">{item.contract_name}</span></p>}
-            {item.address && <p><span className="text-slate-400">Address:</span> {item.address}</p>}
-            {item.bedrooms && <p><span className="text-slate-400">Bedrooms:</span> {item.bedrooms}</p>}
-            {item.notes && <p><span className="text-slate-400">Notes:</span> {item.notes}</p>}
-            {item.internal_notes && <p><span className="text-slate-400">Internal:</span> {item.internal_notes}</p>}
-            <div className="flex gap-2">
-              {item.packing_required  ? <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[10px]">Packing</span> : null}
-              {item.storage_required  ? <span className="px-1.5 py-0.5 bg-sky-50 text-sky-700 rounded text-[10px]">Storage</span> : null}
-            </div>
+            {item.contract_name && <p><span className="text-slate-400 font-medium">Contractor</span> <span className="font-semibold text-indigo-700 ml-1">{item.contract_name}</span></p>}
+            {item.address && <p><span className="text-slate-400 font-medium">Address</span> <span className="text-slate-700 ml-1">{item.address}</span></p>}
+            {item.bedrooms && <p><span className="text-slate-400 font-medium">Bedrooms</span> <span className="text-slate-700 ml-1 tabular-nums">{item.bedrooms}</span></p>}
+            {item.notes && <p><span className="text-slate-400 font-medium">Notes</span> <span className="text-slate-700 ml-1">{item.notes}</span></p>}
+            {item.internal_notes && <p><span className="text-slate-400 font-medium">Internal</span> <span className="text-slate-700 ml-1">{item.internal_notes}</span></p>}
+            {(item.packing_required || item.storage_required) && (
+              <div className="flex gap-1.5 pt-0.5">
+                {item.packing_required ? (
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-purple-50 to-purple-100/70 text-purple-700 border border-purple-200/60 rounded-full text-[10px] font-semibold">Packing</span>
+                ) : null}
+                {item.storage_required ? (
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-sky-50 to-sky-100/70 text-sky-700 border border-sky-200/60 rounded-full text-[10px] font-semibold">Storage</span>
+                ) : null}
+              </div>
+            )}
           </div>
 
           {/* Drivers drop zone */}
           <div>
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-              <Users className="w-3 h-3" />Drivers
-              <span className="font-normal normal-case text-slate-400 ml-0.5">£150/day</span>
+            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Users className="w-3 h-3 text-indigo-500" />Drivers
+              <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£150/day</span>
             </p>
             <div
               onDragOver={e => { e.preventDefault(); onDragOver('driver'); }}
               onDragLeave={onDragLeave}
               onDrop={e => { e.preventDefault(); onDropDriver(); }}
-              className={`min-h-[36px] rounded-lg border-2 border-dashed p-1.5 flex flex-col gap-1 transition-colors ${
+              className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-col gap-1 transition-all duration-150 ${
                 dragOverZone === `${cardKey}|driver`
-                  ? 'border-indigo-400 bg-indigo-50'
-                  : 'border-slate-200 bg-slate-50'
+                  ? 'border-indigo-400 bg-gradient-to-br from-indigo-50 to-indigo-100/60 ring-2 ring-indigo-200/50'
+                  : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
               }`}
             >
               {driverAssignments.map(a => (
@@ -770,28 +794,28 @@ function JobCard({
                 />
               ))}
               {driverAssignments.length === 0 && dragOverZone !== `${cardKey}|driver` && (
-                <span className="text-[10px] text-slate-400 self-center ml-1">Drop drivers here</span>
+                <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop drivers here</span>
               )}
               {dragOverZone === `${cardKey}|driver` && (
-                <span className="text-[10px] text-indigo-500 font-medium self-center ml-1">Release to assign</span>
+                <span className="text-[10px] text-indigo-600 font-semibold self-center ml-1">Release to assign</span>
               )}
             </div>
           </div>
 
           {/* Porters drop zone */}
           <div>
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-              <Users className="w-3 h-3" />Porters
-              <span className="font-normal normal-case text-slate-400 ml-0.5">£125/day</span>
+            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Users className="w-3 h-3 text-violet-500" />Porters
+              <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£125/day</span>
             </p>
             <div
               onDragOver={e => { e.preventDefault(); onDragOver('porter'); }}
               onDragLeave={onDragLeave}
               onDrop={e => { e.preventDefault(); onDropPorter(); }}
-              className={`min-h-[36px] rounded-lg border-2 border-dashed p-1.5 flex flex-col gap-1 transition-colors ${
+              className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-col gap-1 transition-all duration-150 ${
                 dragOverZone === `${cardKey}|porter`
-                  ? 'border-violet-400 bg-violet-50'
-                  : 'border-slate-200 bg-slate-50'
+                  ? 'border-violet-400 bg-gradient-to-br from-violet-50 to-violet-100/60 ring-2 ring-violet-200/50'
+                  : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
               }`}
             >
               {porterAssignments.map(a => (
@@ -806,25 +830,27 @@ function JobCard({
                 />
               ))}
               {porterAssignments.length === 0 && dragOverZone !== `${cardKey}|porter` && (
-                <span className="text-[10px] text-slate-400 self-center ml-1">Drop porters here</span>
+                <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop porters here</span>
               )}
               {dragOverZone === `${cardKey}|porter` && (
-                <span className="text-[10px] text-violet-500 font-medium self-center ml-1">Release to assign</span>
+                <span className="text-[10px] text-violet-600 font-semibold self-center ml-1">Release to assign</span>
               )}
             </div>
           </div>
 
           {/* Vehicle drop zone */}
           <div>
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1"><Truck className="w-3 h-3" />Vehicles</p>
+            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Truck className="w-3 h-3 text-teal-500" />Vehicles
+            </p>
             <div
               onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
               onDragLeave={onDragLeave}
               onDrop={e => { e.preventDefault(); onDropVehicle(); }}
-              className={`min-h-[36px] rounded-lg border-2 border-dashed p-1.5 flex flex-wrap gap-1 transition-colors ${
+              className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-wrap gap-1 transition-all duration-150 ${
                 dragOverZone === `${cardKey}|vehicle`
-                  ? 'border-teal-400 bg-teal-50'
-                  : 'border-slate-200 bg-slate-50'
+                  ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-teal-100/60 ring-2 ring-teal-200/50'
+                  : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
               }`}
             >
               {vehicleAssignments.map(a => (
@@ -836,46 +862,47 @@ function JobCard({
                 />
               ))}
               {vehicleAssignments.length === 0 && dragOverZone !== `${cardKey}|vehicle` && (
-                <span className="text-[10px] text-slate-400 self-center ml-1">Drop vehicles here</span>
+                <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop vehicles here</span>
               )}
               {dragOverZone === `${cardKey}|vehicle` && (
-                <span className="text-[10px] text-teal-500 font-medium self-center ml-1">Release to assign</span>
+                <span className="text-[10px] text-teal-600 font-semibold self-center ml-1">Release to assign</span>
               )}
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-1.5 pt-1 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {item.source === 'job' && (
                 <button
                   onClick={() => navigate(`/admin/crm/${item.id}`)}
-                  className="text-[10px] text-indigo-600 hover:underline"
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 text-white border border-indigo-600/40 shadow-sm hover:shadow-md hover:-translate-y-px active:scale-95 transition-all"
                 >
-                  Open job record →
+                  Open job
+                  <ArrowUpRight className="w-3 h-3" />
                 </button>
               )}
               {item.source === 'event' && (
                 <>
                   <button
                     onClick={e => { e.stopPropagation(); onEditEvent?.(); }}
-                    className="flex items-center gap-1 text-[10px] font-medium text-slate-500 hover:text-slate-700 transition-colors"
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:shadow active:scale-95 transition-all"
                   >
                     <Edit2 className="w-3 h-3" />Edit
                   </button>
                   <button
                     onClick={e => { e.stopPropagation(); onDeleteEvent?.(); }}
-                    className="flex items-center gap-1 text-[10px] font-medium text-red-400 hover:text-red-600 transition-colors"
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white text-red-600 border border-red-200/70 shadow-sm hover:bg-red-50 hover:border-red-300 hover:shadow active:scale-95 transition-all"
                   >
                     <Trash2 className="w-3 h-3" />Delete
                   </button>
                   {isSurveyEvent && (
                     <button
                       onClick={e => { e.stopPropagation(); onConvertToJob?.(); }}
-                      className="flex items-center gap-1 text-[10px] font-medium text-cyan-600 hover:text-cyan-800 transition-colors"
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-gradient-to-br from-cyan-500 to-cyan-600 text-white border border-cyan-600/40 shadow-sm hover:shadow-md hover:-translate-y-px active:scale-95 transition-all"
                       title="Create a CRM job from this survey"
                     >
-                      <ArrowUpRight className="w-3 h-3" />Convert to job
+                      <ArrowUpRight className="w-3 h-3" />Convert
                     </button>
                   )}
                 </>
@@ -884,7 +911,7 @@ function JobCard({
             {item.source === 'event' && (
               <button
                 onClick={e => { e.stopPropagation(); onDuplicate(); }}
-                className="flex items-center gap-1 text-[10px] font-medium text-slate-400 hover:text-indigo-600 transition-colors"
+                className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white text-slate-600 border border-slate-200 shadow-sm hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50/50 hover:shadow active:scale-95 transition-all"
                 title="Duplicate this job"
               >
                 <Copy className="w-3 h-3" />Duplicate
@@ -1063,8 +1090,12 @@ function WeeklyView({
             return (
               <div
                 key={date}
-                className={`flex-1 border-r border-slate-200 flex flex-col transition-colors ${
-                  isDraggingHere ? 'bg-indigo-50/60' : isToday ? 'bg-indigo-50/30' : 'bg-white'
+                className={`flex-1 border-r border-slate-200/70 flex flex-col transition-colors ${
+                  isDraggingHere
+                    ? 'bg-gradient-to-b from-indigo-50/80 to-indigo-50/30'
+                    : isToday
+                    ? 'bg-gradient-to-b from-indigo-50/40 to-transparent'
+                    : 'bg-white'
                 }`}
                 onDragOver={e => { if (!draggingJobCard) return; e.preventDefault(); setDragOverDate(date); }}
                 onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { setDragOverDate(null); setGapOverKey(null); } }}
@@ -1076,23 +1107,32 @@ function WeeklyView({
                 }}
               >
                 {/* Day header */}
-                <div className={`px-2 py-2.5 border-b border-slate-200 text-center transition-colors ${
-                  isDraggingHere ? 'bg-indigo-100' : isToday ? 'bg-indigo-50' : ''
+                <div className={`px-2 py-3 border-b border-slate-200/70 text-center transition-all ${
+                  isDraggingHere ? 'bg-indigo-100/60' : ''
                 }`}>
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase">{dayName}</p>
-                  <p className={`text-lg font-bold ${isToday || isDraggingHere ? 'text-indigo-600' : 'text-slate-800'}`}>{parseInt(day, 10)}</p>
-                  {isDraggingHere && <p className="text-[10px] text-indigo-500 font-medium mt-0.5">Drop to move here</p>}
+                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isToday ? 'text-indigo-600' : 'text-slate-500'}`}>{dayName}</p>
+                  <div className="flex justify-center mt-1">
+                    {isToday || isDraggingHere ? (
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(79,70,229,0.45)] ring-2 ring-white">
+                        <span className="text-base font-bold tabular-nums">{parseInt(day, 10)}</span>
+                      </div>
+                    ) : (
+                      <span className="text-lg font-bold text-slate-800 tabular-nums leading-none py-1.5">{parseInt(day, 10)}</span>
+                    )}
+                  </div>
+                  {isDraggingHere && <p className="text-[10px] text-indigo-600 font-semibold mt-1">Drop to move here</p>}
                 </div>
 
                 {/* Items */}
-                <div className="flex-1 overflow-y-auto p-1.5">
+                <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
                   {/* Empty column */}
                   {dayItems.length === 0 && !draggingJobCard && (
                     <button
                       onClick={() => onAddQuickJob(date)}
-                      className="w-full flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-slate-300 hover:text-indigo-400 transition-colors py-4"
+                      className="w-full flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-gradient-to-br hover:from-indigo-50/60 hover:to-transparent text-slate-300 hover:text-indigo-500 transition-all py-6 group"
                     >
-                      <Plus className="w-5 h-5" />
+                      <Plus className="w-5 h-5 transition-transform group-hover:scale-110" />
+                      <span className="text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">Add job</span>
                     </button>
                   )}
                   {dayItems.length === 0 && draggingJobCard && (
@@ -1148,9 +1188,10 @@ function WeeklyView({
                   {!draggingJobCard && dayItems.length > 0 && (
                     <button
                       onClick={() => onAddQuickJob(date)}
-                      className="w-full flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-slate-300 hover:text-indigo-400 transition-colors py-2 mt-1.5"
+                      className="w-full flex items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-gradient-to-br hover:from-indigo-50/60 hover:to-transparent text-slate-300 hover:text-indigo-500 transition-all py-2 group"
                     >
-                      <Plus className="w-4 h-4" />
+                      <Plus className="w-4 h-4 transition-transform group-hover:scale-110" />
+                      <span className="text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity">Add</span>
                     </button>
                   )}
                 </div>
