@@ -8,6 +8,7 @@ import {
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
 import QuoteBuilder from '../../components/QuoteBuilder';
+import SurveyTool from '../../components/SurveyTool';
 import api from '../../lib/api';
 import type { CrmJob, CrmActivity, CrmStatus, PlannerAssignment } from '../../types';
 import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
@@ -971,6 +972,11 @@ export default function CRMDetailPage() {
                 )}
               </div>
             )}
+          </Section>
+
+          {/* Inventory Survey */}
+          <Section title="Inventory Survey" accent="bg-teal-400">
+            <SurveyTool jobId={id} />
           </Section>
 
           {/* Operational Notes */}
