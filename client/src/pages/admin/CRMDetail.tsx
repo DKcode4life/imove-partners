@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
+import QuoteBuilder from '../../components/QuoteBuilder';
 import api from '../../lib/api';
 import type { CrmJob, CrmActivity, CrmStatus, PlannerAssignment } from '../../types';
 import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
@@ -859,83 +860,8 @@ export default function CRMDetailPage() {
           </Section>
 
           {/* Quote */}
-          <Section title="Quote" accent="bg-amber-500" {...sectionProps('quote')}>
-            {editingSection === 'quote' ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <F label="Quote Amount (£)">
-                    <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
-                      value={quoteAmount} onChange={e => setQuoteAmount(e.target.value)} />
-                  </F>
-                  <F label="Quote Sent Date">
-                    <input type="date" className="input" value={quoteSentDate} onChange={e => setQuoteSentDate(e.target.value)} />
-                  </F>
-                </div>
-                <div className="grid grid-cols-3 gap-3 pt-1">
-                  <Toggle value={quoteAccepted}   onChange={setQuoteAccepted}   label="Quote accepted" />
-                  <Toggle value={depositRequired} onChange={setDepositRequired} label="Deposit required" />
-                  <Toggle value={depositPaid}     onChange={setDepositPaid}     label="Deposit paid" />
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Prominent amount + sent-date display */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-gradient-to-br from-amber-50 to-amber-100/60 border border-amber-200/70 px-5 py-4 shadow-sm">
-                    <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider mb-1.5">Quote Amount</p>
-                    {quoteAmount ? (
-                      <p className="text-3xl font-bold text-amber-900 tabular-nums tracking-tight leading-none">
-                        {fmt(parseFloat(quoteAmount))}
-                      </p>
-                    ) : (
-                      <p className="text-xl font-semibold text-amber-300 italic leading-none">— not quoted —</p>
-                    )}
-                  </div>
-                  <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/40 border border-slate-200/70 px-5 py-4 shadow-sm">
-                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Quote Sent</p>
-                    <p className="text-xl font-semibold text-slate-800 tabular-nums leading-none">
-                      {quoteSentDate ? fmtDate(quoteSentDate) : <span className="text-slate-300 italic">—</span>}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Status pills */}
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { label: 'Quote Accepted',   value: quoteAccepted },
-                    { label: 'Deposit Required', value: depositRequired },
-                    { label: 'Deposit Paid',     value: depositPaid },
-                  ] as const).map(({ label, value }) => (
-                    <div
-                      key={label}
-                      className={`rounded-lg border px-3 py-2.5 text-xs font-semibold flex items-center gap-2 transition-all ${
-                        value
-                          ? 'bg-gradient-to-br from-emerald-50 to-emerald-100/60 border-emerald-200 text-emerald-700 shadow-sm'
-                          : 'bg-slate-50 border-slate-200/70 text-slate-400'
-                      }`}
-                    >
-                      {value
-                        ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                        : <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-300 inline-block flex-shrink-0" />}
-                      <span className="truncate">{label}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Derived: commission preview when this is an estate-agent referral */}
-                {leadSource === 'Estate Agent Referral' && partnerCommissionRate && quoteAmount && (
-                  <div className="rounded-xl border border-amber-200/70 bg-amber-50/60 px-4 py-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Commission Due</p>
-                      <p className="text-xs text-amber-700/70 mt-0.5">{partnerCommissionRate}% of quote</p>
-                    </div>
-                    <p className="text-lg font-bold text-amber-900 tabular-nums tracking-tight">
-                      {fmt((parseFloat(quoteAmount) * parseFloat(partnerCommissionRate)) / 100)}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+          <Section title="Quote" accent="bg-amber-500">
+            <QuoteBuilder jobId={id} />
           </Section>
         </div>
 
