@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, ClipboardList, Minus, Plus } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { X, ClipboardList, Minus, Plus, MessageSquare } from 'lucide-react';
 
-// ── Room catalogue with per-item emoji icons ───────────────────────────────────
+// ── Room catalogue ─────────────────────────────────────────────────────────────
 
 type RoomItem = { name: string; icon: string };
 type Room     = { name: string; items: RoomItem[] };
@@ -20,31 +20,31 @@ const ROOMS: Room[] = [
   {
     name: 'Bedroom 1',
     items: [
-      { name: 'King Bed',          icon: '🛏️' },
-      { name: 'Wardrobe',          icon: '🚪' },
-      { name: 'Bedside Table',     icon: '💡' },
-      { name: 'Chest of Drawers',  icon: '🗄️' },
-      { name: 'Dressing Table',    icon: '🪞' },
+      { name: 'King Bed',         icon: '🛏️' },
+      { name: 'Wardrobe',         icon: '🚪' },
+      { name: 'Bedside Table',    icon: '💡' },
+      { name: 'Chest of Drawers', icon: '🗄️' },
+      { name: 'Dressing Table',   icon: '🪞' },
     ],
   },
   {
     name: 'Bedroom 2',
     items: [
-      { name: 'Double Bed',        icon: '🛏️' },
-      { name: 'Wardrobe',          icon: '🚪' },
-      { name: 'Bedside Table',     icon: '💡' },
-      { name: 'Chest of Drawers',  icon: '🗄️' },
-      { name: 'Desk',              icon: '✏️' },
+      { name: 'Double Bed',       icon: '🛏️' },
+      { name: 'Wardrobe',         icon: '🚪' },
+      { name: 'Bedside Table',    icon: '💡' },
+      { name: 'Chest of Drawers', icon: '🗄️' },
+      { name: 'Desk',             icon: '✏️' },
     ],
   },
   {
     name: 'Bedroom 3',
     items: [
-      { name: 'Single Bed',        icon: '🛏️' },
-      { name: 'Wardrobe',          icon: '🚪' },
-      { name: 'Bedside Table',     icon: '💡' },
-      { name: 'Chest of Drawers',  icon: '🗄️' },
-      { name: 'Desk',              icon: '✏️' },
+      { name: 'Single Bed',       icon: '🛏️' },
+      { name: 'Wardrobe',         icon: '🚪' },
+      { name: 'Bedside Table',    icon: '💡' },
+      { name: 'Chest of Drawers', icon: '🗄️' },
+      { name: 'Desk',             icon: '✏️' },
     ],
   },
   {
@@ -80,11 +80,11 @@ const ROOMS: Room[] = [
   {
     name: 'Utility Room',
     items: [
-      { name: 'Washing Machine',  icon: '🌊' },
-      { name: 'Tumble Dryer',     icon: '🌀' },
-      { name: 'Storage Shelves',  icon: '📦' },
-      { name: 'Ironing Board',    icon: '👕' },
-      { name: 'Chest Freezer',    icon: '🧊' },
+      { name: 'Washing Machine', icon: '🌊' },
+      { name: 'Tumble Dryer',    icon: '🌀' },
+      { name: 'Storage Shelves', icon: '📦' },
+      { name: 'Ironing Board',   icon: '👕' },
+      { name: 'Chest Freezer',   icon: '🧊' },
     ],
   },
   {
@@ -109,48 +109,177 @@ const ROOMS: Room[] = [
   },
 ];
 
-// ── Types & storage ────────────────────────────────────────────────────────────
+// ── Data types & storage ───────────────────────────────────────────────────────
 
-type SurveyData = Record<string, Record<string, number>>;
+type ItemEntry  = { count: number; note: string };
+type RoomRecord = Record<string, ItemEntry>;
+type SurveyData = Record<string, RoomRecord>;
 
 const storageKey = (jobId: string | undefined) => `crm-survey-${jobId}`;
 
 function loadData(jobId: string | undefined): SurveyData {
   if (!jobId) return {};
-  try { return JSON.parse(localStorage.getItem(storageKey(jobId)) || '{}'); }
-  catch { return {}; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(storageKey(jobId)) || '{}') as
+      Record<string, Record<string, number | ItemEntry>>;
+    // Migrate old format where values were plain numbers
+    const out: SurveyData = {};
+    for (const [room, items] of Object.entries(raw)) {
+      out[room] = {};
+      for (const [item, val] of Object.entries(items)) {
+        out[room][item] = typeof val === 'number'
+          ? { count: val, note: '' }
+          : val;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// ── Note modal ─────────────────────────────────────────────────────────────────
+
+function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
+  itemName: string;
+  itemIcon: string;
+  currentNote: string;
+  onSave: (note: string) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState(currentNote);
+
+  return (
+    // Backdrop — click outside to cancel
+    <div
+      className="absolute inset-0 z-[10] flex items-center justify-center bg-black/30 backdrop-blur-sm p-6"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+          <span className="text-2xl leading-none">{itemIcon}</span>
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-slate-900">{itemName}</h3>
+            <p className="text-xs text-slate-400">Add a note for this item</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Textarea */}
+        <div className="px-5 pb-4">
+          <textarea
+            autoFocus
+            rows={4}
+            placeholder="e.g. Needs disassembly · fragile · customer to pack separately…"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 resize-none outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 transition"
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                onSave(text.trim());
+                onClose();
+              }
+            }}
+          />
+          <p className="text-[11px] text-slate-400 mt-1.5">⌘ Enter to save</p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 px-5 pb-5">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { onSave(text.trim()); onClose(); }}
+            className="flex-1 py-2 rounded-xl bg-teal-600 text-sm font-semibold text-white hover:bg-teal-700 transition-colors active:scale-[0.98]"
+          >
+            Save Note
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Item square card ───────────────────────────────────────────────────────────
 
-function ItemSquare({ name, icon, count, onIncrement, onDecrement, onSetCount }: {
-  name: string; icon: string; count: number;
+const LONG_PRESS_MS = 500;
+
+function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCount, onOpenNote }: {
+  name: string; icon: string; count: number; note: string;
   onIncrement: () => void;
   onDecrement: () => void;
   onSetCount: (n: number) => void;
+  onOpenNote: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [raw,     setRaw]     = useState('');
-  const active = count > 0;
+  const [editingCount, setEditingCount] = useState(false);
+  const [raw,          setRaw]          = useState('');
 
-  const startEdit = () => { setRaw(String(count)); setEditing(true); };
-  const commit    = () => {
+  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressState  = useRef<'pending' | 'fired' | 'idle'>('idle');
+
+  const active  = count > 0;
+  const hasNote = note.trim().length > 0;
+
+  // ── Long-press handlers ────────────────────────────────────────────────────
+  const handlePointerDown = (e: React.PointerEvent) => {
+    // Only respond to primary button / finger
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pressState.current = 'pending';
+    timerRef.current = setTimeout(() => {
+      pressState.current = 'fired';
+      if (navigator.vibrate) navigator.vibrate(25);
+      onOpenNote();
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePointerUp = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (pressState.current === 'pending') onIncrement();
+    pressState.current = 'idle';
+  };
+
+  const handlePointerCancel = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    pressState.current = 'idle';
+  };
+
+  // ── Count edit ─────────────────────────────────────────────────────────────
+  const startCountEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRaw(String(count));
+    setEditingCount(true);
+  };
+
+  const commitCount = () => {
     const n = parseInt(raw, 10);
     onSetCount(isNaN(n) ? 0 : Math.max(0, n));
-    setEditing(false);
+    setEditingCount(false);
   };
 
   return (
     <div
-      className={`relative flex flex-col items-center rounded-2xl border pt-4 pb-2.5 px-2 transition-all select-none ${
+      className={`relative flex flex-col items-center rounded-2xl border pt-4 pb-2.5 px-2 transition-all ${
         active
           ? 'bg-gradient-to-b from-teal-50 to-white border-teal-200 shadow-sm ring-1 ring-teal-100'
           : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
       }`}
     >
-      {/* Count badge — top-right; click to edit */}
+      {/* Count badge — top-right */}
       {active && (
-        editing ? (
+        editingCount ? (
           <input
             autoFocus
             type="number"
@@ -158,16 +287,16 @@ function ItemSquare({ name, icon, count, onIncrement, onDecrement, onSetCount }:
             className="absolute top-1.5 right-1.5 w-9 h-6 text-center text-xs font-bold border border-teal-400 rounded-lg outline-none ring-2 ring-teal-100 bg-white z-10"
             value={raw}
             onChange={e => setRaw(e.target.value)}
-            onBlur={commit}
+            onBlur={commitCount}
             onKeyDown={e => {
-              if (e.key === 'Enter')  commit();
-              if (e.key === 'Escape') setEditing(false);
+              if (e.key === 'Enter')  commitCount();
+              if (e.key === 'Escape') setEditingCount(false);
             }}
           />
         ) : (
           <button
-            onClick={startEdit}
-            title="Click to edit count"
+            onClick={startCountEdit}
+            title="Tap to edit count"
             className="absolute top-1.5 right-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-teal-600 text-white text-[11px] font-bold flex items-center justify-center tabular-nums hover:bg-teal-700 transition-colors"
           >
             {count}
@@ -175,23 +304,38 @@ function ItemSquare({ name, icon, count, onIncrement, onDecrement, onSetCount }:
         )
       )}
 
-      {/* Emoji icon — click to add one */}
+      {/* Note indicator — top-left */}
+      {hasNote && (
+        <button
+          onClick={e => { e.stopPropagation(); onOpenNote(); }}
+          title="Has note — tap to edit"
+          className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center hover:bg-amber-200 transition-colors"
+        >
+          <MessageSquare className="w-2.5 h-2.5" />
+        </button>
+      )}
+
+      {/* Emoji — short tap = add, long press = note */}
       <button
-        onClick={onIncrement}
-        title={`Add ${name}`}
-        className="text-3xl leading-none mb-2 hover:scale-110 transition-transform active:scale-95"
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerCancel}
+        onPointerCancel={handlePointerCancel}
+        onContextMenu={e => e.preventDefault()}
+        title="Tap to add · hold to add a note"
+        className="text-3xl leading-none mb-2 select-none hover:scale-110 transition-transform active:scale-95 touch-none"
       >
         {icon}
       </button>
 
-      {/* Item name */}
+      {/* Name */}
       <p className={`text-[11px] font-medium text-center leading-tight mb-2.5 px-1 ${
         active ? 'text-teal-800' : 'text-slate-500'
       }`}>
         {name}
       </p>
 
-      {/* −  + controls */}
+      {/* − + controls */}
       <div className="flex items-center gap-2 mt-auto">
         <button
           onClick={onDecrement}
@@ -221,6 +365,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const [open,         setOpen]         = useState(false);
   const [data,         setData]         = useState<SurveyData>(() => loadData(jobId));
   const [selectedRoom, setSelectedRoom] = useState(ROOMS[0].name);
+  const [noteModal,    setNoteModal]    = useState<{ room: string; item: string; icon: string } | null>(null);
 
   useEffect(() => { setData(loadData(jobId)); }, [jobId]);
 
@@ -241,45 +386,58 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     if (jobId) localStorage.setItem(storageKey(jobId), JSON.stringify(next));
   }, [jobId]);
 
-  const increment = (room: string, item: string) => {
-    const next = JSON.parse(JSON.stringify(data)) as SurveyData;
-    if (!next[room]) next[room] = {};
-    next[room][item] = (next[room][item] || 0) + 1;
-    persist(next);
-  };
+  const clone = () => JSON.parse(JSON.stringify(data)) as SurveyData;
 
-  const decrement = (room: string, item: string) => {
-    const next = JSON.parse(JSON.stringify(data)) as SurveyData;
-    const cur  = next[room]?.[item] || 0;
-    if (cur <= 0) return;
-    if (cur === 1) {
-      delete next[room][item];
-      if (!Object.keys(next[room]).length) delete next[room];
-    } else {
-      next[room][item] = cur - 1;
-    }
-    persist(next);
-  };
+  const getEntry = (room: string, item: string): ItemEntry =>
+    data[room]?.[item] ?? { count: 0, note: '' };
 
-  const setItemCount = (room: string, item: string, n: number) => {
-    const next = JSON.parse(JSON.stringify(data)) as SurveyData;
-    if (n <= 0) {
+  const setEntry = (room: string, item: string, entry: ItemEntry) => {
+    const next = clone();
+    if (entry.count <= 0 && !entry.note) {
       if (next[room]) {
         delete next[room][item];
         if (!Object.keys(next[room]).length) delete next[room];
       }
     } else {
       if (!next[room]) next[room] = {};
-      next[room][item] = n;
+      next[room][item] = entry;
     }
     persist(next);
   };
 
-  const roomTotal   = (room: string) =>
-    Object.values(data[room] || {}).reduce((s, c) => s + c, 0);
-  const grandTotal  = Object.values(data).reduce(
-    (s, r) => s + Object.values(r).reduce((ss, c) => ss + c, 0), 0);
-  const roomsWithItems = Object.values(data).filter(r => Object.keys(r).length > 0).length;
+  const increment = (room: string, item: string) => {
+    const e = getEntry(room, item);
+    setEntry(room, item, { ...e, count: e.count + 1 });
+  };
+
+  const decrement = (room: string, item: string) => {
+    const e = getEntry(room, item);
+    if (e.count <= 0) return;
+    setEntry(room, item, { ...e, count: e.count - 1 });
+  };
+
+  const setItemCount = (room: string, item: string, n: number) => {
+    const e = getEntry(room, item);
+    setEntry(room, item, { ...e, count: Math.max(0, n) });
+  };
+
+  const saveNote = (room: string, item: string, note: string) => {
+    const e = getEntry(room, item);
+    // If item has no count yet, opening a note still adds a count of 1
+    setEntry(room, item, { count: Math.max(e.count, note ? 1 : e.count), note });
+  };
+
+  // ── Derived stats ────────────────────────────────────────────────────────────
+
+  const roomTotal = (room: string) =>
+    Object.values(data[room] || {}).reduce((s, e) => s + e.count, 0);
+
+  const grandTotal = Object.values(data).reduce(
+    (s, r) => s + Object.values(r).reduce((ss, e) => ss + e.count, 0), 0);
+
+  const roomsWithItems = Object.values(data).filter(
+    r => Object.values(r).some(e => e.count > 0)
+  ).length;
 
   const currentRoom = ROOMS.find(r => r.name === selectedRoom)!;
   const roomData    = data[selectedRoom] || {};
@@ -326,13 +484,11 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                 <ClipboardList className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                  Survey Inventory
-                </h2>
+                <h2 className="text-base font-bold text-slate-900 tracking-tight">Survey Inventory</h2>
                 <p className="text-xs text-slate-500">
                   {grandTotal > 0
                     ? `${grandTotal} item${grandTotal !== 1 ? 's' : ''} across ${roomsWithItems} room${roomsWithItems !== 1 ? 's' : ''}`
-                    : 'Tap an icon to add · tap the count badge to edit'}
+                    : 'Tap to add · hold to add a note'}
                 </p>
               </div>
             </div>
@@ -345,7 +501,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
             </button>
           </div>
 
-          <div className="flex flex-1 min-h-0">
+          <div className="flex flex-1 min-h-0 relative">
             {/* ── Room sidebar ─────────────────────────────────────────────── */}
             <div className="w-52 bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto py-3 px-2">
               {ROOMS.map(r => {
@@ -376,7 +532,6 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
 
             {/* ── Items grid ───────────────────────────────────────────────── */}
             <div className="flex-1 overflow-y-auto p-6">
-              {/* Room heading */}
               <div className="flex items-center gap-3 mb-5">
                 <h3 className="text-lg font-bold text-slate-900 tracking-tight">
                   {currentRoom.name}
@@ -388,25 +543,40 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                 )}
               </div>
 
-              {/* 5-column icon grid */}
               <div className="grid grid-cols-5 gap-3">
-                {currentRoom.items.map(({ name, icon }) => (
-                  <ItemSquare
-                    key={name}
-                    name={name}
-                    icon={icon}
-                    count={roomData[name] || 0}
-                    onIncrement={() => increment(selectedRoom, name)}
-                    onDecrement={() => decrement(selectedRoom, name)}
-                    onSetCount={n => setItemCount(selectedRoom, name, n)}
-                  />
-                ))}
+                {currentRoom.items.map(({ name, icon }) => {
+                  const entry = roomData[name] ?? { count: 0, note: '' };
+                  return (
+                    <ItemSquare
+                      key={name}
+                      name={name}
+                      icon={icon}
+                      count={entry.count}
+                      note={entry.note}
+                      onIncrement={() => increment(selectedRoom, name)}
+                      onDecrement={() => decrement(selectedRoom, name)}
+                      onSetCount={n => setItemCount(selectedRoom, name, n)}
+                      onOpenNote={() => setNoteModal({ room: selectedRoom, item: name, icon })}
+                    />
+                  );
+                })}
               </div>
 
               <p className="text-xs text-slate-400 mt-6 text-center">
-                Tap icon or + to add one · tap the teal badge to type a number · − to remove one
+                Tap icon or + to add · hold icon to add a note · tap teal badge to edit count
               </p>
             </div>
+
+            {/* ── Note modal (rendered inside the overlay to keep z-index simple) */}
+            {noteModal && (
+              <NoteModal
+                itemName={noteModal.item}
+                itemIcon={noteModal.icon}
+                currentNote={data[noteModal.room]?.[noteModal.item]?.note ?? ''}
+                onSave={note => saveNote(noteModal.room, noteModal.item, note)}
+                onClose={() => setNoteModal(null)}
+              />
+            )}
           </div>
         </div>
       )}
