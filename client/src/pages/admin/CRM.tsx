@@ -30,8 +30,8 @@ const S: Record<string, { bg: string; text: string; dot: string; cal: string }> 
 function CrmBadge({ status, size = 'md' }: { status: string; size?: 'sm' | 'md' }) {
   const c = S[status] ?? { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400', cal: 'bg-slate-400' };
   return (
-    <span className={`inline-flex items-center gap-1.5 font-medium rounded-full ${c.bg} ${c.text} ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.dot}`} />
+    <span className={`inline-flex items-center gap-1.5 font-semibold rounded-full ring-1 ring-inset ring-white/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ${c.bg} ${c.text} ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ring-2 ring-white/70 ${c.dot}`} />
       {status}
     </span>
   );
@@ -88,15 +88,28 @@ function buildCells(y: number, m: number): (number | null)[] {
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
-function KpiCard({ label, value, icon, color }: { label: string; value: number; icon: React.ReactNode; color: string }) {
+function KpiCard({
+  label, value, icon, color, accent,
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  color: string;
+  accent: string;
+}) {
   return (
-    <div className="card p-4 flex items-center gap-3">
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${color}`}>
+    <div className="group relative bg-gradient-to-br from-white via-white to-slate-50/50 rounded-xl border border-slate-200/70 shadow-[0_1px_2px_0_rgba(15,23,42,0.04)] hover:shadow-[0_8px_20px_-6px_rgba(15,23,42,0.14),0_2px_4px_-2px_rgba(15,23,42,0.06)] hover:-translate-y-px transition-all duration-200 p-4 flex items-center gap-3 overflow-hidden">
+      {/* Top accent stripe */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[3px]"
+        style={{ background: `linear-gradient(90deg, ${accent}, ${accent}cc 60%, ${accent}55)` }}
+      />
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${color} ring-1 ring-inset ring-white/50 shadow-sm`}>
         {icon}
       </div>
-      <div>
-        <p className="text-2xl font-bold text-slate-900 leading-none">{value}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{label}</p>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold text-slate-900 leading-none tabular-nums tracking-tight">{value}</p>
+        <p className="text-xs font-medium text-slate-500 mt-1 truncate">{label}</p>
       </div>
     </div>
   );
@@ -282,7 +295,7 @@ export default function CRMPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
         <div>
-          <h1 className="page-title">iMove CRM</h1>
+          <h1 className="page-title tracking-tight">iMove CRM</h1>
           <p className="page-subtitle">Manage leads, quotations, move jobs, dates, notes, and client records</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -306,12 +319,12 @@ export default function CRMPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6 mt-5">
-        <KpiCard label="Total Clients"  value={summary['Total']           ?? 0} icon={<Users className="w-5 h-5 text-brand-600" />}    color="bg-brand-50" />
-        <KpiCard label="New Leads"      value={summary['New Lead']         ?? 0} icon={<TrendingUp className="w-5 h-5 text-blue-600" />}   color="bg-blue-50" />
-        <KpiCard label="Awaiting Quote" value={summary['Awaiting Quote']   ?? 0} icon={<ClipboardCheck className="w-5 h-5 text-yellow-600" />} color="bg-yellow-50" />
-        <KpiCard label="Quoted"         value={(summary['Quote Sent'] ?? 0) + (summary['Quote Accepted'] ?? 0)} icon={<Briefcase className="w-5 h-5 text-amber-600" />}  color="bg-amber-50" />
-        <KpiCard label="Booked Moves"   value={summary['Booked Move']      ?? 0} icon={<CheckCircle className="w-5 h-5 text-green-600" />}  color="bg-green-50" />
-        <KpiCard label="Completed"      value={summary['Completed']        ?? 0} icon={<CheckCircle className="w-5 h-5 text-slate-500" />}  color="bg-slate-100" />
+        <KpiCard label="Total Clients"  value={summary['Total']           ?? 0} icon={<Users className="w-5 h-5 text-brand-600" />}            color="bg-gradient-to-br from-brand-50 to-brand-100"    accent="#7c3aed" />
+        <KpiCard label="New Leads"      value={summary['New Lead']         ?? 0} icon={<TrendingUp className="w-5 h-5 text-blue-600" />}        color="bg-gradient-to-br from-blue-50 to-blue-100"      accent="#3b82f6" />
+        <KpiCard label="Awaiting Quote" value={summary['Awaiting Quote']   ?? 0} icon={<ClipboardCheck className="w-5 h-5 text-yellow-600" />}  color="bg-gradient-to-br from-yellow-50 to-yellow-100"  accent="#eab308" />
+        <KpiCard label="Quoted"         value={(summary['Quote Sent'] ?? 0) + (summary['Quote Accepted'] ?? 0)} icon={<Briefcase className="w-5 h-5 text-amber-600" />} color="bg-gradient-to-br from-amber-50 to-amber-100" accent="#f59e0b" />
+        <KpiCard label="Booked Moves"   value={summary['Booked Move']      ?? 0} icon={<CheckCircle className="w-5 h-5 text-green-600" />}      color="bg-gradient-to-br from-green-50 to-green-100"    accent="#22c55e" />
+        <KpiCard label="Completed"      value={summary['Completed']        ?? 0} icon={<CheckCircle className="w-5 h-5 text-slate-500" />}      color="bg-gradient-to-br from-slate-100 to-slate-200"   accent="#94a3b8" />
       </div>
 
       {/* Filter bar */}
@@ -393,26 +406,26 @@ export default function CRMPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px]">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/50">
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-3">Client</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Lead Source</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Estate Agent</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Moving From</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Moving To</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden xl:table-cell">Survey Date</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Move Date</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3">Status</th>
-                    <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden xl:table-cell">Updated</th>
+                  <tr className="border-b border-slate-200/70 bg-gradient-to-b from-slate-50 to-slate-50/40">
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-5 py-3">Client</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden lg:table-cell">Lead Source</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden md:table-cell">Estate Agent</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden lg:table-cell">Moving From</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden lg:table-cell">Moving To</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden xl:table-cell">Survey Date</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Move Date</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3">Status</th>
+                    <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider px-4 py-3 hidden xl:table-cell">Updated</th>
                     <th className="w-20 px-4 py-3" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-slate-100/70">
                   {filtered.map(j => (
-                    <tr key={j.id} className="hover:bg-slate-50/60 transition-colors group cursor-pointer"
+                    <tr key={j.id} className="hover:bg-gradient-to-r hover:from-brand-50/40 hover:to-transparent transition-colors group cursor-pointer"
                       onClick={() => navigate(`/admin/crm/${j.id}`)}>
                       <td className="px-5 py-3.5">
-                        <p className="text-sm font-semibold text-slate-900 group-hover:text-brand-600 transition-colors">{j.full_name}</p>
-                        <p className="text-xs text-slate-400 mt-0.5 hidden sm:block">{j.phone || j.email || '—'}</p>
+                        <p className="text-sm font-semibold text-slate-900 group-hover:text-brand-700 transition-colors tracking-tight">{j.full_name}</p>
+                        <p className="text-xs text-slate-400 mt-0.5 hidden sm:block tabular-nums">{j.phone || j.email || '—'}</p>
                       </td>
                       <td className="px-4 py-3.5 hidden lg:table-cell">
                         <p className="text-xs text-slate-500">{j.lead_source || '—'}</p>
@@ -427,28 +440,28 @@ export default function CRMPage() {
                         <p className="text-xs text-slate-500 truncate max-w-[130px]">{shortAddr(j.to_line1, j.to_postcode)}</p>
                       </td>
                       <td className="px-4 py-3.5 hidden xl:table-cell">
-                        <p className="text-xs text-slate-500">{fmtDate(j.survey_date)}</p>
+                        <p className="text-xs text-slate-500 tabular-nums">{fmtDate(j.survey_date)}</p>
                       </td>
                       <td className="px-4 py-3.5 hidden sm:table-cell">
-                        <p className="text-xs text-slate-700 font-medium">{fmtDate(j.confirmed_move_date || j.preferred_move_date)}</p>
+                        <p className="text-xs text-slate-700 font-semibold tabular-nums">{fmtDate(j.confirmed_move_date || j.preferred_move_date)}</p>
                         {j.preferred_move_date && !j.confirmed_move_date && (
-                          <p className="text-xs text-slate-400">Preferred</p>
+                          <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Preferred</p>
                         )}
                       </td>
                       <td className="px-4 py-3.5">
                         <CrmBadge status={j.status} size="sm" />
                       </td>
                       <td className="px-4 py-3.5 hidden xl:table-cell">
-                        <p className="text-xs text-slate-400">{fmtDate(j.updated_at)}</p>
+                        <p className="text-xs text-slate-400 tabular-nums">{fmtDate(j.updated_at)}</p>
                       </td>
                       <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => navigate(`/admin/crm/${j.id}`)}
-                            className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="View">
+                            className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all hover:shadow-sm hover:scale-105 active:scale-95" title="View">
                             <Eye className="w-3.5 h-3.5" />
                           </button>
                           <button onClick={() => setDeleteTarget(j)}
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all hover:shadow-sm hover:scale-105 active:scale-95" title="Delete">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -457,8 +470,10 @@ export default function CRMPage() {
                   ))}
                 </tbody>
               </table>
-              <div className="px-5 py-3 border-t border-slate-50 bg-slate-50/30">
-                <p className="text-xs text-slate-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}{hasFilters ? ` of ${jobs.length} total` : ''}</p>
+              <div className="px-5 py-3 border-t border-slate-100/70 bg-gradient-to-b from-transparent to-slate-50/40">
+                <p className="text-xs font-medium text-slate-500 tabular-nums">
+                  {filtered.length} record{filtered.length !== 1 ? 's' : ''}{hasFilters ? ` of ${jobs.length} total` : ''}
+                </p>
               </div>
             </div>
           )}
@@ -491,7 +506,11 @@ export default function CRMPage() {
                 <div key={i} className={`min-h-[96px] p-1.5 border-r border-b border-slate-100 ${i % 7 === 6 ? 'border-r-0' : ''} ${!day || weekend ? 'bg-slate-50/40' : ''}`}>
                   {day && (
                     <>
-                      <div className={`text-xs font-medium mb-1 w-6 h-6 flex items-center justify-center rounded-full mx-auto ${isToday ? 'bg-brand-600 text-white' : 'text-slate-500'}`}>
+                      <div className={`text-xs font-bold mb-1 w-6 h-6 flex items-center justify-center rounded-full mx-auto tabular-nums ${
+                        isToday
+                          ? 'bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-[0_4px_10px_-2px_rgba(124,58,237,0.4)] ring-2 ring-white'
+                          : 'text-slate-500'
+                      }`}>
                         {day}
                       </div>
                       <div className="space-y-0.5">
