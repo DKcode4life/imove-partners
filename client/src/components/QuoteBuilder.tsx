@@ -31,8 +31,8 @@ type QuoteBuilderState = {
 } & DepositSection;
 
 const DEFAULT_DEPOSIT: DepositSection = {
-  depositType: 'none',
-  depositValue: '',
+  depositType: 'percentage',
+  depositValue: '10',
   depositPaid: false,
   depositPaidDate: '',
   balancePaid: false,
@@ -947,7 +947,7 @@ function DepositEditView({
               <input
                 type="number" min="0" step="0.01"
                 className="input pl-7 tabular-nums"
-                placeholder={section.depositType === 'percentage' ? 'e.g. 25' : 'e.g. 250'}
+                placeholder={section.depositType === 'percentage' ? 'e.g. 10' : 'e.g. 250'}
                 value={section.depositValue}
                 onChange={e => onChange('depositValue', e.target.value)}
               />
@@ -987,6 +987,11 @@ function DepositEditView({
   );
 }
 
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function PaidEditRow({
   label, paid, date, onPaidChange, onDateChange,
 }: {
@@ -996,11 +1001,19 @@ function PaidEditRow({
   onPaidChange: (v: boolean) => void;
   onDateChange: (v: string) => void;
 }) {
+  // Pre-fill today's date when toggling on, but only if the date is empty —
+  // never overwrite a value the user already entered.
+  function togglePaid() {
+    const next = !paid;
+    onPaidChange(next);
+    if (next && !date) onDateChange(todayISO());
+  }
+
   return (
     <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
       <button
         type="button"
-        onClick={() => onPaidChange(!paid)}
+        onClick={togglePaid}
         className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${
           paid
             ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-2 border-emerald-600 shadow-sm'
