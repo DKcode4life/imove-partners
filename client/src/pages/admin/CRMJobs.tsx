@@ -47,8 +47,8 @@ const STATUS_CFG: Record<string, {
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? STATUS_CFG['Completed'];
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.dot}`} />
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-inset ring-white/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ${c.bg} ${c.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ring-2 ring-white/70 ${c.dot}`} />
       {status}
     </span>
   );
@@ -101,16 +101,22 @@ function fmtMoney(n: number) {
 interface PerfCardProps {
   label: string; value: string; sub: string;
   icon: React.ReactNode; iconBg: string; iconColor: string;
+  accent: string;          // hex colour for the top accent stripe
   highlight?: boolean;
 }
 
-function PerfCard({ label, value, sub, icon, iconBg, iconColor, highlight }: PerfCardProps) {
+function PerfCard({ label, value, sub, icon, iconBg, iconColor, accent, highlight }: PerfCardProps) {
   return (
-    <div className={`card p-4 ${highlight ? 'ring-2 ring-brand-200' : ''}`}>
-      <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${iconBg}`}>
+    <div className={`group relative bg-gradient-to-br from-white via-white to-slate-50/50 rounded-xl border border-slate-200/70 shadow-[0_1px_2px_0_rgba(15,23,42,0.04)] hover:shadow-[0_8px_20px_-6px_rgba(15,23,42,0.14),0_2px_4px_-2px_rgba(15,23,42,0.06)] hover:-translate-y-px transition-all duration-200 p-4 overflow-hidden ${highlight ? 'ring-2 ring-brand-200' : ''}`}>
+      {/* Top accent stripe */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[3px]"
+        style={{ background: `linear-gradient(90deg, ${accent}, ${accent}cc 60%, ${accent}55)` }}
+      />
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ring-1 ring-inset ring-white/50 shadow-sm bg-gradient-to-br ${iconBg}`}>
         <span className={iconColor}>{icon}</span>
       </div>
-      <p className="text-2xl font-bold text-slate-900 leading-none mb-1 tabular-nums">{value}</p>
+      <p className="text-2xl font-bold text-slate-900 leading-none mb-1 tabular-nums tracking-tight">{value}</p>
       <p className="text-xs font-semibold text-slate-700 mb-0.5">{label}</p>
       <p className="text-xs text-slate-400">{sub}</p>
     </div>
@@ -317,7 +323,7 @@ export default function CRMJobsPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="page-title">Jobs</h1>
+          <h1 className="page-title tracking-tight">Jobs</h1>
           <p className="page-subtitle">Manage and track all removals jobs from lead to completion</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -349,7 +355,8 @@ export default function CRMJobsPage() {
             value={String(stats.total)}
             sub="created this month"
             icon={<TrendingUp className="w-4.5 h-4.5" />}
-            iconBg="bg-brand-50" iconColor="text-brand-600"
+            iconBg="from-brand-50 to-brand-100" iconColor="text-brand-600"
+            accent="#7c3aed"
             highlight={stats.total > 0}
           />
           <PerfCard
@@ -357,35 +364,40 @@ export default function CRMJobsPage() {
             value={stats.surveyRate != null ? `${stats.surveyRate}%` : '—'}
             sub={stats.surveyRate != null ? 'of this month\'s jobs' : 'no jobs yet'}
             icon={<ClipboardCheck className="w-4.5 h-4.5" />}
-            iconBg="bg-cyan-50" iconColor="text-cyan-600"
+            iconBg="from-cyan-50 to-cyan-100" iconColor="text-cyan-600"
+            accent="#06b6d4"
           />
           <PerfCard
             label="Booking Rate"
             value={stats.bookingRate != null ? `${stats.bookingRate}%` : '—'}
             sub={stats.bookingRate != null ? 'reached booked / in progress' : 'no jobs yet'}
             icon={<CalendarCheck className="w-4.5 h-4.5" />}
-            iconBg="bg-green-50" iconColor="text-green-600"
+            iconBg="from-green-50 to-green-100" iconColor="text-green-600"
+            accent="#22c55e"
           />
           <PerfCard
             label="Avg Job Value"
             value={stats.avgValue != null ? fmtMoney(stats.avgValue) : '—'}
             sub="across all quoted jobs"
             icon={<Banknote className="w-4.5 h-4.5" />}
-            iconBg="bg-amber-50" iconColor="text-amber-600"
+            iconBg="from-amber-50 to-amber-100" iconColor="text-amber-600"
+            accent="#f59e0b"
           />
           <PerfCard
             label="Pipeline Value"
             value={stats.pipelineValue > 0 ? fmtMoney(stats.pipelineValue) : '—'}
             sub="active jobs with quotes"
             icon={<BarChart3 className="w-4.5 h-4.5" />}
-            iconBg="bg-violet-50" iconColor="text-violet-600"
+            iconBg="from-violet-50 to-violet-100" iconColor="text-violet-600"
+            accent="#8b5cf6"
           />
           <PerfCard
             label="Confirmed Moves"
             value={String(stats.confirmedThisMonth)}
             sub="move dates set this month"
             icon={<CalendarDays className="w-4.5 h-4.5" />}
-            iconBg="bg-orange-50" iconColor="text-orange-600"
+            iconBg="from-orange-50 to-orange-100" iconColor="text-orange-600"
+            accent="#f97316"
           />
         </div>
       </div>
@@ -445,7 +457,7 @@ export default function CRMJobsPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px]">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/50">
+                <tr className="border-b border-slate-200/70 bg-gradient-to-b from-slate-50 to-slate-50/40">
                   <th className="text-left px-5 py-3 w-[100px]">
                     <SortBtn col="id" label="Ref" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </th>
@@ -453,16 +465,16 @@ export default function CRMJobsPage() {
                     <SortBtn col="full_name" label="Client" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </th>
                   <th className="text-left px-4 py-3 hidden lg:table-cell">
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Route</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Route</span>
                   </th>
                   <th className="text-left px-4 py-3 hidden md:table-cell">
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Bedrooms</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Bedrooms</span>
                   </th>
                   <th className="text-left px-4 py-3 hidden sm:table-cell">
                     <SortBtn col="confirmed_move_date" label="Move Date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </th>
                   <th className="text-left px-4 py-3 hidden xl:table-cell">
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Quote</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Quote</span>
                   </th>
                   <th className="text-left px-4 py-3">
                     <SortBtn col="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -473,7 +485,7 @@ export default function CRMJobsPage() {
                   <th className="w-16 px-4 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-slate-100/70">
                 {sorted.map(j => {
                   const moveDate = j.confirmed_move_date || j.preferred_move_date;
                   const isConfirmed = !!j.confirmed_move_date;
@@ -481,22 +493,22 @@ export default function CRMJobsPage() {
                   const toAddr   = shortAddr(j.to_line1, j.to_postcode);
                   return (
                     <tr key={j.id}
-                      className="hover:bg-slate-50/60 transition-colors group cursor-pointer"
+                      className="hover:bg-gradient-to-r hover:from-brand-50/40 hover:to-transparent transition-colors group cursor-pointer"
                       onClick={() => navigate(`/admin/crm/${j.id}`)}>
 
                       {/* Ref */}
                       <td className="px-5 py-3.5">
-                        <span className="text-xs font-mono font-semibold text-slate-400 group-hover:text-brand-500 transition-colors">
+                        <span className="text-xs font-mono font-semibold text-slate-400 group-hover:text-brand-500 transition-colors tabular-nums">
                           {jobRef(j.id)}
                         </span>
                       </td>
 
                       {/* Client */}
                       <td className="px-4 py-3.5">
-                        <p className="text-sm font-semibold text-slate-900 group-hover:text-brand-600 transition-colors">
+                        <p className="text-sm font-semibold text-slate-900 group-hover:text-brand-700 transition-colors tracking-tight">
                           {j.full_name}
                         </p>
-                        <p className="text-xs text-slate-400 mt-0.5">{j.phone || j.email || '—'}</p>
+                        <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{j.phone || j.email || '—'}</p>
                       </td>
 
                       {/* Route */}
@@ -521,20 +533,22 @@ export default function CRMJobsPage() {
                       <td className="px-4 py-3.5 hidden sm:table-cell">
                         {moveDate ? (
                           <>
-                            <p className={`text-sm font-semibold ${isConfirmed ? 'text-slate-900' : 'text-slate-500'}`}>
+                            <p className={`text-sm font-semibold tabular-nums ${isConfirmed ? 'text-slate-900' : 'text-slate-500'}`}>
                               {fmtDate(moveDate)}
                             </p>
-                            <p className="text-xs text-slate-400">{isConfirmed ? 'Confirmed' : 'Preferred'}</p>
+                            <p className={`text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isConfirmed ? 'text-emerald-600' : 'text-slate-400'}`}>
+                              {isConfirmed ? 'Confirmed' : 'Preferred'}
+                            </p>
                           </>
                         ) : (
-                          <span className="text-xs text-slate-300">Not set</span>
+                          <span className="text-xs text-slate-300 italic">Not set</span>
                         )}
                       </td>
 
                       {/* Quote */}
                       <td className="px-4 py-3.5 hidden xl:table-cell">
                         {j.quote_amount != null ? (
-                          <span className="text-sm font-semibold text-slate-700">
+                          <span className="text-sm font-bold text-slate-700 tabular-nums">
                             £{j.quote_amount.toLocaleString('en-GB', { minimumFractionDigits: 0 })}
                           </span>
                         ) : (
@@ -549,18 +563,18 @@ export default function CRMJobsPage() {
 
                       {/* Updated */}
                       <td className="px-4 py-3.5 hidden xl:table-cell">
-                        <span className="text-xs text-slate-400">{fmtDate(j.updated_at)}</span>
+                        <span className="text-xs text-slate-400 tabular-nums">{fmtDate(j.updated_at)}</span>
                       </td>
 
                       {/* Actions */}
                       <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => navigate(`/admin/crm/${j.id}`)}
-                            className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Open">
+                            className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all hover:shadow-sm hover:scale-105 active:scale-95" title="Open">
                             <Eye className="w-3.5 h-3.5" />
                           </button>
                           <button onClick={() => setDeleteTarget(j)}
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all hover:shadow-sm hover:scale-105 active:scale-95" title="Delete">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>

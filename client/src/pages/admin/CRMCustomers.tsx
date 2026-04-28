@@ -27,7 +27,7 @@ function StatBadge({ count, icon, color, title }: { count: number; icon: React.R
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold tabular-nums ${color}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold tabular-nums ring-1 ring-inset ring-white/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ${color}`}
     >
       {icon}
       {count}
@@ -130,8 +130,8 @@ export default function CRMCustomers() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Customer Database</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{customers.length} customer{customers.length !== 1 ? 's' : ''}</p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Customer Database</h1>
+          <p className="text-sm text-slate-500 mt-0.5 tabular-nums">{customers.length} customer{customers.length !== 1 ? 's' : ''}</p>
         </div>
         <button
           onClick={() => setNewOpen(true)}
@@ -177,16 +177,21 @@ export default function CRMCustomers() {
         </div>
       ) : customers.length === 0 ? (
         <div className="card p-12 text-center">
-          <UserCircle2 className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-          <p className="text-sm font-medium text-slate-500">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200/60 flex items-center justify-center mx-auto mb-4 ring-1 ring-inset ring-white/50 shadow-sm">
+            <UserCircle2 className="w-8 h-8 text-slate-400" />
+          </div>
+          <p className="text-sm font-semibold text-slate-700 mb-1">
             {search ? 'No customers match your search' : 'No customers yet'}
+          </p>
+          <p className="text-xs text-slate-400 mb-4">
+            {search ? 'Try adjusting your search' : 'Add your first customer to start tracking moves and referrals'}
           </p>
           {!search && (
             <button
               onClick={() => setNewOpen(true)}
-              className="mt-4 text-sm text-brand-600 hover:text-brand-700 font-medium"
+              className="btn-primary"
             >
-              Add your first customer →
+              <Plus className="w-4 h-4" /> Add your first customer
             </button>
           )}
         </div>
@@ -194,30 +199,30 @@ export default function CRMCustomers() {
         <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Contact</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Address</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Stats</th>
+              <tr className="border-b border-slate-200/70 bg-gradient-to-b from-slate-50 to-slate-50/40">
+                <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Customer</th>
+                <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider hidden md:table-cell">Contact</th>
+                <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Address</th>
+                <th className="text-center px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Stats</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody className="divide-y divide-slate-100/70">
               {customers.map(c => (
                 <tr
                   key={c.id}
                   onClick={() => navigate(`/admin/crm/customers/${c.id}`)}
-                  className="hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="hover:bg-gradient-to-r hover:from-brand-50/40 hover:to-transparent cursor-pointer transition-colors group"
                 >
                   {/* Name */}
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-100 to-brand-200 flex items-center justify-center flex-shrink-0 ring-1 ring-inset ring-white/50 shadow-sm">
                         <span className="text-sm font-bold text-brand-700">
                           {c.full_name.charAt(0).toUpperCase()}
                         </span>
                       </div>
-                      <span className="font-semibold text-slate-900">{c.full_name}</span>
+                      <span className="font-semibold text-slate-900 group-hover:text-brand-700 transition-colors tracking-tight">{c.full_name}</span>
                     </div>
                   </td>
 
@@ -225,7 +230,7 @@ export default function CRMCustomers() {
                   <td className="px-4 py-3.5 hidden md:table-cell">
                     <div className="space-y-0.5">
                       {c.phone && (
-                        <div className="flex items-center gap-1.5 text-slate-600">
+                        <div className="flex items-center gap-1.5 text-slate-600 tabular-nums">
                           <Phone className="w-3.5 h-3.5 text-slate-400" />
                           {c.phone}
                         </div>
@@ -254,19 +259,19 @@ export default function CRMCustomers() {
                       <StatBadge
                         count={c.jobs_count}
                         icon={<Briefcase className="w-3 h-3" />}
-                        color="bg-blue-100 text-blue-700"
+                        color="bg-gradient-to-br from-blue-50 to-blue-100 text-blue-700"
                         title={`${c.jobs_count} job${c.jobs_count !== 1 ? 's' : ''}`}
                       />
                       <StatBadge
                         count={c.storage_count}
                         icon={<Archive className="w-3 h-3" />}
-                        color="bg-orange-100 text-orange-700"
+                        color="bg-gradient-to-br from-orange-50 to-orange-100 text-orange-700"
                         title={`${c.storage_count} storage job${c.storage_count !== 1 ? 's' : ''}`}
                       />
                       <StatBadge
                         count={c.referrals_count}
                         icon={<Users className="w-3 h-3" />}
-                        color="bg-green-100 text-green-700"
+                        color="bg-gradient-to-br from-green-50 to-green-100 text-green-700"
                         title={`${c.referrals_count} referral${c.referrals_count !== 1 ? 's' : ''}`}
                       />
                     </div>
@@ -276,7 +281,7 @@ export default function CRMCustomers() {
                   <td className="px-4 py-3.5 text-right">
                     <button
                       onClick={e => { e.stopPropagation(); setDeleteTarget(c); }}
-                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all hover:shadow-sm hover:scale-105 active:scale-95"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
