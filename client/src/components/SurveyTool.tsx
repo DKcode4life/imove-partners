@@ -1,113 +1,41 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, ClipboardList, Minus, Plus, MessageSquare } from 'lucide-react';
+import type { CatalogCategory } from '../data/inventoryCatalog';
+import { loadCatalog } from '../lib/catalogStorage';
 
-// ── Room catalogue ─────────────────────────────────────────────────────────────
+// ── Survey room definitions ────────────────────────────────────────────────────
+// Each room has a fixed display name (used as the key in SurveyData) and a
+// categoryId that maps to the inventory catalog for its item list.
 
-type RoomItem = { name: string; icon: string };
-type Room     = { name: string; items: RoomItem[] };
-
-const ROOMS: Room[] = [
-  {
-    name: 'Living Room',
-    items: [
-      { name: 'Sofa',         icon: '🛋️' },
-      { name: 'Coffee Table', icon: '🍵' },
-      { name: 'TV Unit',      icon: '📺' },
-      { name: 'Armchair',     icon: '🪑' },
-      { name: 'Bookcase',     icon: '📚' },
-    ],
-  },
-  {
-    name: 'Bedroom 1',
-    items: [
-      { name: 'King Bed',         icon: '🛏️' },
-      { name: 'Wardrobe',         icon: '🚪' },
-      { name: 'Bedside Table',    icon: '💡' },
-      { name: 'Chest of Drawers', icon: '🗄️' },
-      { name: 'Dressing Table',   icon: '🪞' },
-    ],
-  },
-  {
-    name: 'Bedroom 2',
-    items: [
-      { name: 'Double Bed',       icon: '🛏️' },
-      { name: 'Wardrobe',         icon: '🚪' },
-      { name: 'Bedside Table',    icon: '💡' },
-      { name: 'Chest of Drawers', icon: '🗄️' },
-      { name: 'Desk',             icon: '✏️' },
-    ],
-  },
-  {
-    name: 'Bedroom 3',
-    items: [
-      { name: 'Single Bed',       icon: '🛏️' },
-      { name: 'Wardrobe',         icon: '🚪' },
-      { name: 'Bedside Table',    icon: '💡' },
-      { name: 'Chest of Drawers', icon: '🗄️' },
-      { name: 'Desk',             icon: '✏️' },
-    ],
-  },
-  {
-    name: 'Kitchen',
-    items: [
-      { name: 'Fridge Freezer',  icon: '🧊' },
-      { name: 'Washing Machine', icon: '🫧' },
-      { name: 'Dishwasher',      icon: '🍽️' },
-      { name: 'Microwave',       icon: '📡' },
-      { name: 'Kitchen Table',   icon: '🍴' },
-    ],
-  },
-  {
-    name: 'Study',
-    items: [
-      { name: 'Desk',             icon: '🖥️' },
-      { name: 'Office Chair',     icon: '🪑' },
-      { name: 'Bookcase',         icon: '📚' },
-      { name: 'Filing Cabinet',   icon: '🗃️' },
-      { name: 'Computer Monitor', icon: '💻' },
-    ],
-  },
-  {
-    name: 'Dining Room',
-    items: [
-      { name: 'Dining Table',    icon: '🍽️' },
-      { name: 'Dining Chairs',   icon: '🪑' },
-      { name: 'Sideboard',       icon: '🗄️' },
-      { name: 'Display Cabinet', icon: '🪟' },
-      { name: 'Bar Stool',       icon: '🍺' },
-    ],
-  },
-  {
-    name: 'Utility Room',
-    items: [
-      { name: 'Washing Machine', icon: '🌊' },
-      { name: 'Tumble Dryer',    icon: '🌀' },
-      { name: 'Storage Shelves', icon: '📦' },
-      { name: 'Ironing Board',   icon: '👕' },
-      { name: 'Chest Freezer',   icon: '🧊' },
-    ],
-  },
-  {
-    name: 'Garage',
-    items: [
-      { name: 'Workbench',     icon: '🔨' },
-      { name: 'Tool Cabinet',  icon: '🔧' },
-      { name: 'Shelving Unit', icon: '📦' },
-      { name: 'Lawnmower',     icon: '🌱' },
-      { name: 'Bicycle',       icon: '🚲' },
-    ],
-  },
-  {
-    name: 'Garden',
-    items: [
-      { name: 'Garden Table',  icon: '🪴' },
-      { name: 'Garden Chairs', icon: '🪑' },
-      { name: 'BBQ',           icon: '🔥' },
-      { name: 'Garden Shed',   icon: '🏠' },
-      { name: 'Parasol',       icon: '☂️' },
-    ],
-  },
+const SURVEY_ROOMS = [
+  { id: 'living-room',   name: 'Living Room',        categoryId: 'living-room' },
+  { id: 'bedroom-1',     name: 'Bedroom 1',           categoryId: 'bedroom' },
+  { id: 'bedroom-2',     name: 'Bedroom 2',           categoryId: 'bedroom' },
+  { id: 'bedroom-3',     name: 'Bedroom 3',           categoryId: 'bedroom' },
+  { id: 'kitchen',       name: 'Kitchen & Utility',   categoryId: 'kitchen-utility' },
+  { id: 'garage',        name: 'Garage / Garden',     categoryId: 'garage-garden' },
+  { id: 'office',        name: 'Office & Commercial', categoryId: 'office-commercial' },
 ];
+
+// ── Volume helpers ─────────────────────────────────────────────────────────────
+
+const FT3_TO_M3 = 0.028317;
+const fmtFt = (n: number) => n.toFixed(1);
+const fmtM3 = (n: number) => (n * FT3_TO_M3).toFixed(2);
+
+function roomVolumeFt(
+  roomName: string,
+  roomData: RoomRecord,
+  catalog: CatalogCategory[],
+  categoryId: string,
+): number {
+  const cat = catalog.find(c => c.id === categoryId);
+  if (!cat) return 0;
+  return Object.entries(roomData).reduce((total, [itemName, entry]) => {
+    const catalogItem = cat.items.find(i => i.name === itemName);
+    return total + (catalogItem?.volumeCuFt ?? 0) * entry.count;
+  }, 0);
+}
 
 // ── Data types & storage ───────────────────────────────────────────────────────
 
@@ -127,9 +55,7 @@ function loadData(jobId: string | undefined): SurveyData {
     for (const [room, items] of Object.entries(raw)) {
       out[room] = {};
       for (const [item, val] of Object.entries(items)) {
-        out[room][item] = typeof val === 'number'
-          ? { count: val, note: '' }
-          : val;
+        out[room][item] = typeof val === 'number' ? { count: val, note: '' } : val;
       }
     }
     return out;
@@ -150,7 +76,6 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
   const [text, setText] = useState(currentNote);
 
   return (
-    // Backdrop — click outside to cancel
     <div
       className="absolute inset-0 z-[10] flex items-center justify-center bg-black/30 backdrop-blur-sm p-6"
       onClick={onClose}
@@ -159,7 +84,6 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
         className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-3">
           <span className="text-2xl leading-none">{itemIcon}</span>
           <div className="flex-1">
@@ -174,7 +98,6 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
           </button>
         </div>
 
-        {/* Textarea */}
         <div className="px-5 pb-4">
           <textarea
             autoFocus
@@ -193,7 +116,6 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
           <p className="text-[11px] text-slate-400 mt-1.5">⌘ Enter to save</p>
         </div>
 
-        {/* Actions */}
         <div className="flex gap-2 px-5 pb-5">
           <button
             onClick={onClose}
@@ -217,8 +139,8 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
 
 const LONG_PRESS_MS = 500;
 
-function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCount, onOpenNote }: {
-  name: string; icon: string; count: number; note: string;
+function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrement, onSetCount, onOpenNote }: {
+  name: string; icon: string; count: number; note: string; volumeCuFt: number;
   onIncrement: () => void;
   onDecrement: () => void;
   onSetCount: (n: number) => void;
@@ -227,15 +149,13 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
   const [editingCount, setEditingCount] = useState(false);
   const [raw,          setRaw]          = useState('');
 
-  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pressState  = useRef<'pending' | 'fired' | 'idle'>('idle');
+  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressState = useRef<'pending' | 'fired' | 'idle'>('idle');
 
   const active  = count > 0;
   const hasNote = note.trim().length > 0;
 
-  // ── Long-press handlers ────────────────────────────────────────────────────
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Only respond to primary button / finger
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pressState.current = 'pending';
     timerRef.current = setTimeout(() => {
@@ -256,7 +176,6 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
     pressState.current = 'idle';
   };
 
-  // ── Count edit ─────────────────────────────────────────────────────────────
   const startCountEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     setRaw(String(count));
@@ -277,7 +196,7 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
           : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
       }`}
     >
-      {/* Count badge — top-right */}
+      {/* Count badge */}
       {active && (
         editingCount ? (
           <input
@@ -304,7 +223,7 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
         )
       )}
 
-      {/* Note indicator — top-left */}
+      {/* Note indicator */}
       {hasNote && (
         <button
           onClick={e => { e.stopPropagation(); onOpenNote(); }}
@@ -315,7 +234,7 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
         </button>
       )}
 
-      {/* Emoji — short tap = add, long press = note */}
+      {/* Emoji — tap = add, long press = note */}
       <button
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
@@ -323,20 +242,27 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
         onPointerCancel={handlePointerCancel}
         onContextMenu={e => e.preventDefault()}
         title="Tap to add · hold to add a note"
-        className="text-3xl leading-none mb-2 select-none hover:scale-110 transition-transform active:scale-95 touch-none"
+        className="text-3xl leading-none mb-1.5 select-none hover:scale-110 transition-transform active:scale-95 touch-none"
       >
         {icon}
       </button>
 
       {/* Name */}
-      <p className={`text-[11px] font-medium text-center leading-tight mb-2.5 px-1 ${
+      <p className={`text-[10px] font-medium text-center leading-tight px-1 ${
         active ? 'text-teal-800' : 'text-slate-500'
       }`}>
         {name}
       </p>
 
-      {/* − + controls */}
-      <div className="flex items-center gap-2 mt-auto">
+      {/* Volume per unit */}
+      {volumeCuFt > 0 && (
+        <p className="text-[9px] text-slate-400 tabular-nums mt-0.5">
+          {volumeCuFt} ft³
+        </p>
+      )}
+
+      {/* −/+ controls */}
+      <div className="flex items-center gap-2 mt-auto pt-2">
         <button
           onClick={onDecrement}
           disabled={!active}
@@ -362,10 +288,11 @@ function ItemSquare({ name, icon, count, note, onIncrement, onDecrement, onSetCo
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
-  const [open,         setOpen]         = useState(false);
-  const [data,         setData]         = useState<SurveyData>(() => loadData(jobId));
-  const [selectedRoom, setSelectedRoom] = useState(ROOMS[0].name);
-  const [noteModal,    setNoteModal]    = useState<{ room: string; item: string; icon: string } | null>(null);
+  const [catalog]        = useState<CatalogCategory[]>(() => loadCatalog());
+  const [open,           setOpen]           = useState(false);
+  const [data,           setData]           = useState<SurveyData>(() => loadData(jobId));
+  const [selectedRoomId, setSelectedRoomId] = useState(SURVEY_ROOMS[0].id);
+  const [noteModal,      setNoteModal]      = useState<{ room: string; item: string; icon: string } | null>(null);
 
   useEffect(() => { setData(loadData(jobId)); }, [jobId]);
 
@@ -423,38 +350,43 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
 
   const saveNote = (room: string, item: string, note: string) => {
     const e = getEntry(room, item);
-    // If item has no count yet, opening a note still adds a count of 1
     setEntry(room, item, { count: Math.max(e.count, note ? 1 : e.count), note });
   };
 
   // ── Derived stats ────────────────────────────────────────────────────────────
 
-  const roomTotal = (room: string) =>
-    Object.values(data[room] || {}).reduce((s, e) => s + e.count, 0);
+  const roomItemCount = (roomName: string) =>
+    Object.values(data[roomName] || {}).reduce((s, e) => s + e.count, 0);
 
-  const grandTotal = Object.values(data).reduce(
-    (s, r) => s + Object.values(r).reduce((ss, e) => ss + e.count, 0), 0);
+  const grandItemCount = SURVEY_ROOMS.reduce(
+    (s, r) => s + roomItemCount(r.name), 0);
 
-  const roomsWithItems = Object.values(data).filter(
-    r => Object.values(r).some(e => e.count > 0)
-  ).length;
+  const roomsWithItems = SURVEY_ROOMS.filter(r => roomItemCount(r.name) > 0).length;
 
-  const currentRoom = ROOMS.find(r => r.name === selectedRoom)!;
-  const roomData    = data[selectedRoom] || {};
+  const getRoomVol = (r: typeof SURVEY_ROOMS[0]) =>
+    roomVolumeFt(r.name, data[r.name] ?? {}, catalog, r.categoryId);
+
+  const totalVolFt = SURVEY_ROOMS.reduce((s, r) => s + getRoomVol(r), 0);
+
+  const currentRoom = SURVEY_ROOMS.find(r => r.id === selectedRoomId) ?? SURVEY_ROOMS[0];
+  const roomData    = data[currentRoom.name] ?? {};
+  const catItems    = catalog.find(c => c.id === currentRoom.categoryId)?.items ?? [];
+  const curRoomVol  = getRoomVol(currentRoom);
+  const curRoomCount= roomItemCount(currentRoom.name);
 
   return (
     <>
-      {/* ── Card summary ─────────────────────────────────────────────────────── */}
+      {/* ── Compact card (shown in CRM job profile) ───────────────────────────── */}
       <div className="space-y-3">
-        {grandTotal > 0 ? (
-          <div className="flex items-center gap-2 bg-gradient-to-r from-teal-50 to-teal-100/50 rounded-xl px-3 py-2.5 border border-teal-100">
+        {totalVolFt > 0 ? (
+          <div className="flex items-center gap-3 bg-gradient-to-r from-teal-50 to-teal-100/50 rounded-xl px-3 py-2.5 border border-teal-100">
             <ClipboardList className="w-4 h-4 text-teal-600 flex-shrink-0" />
             <div>
               <p className="text-xs font-bold text-teal-800 tabular-nums">
-                {grandTotal} item{grandTotal !== 1 ? 's' : ''}
+                {fmtFt(totalVolFt)} ft³ &nbsp;·&nbsp; {fmtM3(totalVolFt)} m³
               </p>
               <p className="text-[11px] text-teal-600">
-                {roomsWithItems} room{roomsWithItems !== 1 ? 's' : ''} surveyed
+                {grandItemCount} item{grandItemCount !== 1 ? 's' : ''} across {roomsWithItems} room{roomsWithItems !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
@@ -485,11 +417,16 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
               </div>
               <div>
                 <h2 className="text-base font-bold text-slate-900 tracking-tight">Survey Inventory</h2>
-                <p className="text-xs text-slate-500">
-                  {grandTotal > 0
-                    ? `${grandTotal} item${grandTotal !== 1 ? 's' : ''} across ${roomsWithItems} room${roomsWithItems !== 1 ? 's' : ''}`
-                    : 'Tap to add · hold to add a note'}
-                </p>
+                {totalVolFt > 0 ? (
+                  <p className="text-xs text-slate-500 tabular-nums">
+                    <span className="font-semibold text-teal-700">{fmtFt(totalVolFt)} ft³</span>
+                    {' '}·{' '}
+                    <span className="font-semibold text-teal-700">{fmtM3(totalVolFt)} m³</span>
+                    {' '}total &nbsp;·&nbsp; {grandItemCount} item{grandItemCount !== 1 ? 's' : ''} across {roomsWithItems} room{roomsWithItems !== 1 ? 's' : ''}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500">Tap to add · hold to add a note</p>
+                )}
               </div>
             </div>
             <button
@@ -504,26 +441,34 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
           <div className="flex flex-1 min-h-0 relative">
             {/* ── Room sidebar ─────────────────────────────────────────────── */}
             <div className="w-52 bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto py-3 px-2">
-              {ROOMS.map(r => {
-                const tot      = roomTotal(r.name);
-                const isActive = r.name === selectedRoom;
+              {SURVEY_ROOMS.map(r => {
+                const count   = roomItemCount(r.name);
+                const vol     = getRoomVol(r);
+                const isActive = r.id === selectedRoomId;
                 return (
                   <button
-                    key={r.name}
-                    onClick={() => setSelectedRoom(r.name)}
+                    key={r.id}
+                    onClick={() => setSelectedRoomId(r.id)}
                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all mb-1 ${
                       isActive
                         ? 'bg-teal-50 text-teal-800 shadow-sm ring-1 ring-teal-100'
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
                     }`}
                   >
-                    <span>{r.name}</span>
-                    {tot > 0 && (
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full tabular-nums ${
-                        isActive ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {tot}
-                      </span>
+                    <span className="truncate text-left">{r.name}</span>
+                    {count > 0 && (
+                      <div className="flex-shrink-0 ml-2 text-right">
+                        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full tabular-nums block ${
+                          isActive ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {count}
+                        </span>
+                        {vol > 0 && (
+                          <span className="text-[9px] text-slate-400 tabular-nums">
+                            {fmtFt(vol)} ft³
+                          </span>
+                        )}
+                      </div>
                     )}
                   </button>
                 );
@@ -532,31 +477,42 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
 
             {/* ── Items grid ───────────────────────────────────────────────── */}
             <div className="flex-1 overflow-y-auto p-6">
-              <div className="flex items-center gap-3 mb-5">
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                  {currentRoom.name}
-                </h3>
-                {roomTotal(selectedRoom) > 0 && (
-                  <span className="px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-700 text-xs font-bold tabular-nums">
-                    {roomTotal(selectedRoom)} item{roomTotal(selectedRoom) !== 1 ? 's' : ''}
+              {/* Room header with volume total */}
+              <div className="flex items-start justify-between mb-5">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                    {currentRoom.name}
+                  </h3>
+                  {curRoomVol > 0 && (
+                    <p className="text-sm text-slate-500 tabular-nums mt-0.5">
+                      <span className="font-semibold text-teal-700">{fmtFt(curRoomVol)} ft³</span>
+                      {' '}·{' '}
+                      <span className="font-semibold text-teal-700">{fmtM3(curRoomVol)} m³</span>
+                    </p>
+                  )}
+                </div>
+                {curRoomCount > 0 && (
+                  <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-700 text-xs font-bold tabular-nums flex-shrink-0">
+                    {curRoomCount} item{curRoomCount !== 1 ? 's' : ''}
                   </span>
                 )}
               </div>
 
               <div className="grid grid-cols-5 gap-3">
-                {currentRoom.items.map(({ name, icon }) => {
+                {catItems.map(({ id, name, icon, volumeCuFt }) => {
                   const entry = roomData[name] ?? { count: 0, note: '' };
                   return (
                     <ItemSquare
-                      key={name}
+                      key={id}
                       name={name}
                       icon={icon}
                       count={entry.count}
                       note={entry.note}
-                      onIncrement={() => increment(selectedRoom, name)}
-                      onDecrement={() => decrement(selectedRoom, name)}
-                      onSetCount={n => setItemCount(selectedRoom, name, n)}
-                      onOpenNote={() => setNoteModal({ room: selectedRoom, item: name, icon })}
+                      volumeCuFt={volumeCuFt}
+                      onIncrement={() => increment(currentRoom.name, name)}
+                      onDecrement={() => decrement(currentRoom.name, name)}
+                      onSetCount={n => setItemCount(currentRoom.name, name, n)}
+                      onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
                     />
                   );
                 })}
@@ -567,7 +523,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
               </p>
             </div>
 
-            {/* ── Note modal (rendered inside the overlay to keep z-index simple) */}
+            {/* Note modal */}
             {noteModal && (
               <NoteModal
                 itemName={noteModal.item}

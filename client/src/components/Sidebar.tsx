@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, ClipboardList, Users, LogOut, PoundSterling, Settings, Briefcase, ChevronLeft, ChevronRight, ArrowLeftRight,
+  LayoutDashboard, ClipboardList, Users, LogOut, PoundSterling, Settings, Briefcase, ChevronLeft, ChevronRight, ArrowLeftRight, Package,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
@@ -145,6 +145,29 @@ export default function Sidebar() {
             {!collapsed && item.label}
           </NavLink>
         ))}
+
+        {/* Admin: Inventory Settings (CRM surface only) */}
+        {user?.role === 'admin' && surface !== 'partners' && (
+          <>
+            {!collapsed && <div className="!mt-3 !mb-1 border-t border-slate-200" />}
+            <NavLink
+              to="/admin/crm/inventory"
+              title={collapsed ? 'Inventory Settings' : undefined}
+              className={({ isActive }) =>
+                `flex items-center rounded-lg text-sm font-medium transition-colors ${
+                  collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
+                } ${
+                  isActive
+                    ? 'bg-brand-50 text-brand-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`
+              }
+            >
+              <Package className="w-5 h-5" />
+              {!collapsed && 'Inventory'}
+            </NavLink>
+          </>
+        )}
 
         {/* Admin: Leads by status */}
         {user?.role === 'admin' && !collapsed && (

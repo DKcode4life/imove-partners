@@ -26,6 +26,7 @@ import AdminCRMCustomerDetail from './pages/admin/CRMCustomerDetail';
 import AdminCRMJobs from './pages/admin/CRMJobs';
 import AdminCRMPlanner from './pages/admin/CRMPlanner';
 import AdminCRMSettings from './pages/admin/CRMSettings';
+import AdminInventorySettings from './pages/admin/InventorySettings';
 
 export default function App() {
   // Subdomain-aware route gating:
@@ -73,6 +74,7 @@ export default function App() {
                 <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
                 <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />
                 <Route path="/admin/crm/settings" element={<AdminCRMSettings />} />
+                <Route path="/admin/crm/inventory" element={<AdminInventorySettings />} />
                 <Route path="/admin/crm/:id" element={<AdminCRMDetail />} />
               </>
             )}
