@@ -9,6 +9,10 @@ export type LineItem = {
   price: number;
 };
 
+export type AddonItem = LineItem & {
+  selected: boolean;       // ticked → counts in Fix Quotation total; unticked → Add-ons Total
+};
+
 type DepositType = 'none' | 'percentage' | 'fixed';
 
 type DepositSection = {
@@ -22,7 +26,8 @@ type DepositSection = {
 
 type QuoteBuilderState = {
   estimateItems: LineItem[];
-  quotationItems: LineItem[];
+  quotationItems: LineItem[];   // Fix Quotation mandatory items
+  quotationAddons: AddonItem[]; // Fix Quotation optional add-ons
 } & DepositSection;
 
 const DEFAULT_DEPOSIT: DepositSection = {
@@ -37,6 +42,7 @@ const DEFAULT_DEPOSIT: DepositSection = {
 const DEFAULT_STATE: QuoteBuilderState = {
   estimateItems: [],
   quotationItems: [],
+  quotationAddons: [],
   ...DEFAULT_DEPOSIT,
 };
 
@@ -55,7 +61,7 @@ function fmtDateShort(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function listTotal(items: LineItem[]) {
+function listTotal(items: { price: number }[]) {
   return items.reduce((a, i) => a + (Number.isFinite(i.price) ? i.price : 0), 0);
 }
 
@@ -65,8 +71,7 @@ function loadFromStorage(jobId: string | number | undefined): QuoteBuilderState 
     const raw = localStorage.getItem(`crm-quote-${jobId}`);
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw);
-    // Strip any legacy `discount` field from items.
-    const stripDiscount = (items: unknown): LineItem[] =>
+    const stripItems = (items: unknown): LineItem[] =>
       Array.isArray(items)
         ? items.map(i => ({
             id: typeof (i as LineItem)?.id === 'string' ? (i as LineItem).id : newId(),
@@ -74,11 +79,21 @@ function loadFromStorage(jobId: string | number | undefined): QuoteBuilderState 
             price: typeof (i as LineItem)?.price === 'number' ? (i as LineItem).price : 0,
           }))
         : [];
+    const stripAddons = (items: unknown): AddonItem[] =>
+      Array.isArray(items)
+        ? items.map(i => ({
+            id: typeof (i as AddonItem)?.id === 'string' ? (i as AddonItem).id : newId(),
+            description: typeof (i as AddonItem)?.description === 'string' ? (i as AddonItem).description : '',
+            price: typeof (i as AddonItem)?.price === 'number' ? (i as AddonItem).price : 0,
+            selected: typeof (i as AddonItem)?.selected === 'boolean' ? (i as AddonItem).selected : false,
+          }))
+        : [];
     return {
       ...DEFAULT_STATE,
       ...parsed,
-      estimateItems: stripDiscount(parsed.estimateItems),
-      quotationItems: stripDiscount(parsed.quotationItems),
+      estimateItems:   stripItems(parsed.estimateItems),
+      quotationItems:  stripItems(parsed.quotationItems),
+      quotationAddons: stripAddons(parsed.quotationAddons),
     };
   } catch {
     return DEFAULT_STATE;
@@ -102,6 +117,8 @@ interface Props {
   jobId: number | string | undefined;
 }
 
+type QuotationDraft = { items: LineItem[]; addons: AddonItem[] };
+
 export default function QuoteBuilder({ jobId }: Props) {
   const storageKey = jobId ? `crm-quote-${jobId}` : null;
 
@@ -109,7 +126,7 @@ export default function QuoteBuilder({ jobId }: Props) {
 
   // Per-block draft state. null = that block is in read mode.
   const [estimateDraft,  setEstimateDraft]  = useState<LineItem[] | null>(null);
-  const [quotationDraft, setQuotationDraft] = useState<LineItem[] | null>(null);
+  const [quotationDraft, setQuotationDraft] = useState<QuotationDraft | null>(null);
   const [depositDraft,   setDepositDraft]   = useState<DepositSection | null>(null);
 
   // Reload + reset drafts when the job switches
@@ -147,26 +164,65 @@ export default function QuoteBuilder({ jobId }: Props) {
     setEstimateDraft(prev => (prev ?? []).filter(i => i.id !== id));
   }
 
-  // ── Quotation handlers ────────────────────────────────────────────────────
-  const editingQuotation = quotationDraft !== null;
-  const quotationItems   = quotationDraft ?? committed.quotationItems;
-  function startEditQuotation() { setQuotationDraft([...committed.quotationItems]); }
+  // ── Fix Quotation handlers (mandatory items + optional add-ons) ─────────
+  const editingQuotation  = quotationDraft !== null;
+  const quotationItems    = quotationDraft?.items  ?? committed.quotationItems;
+  const quotationAddons   = quotationDraft?.addons ?? committed.quotationAddons;
+
+  function startEditQuotation() {
+    setQuotationDraft({
+      items:  [...committed.quotationItems],
+      addons: [...committed.quotationAddons],
+    });
+  }
   function saveQuotation() {
     if (!quotationDraft) return;
-    const next = { ...committed, quotationItems: quotationDraft };
+    const next = {
+      ...committed,
+      quotationItems:  quotationDraft.items,
+      quotationAddons: quotationDraft.addons,
+    };
     setCommitted(next);
     persist(next);
     setQuotationDraft(null);
   }
   function cancelQuotation() { setQuotationDraft(null); }
-  function addQuotationItem() {
-    setQuotationDraft(prev => [...(prev ?? []), { id: newId(), description: '', price: 0 }]);
+
+  function addMandatoryItem() {
+    setQuotationDraft(prev =>
+      prev ? { ...prev, items: [...prev.items, { id: newId(), description: '', price: 0 }] } : prev,
+    );
   }
-  function updateQuotationItem(id: string, patch: Partial<LineItem>) {
-    setQuotationDraft(prev => (prev ?? []).map(i => (i.id === id ? { ...i, ...patch } : i)));
+  function updateMandatoryItem(id: string, patch: Partial<LineItem>) {
+    setQuotationDraft(prev =>
+      prev ? { ...prev, items: prev.items.map(i => (i.id === id ? { ...i, ...patch } : i)) } : prev,
+    );
   }
-  function removeQuotationItem(id: string) {
-    setQuotationDraft(prev => (prev ?? []).filter(i => i.id !== id));
+  function removeMandatoryItem(id: string) {
+    setQuotationDraft(prev => (prev ? { ...prev, items: prev.items.filter(i => i.id !== id) } : prev));
+  }
+
+  function addAddonItem() {
+    setQuotationDraft(prev =>
+      prev
+        ? { ...prev, addons: [...prev.addons, { id: newId(), description: '', price: 0, selected: false }] }
+        : prev,
+    );
+  }
+  function updateAddonItem(id: string, patch: Partial<AddonItem>) {
+    setQuotationDraft(prev =>
+      prev ? { ...prev, addons: prev.addons.map(a => (a.id === id ? { ...a, ...patch } : a)) } : prev,
+    );
+  }
+  function removeAddonItem(id: string) {
+    setQuotationDraft(prev => (prev ? { ...prev, addons: prev.addons.filter(a => a.id !== id) } : prev));
+  }
+  function toggleAddonSelected(id: string) {
+    setQuotationDraft(prev =>
+      prev
+        ? { ...prev, addons: prev.addons.map(a => (a.id === id ? { ...a, selected: !a.selected } : a)) }
+        : prev,
+    );
   }
 
   // ── Deposit handlers ──────────────────────────────────────────────────────
@@ -186,20 +242,26 @@ export default function QuoteBuilder({ jobId }: Props) {
   }
 
   // ── Derived totals ────────────────────────────────────────────────────────
-  const quotationTotal = useMemo(() => listTotal(quotationItems), [quotationItems]);
+  const mandatoryTotal       = useMemo(() => listTotal(quotationItems), [quotationItems]);
+  const selectedAddons       = useMemo(() => quotationAddons.filter(a => a.selected),   [quotationAddons]);
+  const unselectedAddons     = useMemo(() => quotationAddons.filter(a => !a.selected),  [quotationAddons]);
+  const selectedAddonsTotal  = useMemo(() => listTotal(selectedAddons),   [selectedAddons]);
+  const unselectedAddonsTotal = useMemo(() => listTotal(unselectedAddons), [unselectedAddons]);
+  const fixQuotationTotal    = mandatoryTotal + selectedAddonsTotal;
+
   const depositValueNum = parseFloat(depositSection.depositValue) || 0;
   const depositAmount = useMemo(() => {
     if (depositSection.depositType === 'none') return 0;
     if (depositSection.depositType === 'percentage') {
-      return Math.max(0, (quotationTotal * depositValueNum) / 100);
+      return Math.max(0, (fixQuotationTotal * depositValueNum) / 100);
     }
     return Math.max(0, depositValueNum);
-  }, [depositSection.depositType, depositValueNum, quotationTotal]);
-  const remainingBalance = Math.max(0, quotationTotal - depositAmount);
+  }, [depositSection.depositType, depositValueNum, fixQuotationTotal]);
+  const remainingBalance = Math.max(0, fixQuotationTotal - depositAmount);
   const fullyPaid =
     depositSection.balancePaid &&
     (depositSection.depositType === 'none' || depositSection.depositPaid) &&
-    quotationTotal > 0;
+    fixQuotationTotal > 0;
 
   return (
     <div className="space-y-5">
@@ -226,19 +288,24 @@ export default function QuoteBuilder({ jobId }: Props) {
         accent="cyan"
       />
 
-      <LineItemBlock
-        title="Formal Quotation"
-        subtitle="Confirmed pricing for the move"
-        items={quotationItems}
+      <FixQuotationBlock
+        mandatoryItems={quotationItems}
+        addonItems={quotationAddons}
         editing={editingQuotation}
         onEdit={startEditQuotation}
         onSave={saveQuotation}
         onCancel={cancelQuotation}
-        onAdd={addQuotationItem}
-        onUpdate={updateQuotationItem}
-        onRemove={removeQuotationItem}
-        accent="amber"
-        emphasizeTotal
+        onAddMandatory={addMandatoryItem}
+        onUpdateMandatory={updateMandatoryItem}
+        onRemoveMandatory={removeMandatoryItem}
+        onAddAddon={addAddonItem}
+        onUpdateAddon={updateAddonItem}
+        onRemoveAddon={removeAddonItem}
+        onToggleAddonSelected={toggleAddonSelected}
+        mandatoryTotal={mandatoryTotal}
+        selectedAddonsTotal={selectedAddonsTotal}
+        unselectedAddonsTotal={unselectedAddonsTotal}
+        fixQuotationTotal={fixQuotationTotal}
       />
 
       <DepositBlock
@@ -248,7 +315,7 @@ export default function QuoteBuilder({ jobId }: Props) {
         onSave={saveDeposit}
         onCancel={cancelDeposit}
         onChange={setDepositField}
-        quotationTotal={quotationTotal}
+        quotationTotal={fixQuotationTotal}
         depositAmount={depositAmount}
         remainingBalance={remainingBalance}
         fullyPaid={fullyPaid}
@@ -310,7 +377,7 @@ function BlockHeader({
   );
 }
 
-// ── Line-item block ───────────────────────────────────────────────────────────
+// ── Line-item block (Estimate Quote) ──────────────────────────────────────────
 
 type AccentName = 'cyan' | 'amber';
 
@@ -335,7 +402,7 @@ function LineItemBlock({
   title, subtitle, items,
   editing, onEdit, onSave, onCancel,
   onAdd, onUpdate, onRemove,
-  accent, emphasizeTotal = false,
+  accent,
 }: {
   title: string;
   subtitle: string;
@@ -348,7 +415,6 @@ function LineItemBlock({
   onUpdate: (id: string, patch: Partial<LineItem>) => void;
   onRemove: (id: string) => void;
   accent: AccentName;
-  emphasizeTotal?: boolean;
 }) {
   const cfg   = ACCENT[accent];
   const total = listTotal(items);
@@ -365,7 +431,6 @@ function LineItemBlock({
         onCancel={onCancel}
       />
 
-      {/* Items */}
       <div className="divide-y divide-slate-100">
         {items.length === 0 ? (
           <div className="px-4 py-8 text-center">
@@ -383,49 +448,20 @@ function LineItemBlock({
             )}
           </div>
         ) : editing ? (
-          // ── Editable rows ────────────────────────────────────────────────
           items.map(item => (
-            <div key={item.id} className="px-4 py-2.5 flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="Description (e.g. Removal of 2-bed flat, Hampstead → Camden)"
-                className="input flex-1 min-w-0"
-                value={item.description}
-                onChange={e => onUpdate(item.id, { description: e.target.value })}
-              />
-              <div className="relative flex-shrink-0">
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">£</span>
-                <input
-                  type="number" min="0" step="0.01" placeholder="0.00"
-                  className="input w-32 pl-6 tabular-nums text-right"
-                  value={item.price === 0 ? '' : item.price}
-                  onChange={e => onUpdate(item.id, { price: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => onRemove(item.id)}
-                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
-                title="Remove item"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
+            <ItemEditRow
+              key={item.id}
+              item={item}
+              onUpdate={patch => onUpdate(item.id, patch)}
+              onRemove={() => onRemove(item.id)}
+              placeholder="Description (e.g. Removal of 2-bed flat)"
+            />
           ))
         ) : (
-          // ── Read-only rows ───────────────────────────────────────────────
-          items.map(item => (
-            <div key={item.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
-              <p className="text-sm text-slate-700 flex-1 min-w-0 truncate">
-                {item.description || <span className="italic text-slate-400">Untitled item</span>}
-              </p>
-              <p className="text-sm font-semibold text-slate-900 tabular-nums flex-shrink-0">{fmt(item.price)}</p>
-            </div>
-          ))
+          items.map(item => <ItemReadRow key={item.id} item={item} />)
         )}
       </div>
 
-      {/* Add item button (edit mode only) */}
       {editing && (
         <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/40">
           <button
@@ -438,13 +474,359 @@ function LineItemBlock({
         </div>
       )}
 
-      {/* Total */}
       {items.length > 0 && (
         <div className="px-4 py-3 border-t border-slate-100 bg-gradient-to-br from-slate-50 to-slate-100/30 flex items-center justify-between">
           <span className={`text-sm font-bold ${cfg.label}`}>{title} Total</span>
-          <span className={`font-bold tabular-nums tracking-tight ${cfg.total} ${emphasizeTotal ? 'text-2xl' : 'text-lg'}`}>
-            {fmt(total)}
-          </span>
+          <span className={`font-bold tabular-nums tracking-tight text-lg ${cfg.total}`}>{fmt(total)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Reusable row renderers ────────────────────────────────────────────────────
+
+function ItemEditRow({
+  item, onUpdate, onRemove, placeholder, leading,
+}: {
+  item: LineItem;
+  onUpdate: (patch: Partial<LineItem>) => void;
+  onRemove: () => void;
+  placeholder: string;
+  leading?: React.ReactNode;
+}) {
+  return (
+    <div className={`px-4 py-2.5 flex items-center gap-2 ${leading ? '' : ''}`}>
+      {leading}
+      <input
+        type="text"
+        placeholder={placeholder}
+        className="input flex-1 min-w-0"
+        value={item.description}
+        onChange={e => onUpdate({ description: e.target.value })}
+      />
+      <div className="relative flex-shrink-0">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">£</span>
+        <input
+          type="number" min="0" step="0.01" placeholder="0.00"
+          className="input w-32 pl-6 tabular-nums text-right"
+          value={item.price === 0 ? '' : item.price}
+          onChange={e => onUpdate({ price: parseFloat(e.target.value) || 0 })}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
+        title="Remove item"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function ItemReadRow({ item, leading, trailing }: { item: LineItem; leading?: React.ReactNode; trailing?: React.ReactNode }) {
+  return (
+    <div className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
+      {leading}
+      <p className="text-sm text-slate-700 flex-1 min-w-0 truncate">
+        {item.description || <span className="italic text-slate-400">Untitled item</span>}
+      </p>
+      {trailing}
+      <p className="text-sm font-semibold text-slate-900 tabular-nums flex-shrink-0">{fmt(item.price)}</p>
+    </div>
+  );
+}
+
+// ── Fix Quotation block (mandatory + optional add-ons) ────────────────────────
+
+function FixQuotationBlock({
+  mandatoryItems, addonItems,
+  editing, onEdit, onSave, onCancel,
+  onAddMandatory, onUpdateMandatory, onRemoveMandatory,
+  onAddAddon, onUpdateAddon, onRemoveAddon, onToggleAddonSelected,
+  mandatoryTotal, selectedAddonsTotal, unselectedAddonsTotal, fixQuotationTotal,
+}: {
+  mandatoryItems: LineItem[];
+  addonItems: AddonItem[];
+  editing: boolean;
+  onEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onAddMandatory: () => void;
+  onUpdateMandatory: (id: string, patch: Partial<LineItem>) => void;
+  onRemoveMandatory: (id: string) => void;
+  onAddAddon: () => void;
+  onUpdateAddon: (id: string, patch: Partial<AddonItem>) => void;
+  onRemoveAddon: (id: string) => void;
+  onToggleAddonSelected: (id: string) => void;
+  mandatoryTotal: number;
+  selectedAddonsTotal: number;
+  unselectedAddonsTotal: number;
+  fixQuotationTotal: number;
+}) {
+  const cfg = ACCENT.amber;
+  const selectedAddons   = addonItems.filter(a => a.selected);
+  const unselectedAddons = addonItems.filter(a => !a.selected);
+  const isEmpty = mandatoryItems.length === 0 && addonItems.length === 0;
+
+  return (
+    <div className={`rounded-xl border bg-white overflow-hidden shadow-sm ${cfg.headerBorder}`}>
+      <BlockHeader
+        title="Fix Quotation"
+        subtitle="Confirmed pricing — mandatory items + optional add-ons"
+        accent={cfg}
+        editing={editing}
+        onEdit={onEdit}
+        onSave={onSave}
+        onCancel={onCancel}
+      />
+
+      {editing ? (
+        <FixEditView
+          mandatoryItems={mandatoryItems}
+          addonItems={addonItems}
+          onAddMandatory={onAddMandatory}
+          onUpdateMandatory={onUpdateMandatory}
+          onRemoveMandatory={onRemoveMandatory}
+          onAddAddon={onAddAddon}
+          onUpdateAddon={onUpdateAddon}
+          onRemoveAddon={onRemoveAddon}
+          onToggleAddonSelected={onToggleAddonSelected}
+        />
+      ) : (
+        <FixReadView
+          mandatoryItems={mandatoryItems}
+          selectedAddons={selectedAddons}
+          unselectedAddons={unselectedAddons}
+          isEmpty={isEmpty}
+          onEdit={onEdit}
+        />
+      )}
+
+      {/* Totals */}
+      {!isEmpty && (
+        <div className="px-4 py-3 border-t border-slate-100 bg-gradient-to-br from-slate-50 to-slate-100/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className={`text-sm font-bold ${cfg.label}`}>Fix Quotation Total</span>
+              {selectedAddons.length > 0 && (
+                <span className="text-[11px] text-slate-400 ml-2 tabular-nums">
+                  {fmt(mandatoryTotal)} + {fmt(selectedAddonsTotal)} add-on{selectedAddons.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <span className={`font-bold tabular-nums tracking-tight text-2xl ${cfg.total}`}>
+              {fmt(fixQuotationTotal)}
+            </span>
+          </div>
+          {(unselectedAddons.length > 0 || (editing && addonItems.length > 0)) && (
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+              <div>
+                <span className="text-xs font-semibold text-slate-500">Add-ons Total</span>
+                <span className="text-[11px] text-slate-400 ml-2">not yet selected</span>
+              </div>
+              <span className="text-base font-bold text-slate-700 tabular-nums tracking-tight">
+                {fmt(unselectedAddonsTotal)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FixEditView({
+  mandatoryItems, addonItems,
+  onAddMandatory, onUpdateMandatory, onRemoveMandatory,
+  onAddAddon, onUpdateAddon, onRemoveAddon, onToggleAddonSelected,
+}: {
+  mandatoryItems: LineItem[];
+  addonItems: AddonItem[];
+  onAddMandatory: () => void;
+  onUpdateMandatory: (id: string, patch: Partial<LineItem>) => void;
+  onRemoveMandatory: (id: string) => void;
+  onAddAddon: () => void;
+  onUpdateAddon: (id: string, patch: Partial<AddonItem>) => void;
+  onRemoveAddon: (id: string) => void;
+  onToggleAddonSelected: (id: string) => void;
+}) {
+  return (
+    <div className="divide-y divide-slate-100">
+      {/* Mandatory items */}
+      <div className="px-4 py-3">
+        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+          Mandatory items
+        </p>
+        {mandatoryItems.length === 0 ? (
+          <p className="text-xs text-slate-400 italic py-1">No mandatory items yet</p>
+        ) : (
+          <div className="-mx-4">
+            {mandatoryItems.map(item => (
+              <ItemEditRow
+                key={item.id}
+                item={item}
+                onUpdate={patch => onUpdateMandatory(item.id, patch)}
+                onRemove={() => onRemoveMandatory(item.id)}
+                placeholder="e.g. House move, 1 day"
+              />
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onAddMandatory}
+          className="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1.5 active:scale-95 transition-transform"
+        >
+          <PlusCircle className="w-4 h-4" /> Add mandatory item
+        </button>
+      </div>
+
+      {/* Optional add-ons */}
+      <div className="px-4 py-3 bg-slate-50/30">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            Optional add-ons
+          </p>
+        </div>
+        <p className="text-[11px] text-slate-400 mb-2">
+          Tick the box to include in Fix Quotation Total. Unticked add-ons stay in Add-ons Total.
+        </p>
+        {addonItems.length === 0 ? (
+          <p className="text-xs text-slate-400 italic py-1">No optional add-ons yet</p>
+        ) : (
+          <div className="-mx-4">
+            {addonItems.map(item => (
+              <div
+                key={item.id}
+                className={`px-4 py-2.5 flex items-center gap-2 transition-colors ${item.selected ? 'bg-emerald-50/50' : ''}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => onToggleAddonSelected(item.id)}
+                  className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${
+                    item.selected
+                      ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-2 border-emerald-600 shadow-sm'
+                      : 'bg-white border-2 border-slate-300 hover:border-emerald-400'
+                  }`}
+                  aria-pressed={item.selected}
+                  title={item.selected ? 'Selected — counts in Fix Quotation Total' : 'Click to add to Fix Quotation Total'}
+                >
+                  {item.selected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                </button>
+                <input
+                  type="text"
+                  placeholder="e.g. Packing service"
+                  className="input flex-1 min-w-0"
+                  value={item.description}
+                  onChange={e => onUpdateAddon(item.id, { description: e.target.value })}
+                />
+                <div className="relative flex-shrink-0">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">£</span>
+                  <input
+                    type="number" min="0" step="0.01" placeholder="0.00"
+                    className="input w-32 pl-6 tabular-nums text-right"
+                    value={item.price === 0 ? '' : item.price}
+                    onChange={e => onUpdateAddon(item.id, { price: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onRemoveAddon(item.id)}
+                  className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
+                  title="Remove add-on"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onAddAddon}
+          className="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1.5 active:scale-95 transition-transform"
+        >
+          <PlusCircle className="w-4 h-4" /> Add optional add-on
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FixReadView({
+  mandatoryItems, selectedAddons, unselectedAddons, isEmpty, onEdit,
+}: {
+  mandatoryItems: LineItem[];
+  selectedAddons: AddonItem[];
+  unselectedAddons: AddonItem[];
+  isEmpty: boolean;
+  onEdit: () => void;
+}) {
+  if (isEmpty) {
+    return (
+      <div className="px-4 py-8 text-center">
+        <p className="text-xs text-slate-400 italic">No items yet</p>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
+        >
+          <Pencil className="w-3.5 h-3.5" /> Click Edit to add items
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="divide-y divide-slate-100">
+      {mandatoryItems.length > 0 && (
+        <div>
+          {mandatoryItems.map(item => <ItemReadRow key={item.id} item={item} />)}
+        </div>
+      )}
+
+      {selectedAddons.length > 0 && (
+        <div>
+          {selectedAddons.map(item => (
+            <ItemReadRow
+              key={item.id}
+              item={item}
+              leading={
+                <span
+                  className="w-5 h-5 rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center flex-shrink-0 shadow-sm"
+                  title="Selected add-on"
+                >
+                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                </span>
+              }
+              trailing={
+                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex-shrink-0">
+                  Selected
+                </span>
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {unselectedAddons.length > 0 && (
+        <div className="bg-slate-50/40">
+          <div className="px-4 py-2 border-b border-slate-100">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              Optional — not selected
+            </p>
+          </div>
+          {unselectedAddons.map(item => (
+            <div key={item.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors">
+              <span className="w-5 h-5 rounded-md border-2 border-slate-300 flex-shrink-0" />
+              <p className="text-sm text-slate-500 flex-1 min-w-0 truncate">
+                {item.description || <span className="italic text-slate-400">Untitled add-on</span>}
+              </p>
+              <p className="text-sm font-medium text-slate-500 tabular-nums flex-shrink-0">{fmt(item.price)}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -515,8 +897,6 @@ function DepositBlock({
   );
 }
 
-// ── Deposit edit view ─────────────────────────────────────────────────────────
-
 function DepositEditView({
   section, onChange, depositAmount,
 }: {
@@ -528,7 +908,6 @@ function DepositEditView({
 
   return (
     <>
-      {/* Type selector */}
       <div>
         <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Deposit type</p>
         <div className="grid grid-cols-3 gap-2">
@@ -555,7 +934,6 @@ function DepositEditView({
         </div>
       </div>
 
-      {/* Value input + calculated deposit */}
       {!noDeposit && (
         <div className="grid grid-cols-2 gap-3 items-end mt-4">
           <div>
@@ -584,7 +962,6 @@ function DepositEditView({
         </div>
       )}
 
-      {/* Deposit paid */}
       {!noDeposit && (
         <div className="mt-4">
           <PaidEditRow
@@ -597,7 +974,6 @@ function DepositEditView({
         </div>
       )}
 
-      {/* Balance paid */}
       <div className="mt-4">
         <PaidEditRow
           label="Balance paid"
@@ -647,8 +1023,6 @@ function PaidEditRow({
   );
 }
 
-// ── Deposit read view ─────────────────────────────────────────────────────────
-
 function DepositReadView({
   section, quotationTotal, depositAmount, remainingBalance, noDeposit,
 }: {
@@ -660,7 +1034,6 @@ function DepositReadView({
 }) {
   return (
     <div className="space-y-3">
-      {/* Deposit type summary */}
       <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-slate-50/60 border border-slate-200/60">
         <div className="min-w-0">
           <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Deposit type</p>
@@ -680,10 +1053,8 @@ function DepositReadView({
         )}
       </div>
 
-      {/* Deposit paid status */}
       {!noDeposit && <ReadPaidRow label="Deposit" paid={section.depositPaid} date={section.depositPaidDate} />}
 
-      {/* Remaining balance card + paid status */}
       <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200/70 p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -694,7 +1065,7 @@ function DepositReadView({
               </p>
             )}
             {quotationTotal === 0 && (
-              <p className="text-[11px] text-slate-400 mt-0.5 italic">Add quotation items to see balance</p>
+              <p className="text-[11px] text-slate-400 mt-0.5 italic">Add Fix Quotation items to see balance</p>
             )}
           </div>
           <p className={`text-2xl font-bold tabular-nums tracking-tight ${remainingBalance === 0 && quotationTotal > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
