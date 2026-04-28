@@ -858,115 +858,84 @@ export default function CRMDetailPage() {
             )}
           </Section>
 
-          {/* Operational Notes */}
-          <Section title="Operational Notes" accent="bg-orange-500" {...sectionProps('ops')}>
-            {/* Admin Notes — always inline editable */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <label className="label mb-0">Admin Notes</label>
-                {!showAdminInput && (
-                  <button type="button" onClick={() => setShowAdminInput(true)}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1">
-                    <PlusCircle className="w-3.5 h-3.5" /> Add
-                  </button>
-                )}
+          {/* Quote */}
+          <Section title="Quote" accent="bg-amber-500" {...sectionProps('quote')}>
+            {editingSection === 'quote' ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <F label="Quote Amount (£)">
+                    <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
+                      value={quoteAmount} onChange={e => setQuoteAmount(e.target.value)} />
+                  </F>
+                  <F label="Quote Sent Date">
+                    <input type="date" className="input" value={quoteSentDate} onChange={e => setQuoteSentDate(e.target.value)} />
+                  </F>
+                </div>
+                <div className="grid grid-cols-3 gap-3 pt-1">
+                  <Toggle value={quoteAccepted}   onChange={setQuoteAccepted}   label="Quote accepted" />
+                  <Toggle value={depositRequired} onChange={setDepositRequired} label="Deposit required" />
+                  <Toggle value={depositPaid}     onChange={setDepositPaid}     label="Deposit paid" />
+                </div>
               </div>
-              {activities.filter(a => a.type === 'admin_note').length > 0 && (
-                <div className="space-y-2 mb-3">
-                  {activities.filter(a => a.type === 'admin_note').map(a => (
-                    <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
-                      {editingAdminNoteId === a.id ? (
-                        <div className="space-y-2">
-                          <textarea className="input resize-none w-full text-sm" rows={3}
-                            value={editingAdminNoteText} onChange={e => setEditingAdminNoteText(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSaveAdminNote(a.id); }} autoFocus />
-                          <div className="flex gap-2">
-                            <button type="button" onClick={() => handleSaveAdminNote(a.id)}
-                              disabled={savingAdminNoteId === a.id || !editingAdminNoteText.trim()}
-                              className="btn-primary text-xs py-1.5 px-3">
-                              {savingAdminNoteId === a.id ? 'Saving…' : 'Save'}
-                            </button>
-                            <button type="button" onClick={() => setEditingAdminNoteId(null)} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm text-slate-800 flex-1">{a.note}</p>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <button type="button" onClick={() => { setEditingAdminNoteId(a.id); setEditingAdminNoteText(a.note || ''); }}
-                                className="p-1 rounded hover:bg-amber-100 text-slate-400 hover:text-slate-600 transition-colors">
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button type="button" onClick={() => handleDeleteAdminNote(a.id)} disabled={deletingAdminNoteId === a.id}
-                                className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors">
-                                {deletingAdminNoteId === a.id
-                                  ? <span className="w-3.5 h-3.5 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" />
-                                  : <X className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-xs text-slate-400 mt-1">
-                            {new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </>
-                      )}
+            ) : (
+              <div className="space-y-4">
+                {/* Prominent amount + sent-date display */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-gradient-to-br from-amber-50 to-amber-100/60 border border-amber-200/70 px-5 py-4 shadow-sm">
+                    <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider mb-1.5">Quote Amount</p>
+                    {quoteAmount ? (
+                      <p className="text-3xl font-bold text-amber-900 tabular-nums tracking-tight leading-none">
+                        {fmt(parseFloat(quoteAmount))}
+                      </p>
+                    ) : (
+                      <p className="text-xl font-semibold text-amber-300 italic leading-none">— not quoted —</p>
+                    )}
+                  </div>
+                  <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/40 border border-slate-200/70 px-5 py-4 shadow-sm">
+                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Quote Sent</p>
+                    <p className="text-xl font-semibold text-slate-800 tabular-nums leading-none">
+                      {quoteSentDate ? fmtDate(quoteSentDate) : <span className="text-slate-300 italic">—</span>}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Status pills */}
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { label: 'Quote Accepted',   value: quoteAccepted },
+                    { label: 'Deposit Required', value: depositRequired },
+                    { label: 'Deposit Paid',     value: depositPaid },
+                  ] as const).map(({ label, value }) => (
+                    <div
+                      key={label}
+                      className={`rounded-lg border px-3 py-2.5 text-xs font-semibold flex items-center gap-2 transition-all ${
+                        value
+                          ? 'bg-gradient-to-br from-emerald-50 to-emerald-100/60 border-emerald-200 text-emerald-700 shadow-sm'
+                          : 'bg-slate-50 border-slate-200/70 text-slate-400'
+                      }`}
+                    >
+                      {value
+                        ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                        : <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-300 inline-block flex-shrink-0" />}
+                      <span className="truncate">{label}</span>
                     </div>
                   ))}
                 </div>
-              )}
-              {showAdminInput && (
-                <div className="space-y-2">
-                  <textarea className="input resize-none w-full" rows={3} placeholder="Type admin note…"
-                    value={adminNoteInput} onChange={e => setAdminNoteInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAddAdminNote(); }} autoFocus />
-                  <div className="flex gap-2">
-                    <button type="button" onClick={handleAddAdminNote} disabled={addingAdminNote || !adminNoteInput.trim()} className="btn-primary text-xs py-1.5 px-3">
-                      {addingAdminNote ? 'Adding…' : 'Add'}
-                    </button>
-                    <button type="button" onClick={() => { setShowAdminInput(false); setAdminNoteInput(''); }} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
-                  </div>
-                </div>
-              )}
-              {activities.filter(a => a.type === 'admin_note').length === 0 && !showAdminInput && (
-                <p className="text-xs text-slate-400 italic">No admin notes yet.</p>
-              )}
-            </div>
 
-            <div className="border-t border-slate-100 pt-3 space-y-3">
-              {editingSection === 'ops' ? (
-                <>
-                  <F label="Staff Notes">
-                    <textarea className="input resize-none" rows={3} placeholder="Staff-only notes not shown to client…"
-                      value={internalNotes} onChange={e => setInternalNotes(e.target.value)} />
-                  </F>
-                  <F label="Special Handling Requirements">
-                    <textarea className="input resize-none" rows={2} placeholder="Piano, artwork, antiques, fragile items…"
-                      value={specialHandling} onChange={e => setSpecialHandling(e.target.value)} />
-                  </F>
-                  <F label="Access Restrictions">
-                    <textarea className="input resize-none" rows={2} placeholder="Narrow driveway, parking permit zone, building access times…"
-                      value={accessRestrict} onChange={e => setAccessRestrict(e.target.value)} />
-                  </F>
-                  <div className="grid grid-cols-3 gap-3 pt-1">
-                    <Toggle value={packingReq}     onChange={setPackingReq}     label="Packing" />
-                    <Toggle value={dismantlingReq} onChange={setDismantlingReq} label="Dismantling" />
-                    <Toggle value={storageReq}     onChange={setStorageReq}     label="Storage" />
+                {/* Derived: commission preview when this is an estate-agent referral */}
+                {leadSource === 'Estate Agent Referral' && partnerCommissionRate && quoteAmount && (
+                  <div className="rounded-xl border border-amber-200/70 bg-amber-50/60 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Commission Due</p>
+                      <p className="text-xs text-amber-700/70 mt-0.5">{partnerCommissionRate}% of quote</p>
+                    </div>
+                    <p className="text-lg font-bold text-amber-900 tabular-nums tracking-tight">
+                      {fmt((parseFloat(quoteAmount) * parseFloat(partnerCommissionRate)) / 100)}
+                    </p>
                   </div>
-                </>
-              ) : (
-                <>
-                  <ReadF label="Staff Notes" value={internalNotes} />
-                  <ReadF label="Special Handling" value={specialHandling} />
-                  <ReadF label="Access Restrictions" value={accessRestrict} />
-                  <div className="grid grid-cols-3 gap-3 pt-1">
-                    <ReadF label="Packing"      value={packingReq     ? 'Yes' : 'No'} />
-                    <ReadF label="Dismantling"  value={dismantlingReq ? 'Yes' : 'No'} />
-                    <ReadF label="Storage"      value={storageReq     ? 'Yes' : 'No'} />
-                  </div>
-                </>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </Section>
         </div>
 
@@ -1078,34 +1047,115 @@ export default function CRMDetailPage() {
             )}
           </Section>
 
-          {/* Quote */}
-          <Section title="Quote" accent="bg-amber-500" {...sectionProps('quote')}>
-            {editingSection === 'quote' ? (
-              <div className="space-y-3">
-                <F label="Quote Amount (£)">
-                  <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
-                    value={quoteAmount} onChange={e => setQuoteAmount(e.target.value)} />
-                </F>
-                <F label="Quote Sent Date">
-                  <input type="date" className="input" value={quoteSentDate} onChange={e => setQuoteSentDate(e.target.value)} />
-                </F>
-                <div className="space-y-2.5 pt-1">
-                  <Toggle value={quoteAccepted}   onChange={setQuoteAccepted}   label="Quote accepted" />
-                  <Toggle value={depositRequired} onChange={setDepositRequired} label="Deposit required" />
-                  <Toggle value={depositPaid}     onChange={setDepositPaid}     label="Deposit paid" />
-                </div>
+          {/* Operational Notes */}
+          <Section title="Operational Notes" accent="bg-orange-500" {...sectionProps('ops')}>
+            {/* Admin Notes — always inline editable */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="label mb-0">Admin Notes</label>
+                {!showAdminInput && (
+                  <button type="button" onClick={() => setShowAdminInput(true)}
+                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1">
+                    <PlusCircle className="w-3.5 h-3.5" /> Add
+                  </button>
+                )}
               </div>
-            ) : (
-              <div className="space-y-3">
-                <ReadF label="Quote Amount" value={quoteAmount ? fmt(parseFloat(quoteAmount)) : null} />
-                <ReadF label="Quote Sent Date" value={fmtDate(quoteSentDate)} />
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  <ReadF label="Quote Accepted"  value={quoteAccepted   ? 'Yes' : 'No'} />
-                  <ReadF label="Deposit Req."    value={depositRequired ? 'Yes' : 'No'} />
-                  <ReadF label="Deposit Paid"    value={depositPaid     ? 'Yes' : 'No'} />
+              {activities.filter(a => a.type === 'admin_note').length > 0 && (
+                <div className="space-y-2 mb-3">
+                  {activities.filter(a => a.type === 'admin_note').map(a => (
+                    <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
+                      {editingAdminNoteId === a.id ? (
+                        <div className="space-y-2">
+                          <textarea className="input resize-none w-full text-sm" rows={3}
+                            value={editingAdminNoteText} onChange={e => setEditingAdminNoteText(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSaveAdminNote(a.id); }} autoFocus />
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => handleSaveAdminNote(a.id)}
+                              disabled={savingAdminNoteId === a.id || !editingAdminNoteText.trim()}
+                              className="btn-primary text-xs py-1.5 px-3">
+                              {savingAdminNoteId === a.id ? 'Saving…' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => setEditingAdminNoteId(null)} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm text-slate-800 flex-1">{a.note}</p>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button type="button" onClick={() => { setEditingAdminNoteId(a.id); setEditingAdminNoteText(a.note || ''); }}
+                                className="p-1 rounded hover:bg-amber-100 text-slate-400 hover:text-slate-600 transition-colors">
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button type="button" onClick={() => handleDeleteAdminNote(a.id)} disabled={deletingAdminNoteId === a.id}
+                                className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors">
+                                {deletingAdminNoteId === a.id
+                                  ? <span className="w-3.5 h-3.5 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" />
+                                  : <X className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+              {showAdminInput && (
+                <div className="space-y-2">
+                  <textarea className="input resize-none w-full" rows={3} placeholder="Type admin note…"
+                    value={adminNoteInput} onChange={e => setAdminNoteInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAddAdminNote(); }} autoFocus />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleAddAdminNote} disabled={addingAdminNote || !adminNoteInput.trim()} className="btn-primary text-xs py-1.5 px-3">
+                      {addingAdminNote ? 'Adding…' : 'Add'}
+                    </button>
+                    <button type="button" onClick={() => { setShowAdminInput(false); setAdminNoteInput(''); }} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
+                  </div>
+                </div>
+              )}
+              {activities.filter(a => a.type === 'admin_note').length === 0 && !showAdminInput && (
+                <p className="text-xs text-slate-400 italic">No admin notes yet.</p>
+              )}
+            </div>
+
+            <div className="border-t border-slate-100 pt-3 space-y-3">
+              {editingSection === 'ops' ? (
+                <>
+                  <F label="Staff Notes">
+                    <textarea className="input resize-none" rows={3} placeholder="Staff-only notes not shown to client…"
+                      value={internalNotes} onChange={e => setInternalNotes(e.target.value)} />
+                  </F>
+                  <F label="Special Handling Requirements">
+                    <textarea className="input resize-none" rows={2} placeholder="Piano, artwork, antiques, fragile items…"
+                      value={specialHandling} onChange={e => setSpecialHandling(e.target.value)} />
+                  </F>
+                  <F label="Access Restrictions">
+                    <textarea className="input resize-none" rows={2} placeholder="Narrow driveway, parking permit zone, building access times…"
+                      value={accessRestrict} onChange={e => setAccessRestrict(e.target.value)} />
+                  </F>
+                  <div className="grid grid-cols-3 gap-3 pt-1">
+                    <Toggle value={packingReq}     onChange={setPackingReq}     label="Packing" />
+                    <Toggle value={dismantlingReq} onChange={setDismantlingReq} label="Dismantling" />
+                    <Toggle value={storageReq}     onChange={setStorageReq}     label="Storage" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <ReadF label="Staff Notes" value={internalNotes} />
+                  <ReadF label="Special Handling" value={specialHandling} />
+                  <ReadF label="Access Restrictions" value={accessRestrict} />
+                  <div className="grid grid-cols-3 gap-3 pt-1">
+                    <ReadF label="Packing"      value={packingReq     ? 'Yes' : 'No'} />
+                    <ReadF label="Dismantling"  value={dismantlingReq ? 'Yes' : 'No'} />
+                    <ReadF label="Storage"      value={storageReq     ? 'Yes' : 'No'} />
+                  </div>
+                </>
+              )}
+            </div>
           </Section>
 
           {/* Staff Assignment */}
