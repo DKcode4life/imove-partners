@@ -83,36 +83,79 @@ function PipelineBar({ status, saving, onChange }: { status: string; saving: num
   const pct     = mainIdx >= 0 ? (mainIdx / (PIPELINE.length - 1)) * 100 : 0;
 
   return (
-    <div className="card px-5 pt-4 pb-3 mb-6">
-      <div className="relative px-2 pb-7">
-        <div className="absolute left-2 right-2 bg-slate-200 h-0.5" style={{ top: 7 }} />
+    <div className="card px-5 pt-5 pb-3 mb-6">
+      {/* Track + dots */}
+      <div className="relative px-2 pb-14">
+        <div className="absolute left-2 right-2 h-0.5 rounded-full bg-slate-200" style={{ top: 9 }} />
         {!isLost && (
-          <div className="absolute left-2 bg-slate-300 h-0.5 transition-all duration-300" style={{ top: 7, width: `${pct}%` }} />
+          <div
+            className="absolute left-2 h-0.5 rounded-full bg-gradient-to-r from-brand-400 via-brand-500 to-brand-600 transition-all duration-300"
+            style={{ top: 9, width: `${pct}%` }}
+          />
         )}
         <div className="relative flex justify-between">
           {PIPELINE.map((s, i) => {
-            const isActive  = s === status;
-            const isPast    = !isLost && i < mainIdx;
-            const isSaving  = saving === i;
-            const cfg       = DOT_CFG[s] ?? DOT_CFG['Completed'];
-            const showLabel = i === mainIdx || i === hovered;
-            const labelAlign = i === 0 ? 'left-0' : i === PIPELINE.length - 1 ? 'right-0' : 'left-1/2 -translate-x-1/2';
+            const isActive = s === status;
+            const isPast   = !isLost && i < mainIdx;
+            const isSaving = saving === i;
+            const isHover  = hovered === i;
+            const cfg      = DOT_CFG[s] ?? DOT_CFG['Completed'];
+            const isFirst  = i === 0;
+            const isLast   = i === PIPELINE.length - 1;
+
+            // Anchor edge labels so they don't spill outside the card.
+            const labelAnchor = isFirst
+              ? 'left-0 text-left'
+              : isLast
+                ? 'right-0 text-right'
+                : 'left-1/2 -translate-x-1/2 text-center';
+
+            // Dot shape — active is bigger with a coloured ring + shadow; past
+            // is filled at the normal size; pending is hollow. Hover slightly
+            // scales pending/past dots for feedback.
+            const dotShape = isActive
+              ? `w-5 h-5 ${cfg.filled} ring-[4px] ${cfg.ring} shadow-md`
+              : isPast
+                ? `w-3 h-3 ${cfg.filled} ${isHover ? 'scale-125' : ''}`
+                : `w-3 h-3 bg-white ${cfg.border} ${isHover ? 'scale-125' : ''}`;
+
+            // Label tone — inactive is faded slate, active gets the status
+            // colour at a larger weight + slightly larger size so it pops.
+            const labelTone = isActive
+              ? `text-[11px] font-bold ${cfg.label}`
+              : isHover
+                ? `text-[10px] font-semibold ${cfg.label}`
+                : isPast
+                  ? 'text-[10px] font-medium text-slate-500'
+                  : 'text-[10px] font-medium text-slate-300';
+
             return (
-              <div key={s} className="relative h-4 w-4 flex items-center justify-center"
-                onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
-                <button type="button" onClick={() => onChange(s)}
-                  className={`rounded-full border-2 transition-all duration-150 flex items-center justify-center
-                    ${isActive ? `w-4 h-4 ${cfg.filled} ring-[3px] ${cfg.ring}` : isPast ? `w-3 h-3 ${cfg.filled} hover:scale-125` : `w-3 h-3 bg-white ${cfg.border} hover:scale-125`}`}>
+              <button
+                key={s}
+                type="button"
+                onClick={() => onChange(s)}
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+                className="relative h-5 w-5 flex items-center justify-center cursor-pointer"
+                title={s}
+              >
+                <span
+                  className={`relative z-10 rounded-full border-2 transition-all duration-200 flex items-center justify-center pointer-events-none ${dotShape}`}
+                >
                   {isSaving && <span className="w-2 h-2 border border-white border-t-transparent rounded-full animate-spin" />}
-                </button>
-                <div className={`absolute top-5 whitespace-nowrap text-xs font-medium transition-opacity duration-100 ${labelAlign} ${showLabel ? 'opacity-100' : 'opacity-0 pointer-events-none'} ${isActive ? cfg.label : 'text-slate-500'}`}>
+                </span>
+                <span
+                  className={`absolute top-8 leading-tight break-words transition-all duration-150 pointer-events-none ${labelAnchor} ${labelTone}`}
+                  style={{ width: 76 }}
+                >
                   {s}
-                </div>
-              </div>
+                </span>
+              </button>
             );
           })}
         </div>
       </div>
+      {/* Lost button row */}
       <div className="flex justify-end mt-3 pt-3 border-t border-slate-100">
         <button type="button" onClick={() => onChange(LOST)}
           className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${isLost ? 'bg-red-600 border-red-600 text-white' : 'border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-500'}`}>
