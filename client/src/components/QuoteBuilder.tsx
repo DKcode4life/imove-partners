@@ -379,7 +379,7 @@ function BlockHeader({
 
 // ── Line-item block (Estimate Quote) ──────────────────────────────────────────
 
-type AccentName = 'cyan' | 'amber';
+type AccentName = 'cyan' | 'emerald';
 
 const ACCENT: Record<AccentName, {
   headerBg: string; headerBorder: string; label: string; total: string;
@@ -390,11 +390,11 @@ const ACCENT: Record<AccentName, {
     label:        'text-cyan-700',
     total:        'text-cyan-900',
   },
-  amber: {
-    headerBg:     'bg-gradient-to-br from-amber-50 to-amber-100/50',
-    headerBorder: 'border-amber-200/70',
-    label:        'text-amber-700',
-    total:        'text-amber-900',
+  emerald: {
+    headerBg:     'bg-gradient-to-br from-emerald-50 to-emerald-100/50',
+    headerBorder: 'border-emerald-200/70',
+    label:        'text-emerald-700',
+    total:        'text-emerald-900',
   },
 };
 
@@ -566,7 +566,7 @@ function FixQuotationBlock({
   unselectedAddonsTotal: number;
   fixQuotationTotal: number;
 }) {
-  const cfg = ACCENT.amber;
+  const cfg = ACCENT.emerald;
   const selectedAddons   = addonItems.filter(a => a.selected);
   const unselectedAddons = addonItems.filter(a => !a.selected);
   const isEmpty = mandatoryItems.length === 0 && addonItems.length === 0;
@@ -836,9 +836,9 @@ function FixReadView({
 // ── Deposit + balance block ───────────────────────────────────────────────────
 
 const DEPOSIT_ACCENT = {
-  headerBg:     'bg-gradient-to-br from-emerald-50 to-emerald-100/50',
-  headerBorder: 'border-emerald-200/70',
-  label:        'text-emerald-700',
+  headerBg:     'bg-gradient-to-br from-amber-50 to-amber-100/50',
+  headerBorder: 'border-amber-200/70',
+  label:        'text-amber-700',
 };
 
 function DepositBlock({
@@ -860,7 +860,7 @@ function DepositBlock({
   const noDeposit = section.depositType === 'none';
 
   return (
-    <div className="rounded-xl border border-emerald-200/70 bg-white overflow-hidden shadow-sm">
+    <div className="rounded-xl border border-amber-200/70 bg-white overflow-hidden shadow-sm">
       <BlockHeader
         title="Deposit & Balance"
         subtitle="Track deposit and remaining balance"
@@ -870,7 +870,7 @@ function DepositBlock({
         onSave={onSave}
         onCancel={onCancel}
         extra={fullyPaid && !editing ? (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-emerald-600 text-white shadow-sm">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-500 text-white shadow-sm">
             <CheckCircle className="w-3.5 h-3.5" /> Fully paid
           </span>
         ) : null}
@@ -924,8 +924,8 @@ function DepositEditView({
               onClick={() => onChange('depositType', opt.key)}
               className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all active:scale-95 ${
                 section.depositType === opt.key
-                  ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-600 text-white shadow-sm'
-                  : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
+                  ? 'bg-gradient-to-br from-amber-400 to-amber-500 border-amber-500 text-white shadow-sm'
+                  : 'bg-white border-slate-200 text-slate-600 hover:border-amber-300 hover:text-amber-700'
               }`}
             >
               {opt.label}
@@ -953,9 +953,9 @@ function DepositEditView({
               />
             </div>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200/60 px-4 py-3">
-            <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">Deposit amount</p>
-            <p className="text-2xl font-bold text-emerald-900 tabular-nums tracking-tight leading-none mt-1">
+          <div className="rounded-xl bg-gradient-to-br from-amber-50 to-amber-100/50 border border-amber-200/60 px-4 py-3">
+            <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Deposit amount</p>
+            <p className="text-2xl font-bold text-amber-900 tabular-nums tracking-tight leading-none mt-1">
               {fmt(depositAmount)}
             </p>
           </div>
@@ -1016,14 +1016,14 @@ function PaidEditRow({
         onClick={togglePaid}
         className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all active:scale-90 ${
           paid
-            ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-2 border-emerald-600 shadow-sm'
-            : 'bg-white border-2 border-slate-300 hover:border-emerald-400'
+            ? 'bg-gradient-to-br from-amber-400 to-amber-500 border-2 border-amber-500 shadow-sm'
+            : 'bg-white border-2 border-slate-300 hover:border-amber-400'
         }`}
         aria-pressed={paid}
       >
         {paid && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
       </button>
-      <span className={`text-sm font-semibold flex-1 ${paid ? 'text-emerald-800' : 'text-slate-700'}`}>{label}</span>
+      <span className={`text-sm font-semibold flex-1 ${paid ? 'text-amber-800' : 'text-slate-700'}`}>{label}</span>
       <input
         type="date"
         className="input w-40 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1060,8 +1060,8 @@ function DepositReadView({
         </div>
         {!noDeposit && (
           <div className="text-right flex-shrink-0">
-            <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">Deposit</p>
-            <p className="text-2xl font-bold text-emerald-900 tabular-nums tracking-tight leading-none">{fmt(depositAmount)}</p>
+            <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Deposit</p>
+            <p className="text-2xl font-bold text-amber-900 tabular-nums tracking-tight leading-none">{fmt(depositAmount)}</p>
           </div>
         )}
       </div>
@@ -1081,7 +1081,7 @@ function DepositReadView({
               <p className="text-[11px] text-slate-400 mt-0.5 italic">Add Fix Quotation items to see balance</p>
             )}
           </div>
-          <p className={`text-2xl font-bold tabular-nums tracking-tight ${remainingBalance === 0 && quotationTotal > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
+          <p className={`text-2xl font-bold tabular-nums tracking-tight ${remainingBalance === 0 && quotationTotal > 0 ? 'text-amber-700' : 'text-slate-900'}`}>
             {fmt(remainingBalance)}
           </p>
         </div>
@@ -1107,21 +1107,21 @@ function ReadPaidRow({
       compact
         ? ''
         : paid
-          ? 'bg-emerald-50/70 border-emerald-200'
+          ? 'bg-amber-50/70 border-amber-200'
           : 'bg-slate-50/60 border-slate-200/60'
     }`}>
       <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${
         paid
-          ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-2 border-emerald-600 shadow-sm'
+          ? 'bg-gradient-to-br from-amber-400 to-amber-500 border-2 border-amber-500 shadow-sm'
           : 'bg-white border-2 border-slate-300'
       }`}>
         {paid && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
       </div>
-      <span className={`text-sm font-semibold flex-1 ${paid ? 'text-emerald-800' : 'text-slate-500'}`}>
+      <span className={`text-sm font-semibold flex-1 ${paid ? 'text-amber-800' : 'text-slate-500'}`}>
         {paid ? `${label} paid` : `${label} not paid`}
       </span>
       {paid && date && (
-        <span className="text-xs font-medium text-emerald-700 tabular-nums">
+        <span className="text-xs font-medium text-amber-700 tabular-nums">
           {fmtDateShort(date)}
         </span>
       )}
