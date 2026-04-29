@@ -46,14 +46,18 @@ type ItemEntry  = { count: number; note: string };
 type RoomRecord = Record<string, ItemEntry>;
 type SurveyData = Record<string, RoomRecord>;
 
-type CustomRoom = { id: string; name: string };
+type CustomRoom = { id: string; name: string; categoryId: string };
 
 const storageKey     = (jobId: string | undefined) => `crm-survey-${jobId}`;
 const customRoomsKey = (jobId: string | undefined) => `crm-survey-rooms-${jobId}`;
 
 function loadCustomRooms(jobId: string | undefined): CustomRoom[] {
   if (!jobId) return [];
-  try { return JSON.parse(localStorage.getItem(customRoomsKey(jobId)) || '[]') as CustomRoom[]; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(customRoomsKey(jobId)) || '[]') as
+      Array<{ id: string; name: string; categoryId?: string }>;
+    return raw.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId ?? '__all__' }));
+  }
   catch { return []; }
 }
 
@@ -275,7 +279,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const [selectedRoomId, setSelectedRoomId] = useState(SURVEY_ROOMS[0].id);
   const [noteModal,      setNoteModal]      = useState<{ room: string; item: string; icon: string } | null>(null);
   const [customRooms,    setCustomRooms]    = useState<CustomRoom[]>(() => loadCustomRooms(jobId));
-  const [addingRoom,     setAddingRoom]     = useState(false);
+  const [addingRoomType, setAddingRoomType] = useState<'bedroom' | 'room' | null>(null);
   const [newRoomName,    setNewRoomName]    = useState('');
   const [search,         setSearch]         = useState('');
 
@@ -285,18 +289,18 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
 
   const allRooms = [
     ...SURVEY_ROOMS,
-    ...customRooms.map(r => ({ id: r.id, name: r.name, categoryId: '__all__' })),
+    ...customRooms.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId })),
   ];
 
-  const handleAddRoom = () => {
+  const handleAddRoom = (categoryId: string) => {
     const name = newRoomName.trim();
     if (!name) return;
     const id = `custom-${Date.now()}`;
-    const next = [...customRooms, { id, name }];
+    const next = [...customRooms, { id, name, categoryId }];
     setCustomRooms(next);
     if (jobId) localStorage.setItem(customRoomsKey(jobId), JSON.stringify(next));
     setNewRoomName('');
-    setAddingRoom(false);
+    setAddingRoomType(null);
     setSelectedRoomId(id);
   };
 
@@ -384,6 +388,14 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const displayItems = searchTerm
     ? catalog.flatMap(c => c.items).filter(i => i.name.toLowerCase().includes(searchTerm))
     : catItems;
+
+  // Items added to this room via search that aren't in the room's standard category
+  const allCatalogFlat = catalog.flatMap(c => c.items);
+  const extraItems = !searchTerm
+    ? Object.keys(roomData)
+        .filter(name => !catItems.some(i => i.name === name))
+        .flatMap(name => { const item = allCatalogFlat.find(i => i.name === name); return item ? [item] : []; })
+    : [];
 
   return (
     <>
@@ -485,35 +497,38 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                 );
               })}
 
-              {/* Add Room */}
-              <div className="mt-1 border-t border-slate-100 pt-2">
-                {addingRoom ? (
+              {/* Add Bedroom / Add Room */}
+              <div className="mt-1 border-t border-slate-100 pt-2 space-y-1">
+                {addingRoomType ? (
                   <div className="px-1">
+                    <p className="text-xs text-slate-500 mb-1.5">
+                      {addingRoomType === 'bedroom' ? 'New bedroom name' : 'New room name'}
+                    </p>
                     <input
                       autoFocus
                       type="text"
                       value={newRoomName}
                       onChange={e => setNewRoomName(e.target.value)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter') handleAddRoom();
+                        if (e.key === 'Enter') handleAddRoom(addingRoomType === 'bedroom' ? 'bedroom' : '__all__');
                         if (e.key === 'Escape') {
                           e.stopPropagation();
-                          setAddingRoom(false);
+                          setAddingRoomType(null);
                           setNewRoomName('');
                         }
                       }}
-                      placeholder="Room name…"
+                      placeholder={addingRoomType === 'bedroom' ? 'e.g. Bedroom 4…' : 'e.g. Conservatory…'}
                       className="w-full rounded-lg border border-teal-300 px-2.5 py-1.5 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-teal-100 mb-1.5"
                     />
                     <div className="flex gap-1.5">
                       <button
-                        onClick={handleAddRoom}
+                        onClick={() => handleAddRoom(addingRoomType === 'bedroom' ? 'bedroom' : '__all__')}
                         className="flex-1 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 transition-colors"
                       >
                         Save
                       </button>
                       <button
-                        onClick={() => { setAddingRoom(false); setNewRoomName(''); }}
+                        onClick={() => { setAddingRoomType(null); setNewRoomName(''); }}
                         className="flex-1 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-xs font-medium hover:bg-slate-50 transition-colors"
                       >
                         Cancel
@@ -521,13 +536,22 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                     </div>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => setAddingRoom(true)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-teal-600 transition-colors border border-dashed border-slate-200"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Room
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setAddingRoomType('bedroom')}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-teal-600 transition-colors border border-dashed border-slate-200"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Bedroom
+                    </button>
+                    <button
+                      onClick={() => setAddingRoomType('room')}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-50 hover:text-teal-600 transition-colors border border-dashed border-slate-200"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Room
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -557,64 +581,115 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                 )}
               </div>
 
-              {/* Room header — hidden while searching */}
-              {!searchTerm && (
-                <div className="flex items-start justify-between mb-5">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                      {currentRoom.name}
-                    </h3>
-                    {curRoomVol > 0 && (
-                      <p className="text-sm text-slate-500 tabular-nums mt-0.5">
-                        <span className="font-semibold text-teal-700">{fmtFt(curRoomVol)} ft³</span>
-                        {' '}·{' '}
-                        <span className="font-semibold text-teal-700">{fmtM3(curRoomVol)} m³</span>
-                      </p>
+              {searchTerm ? (
+                /* ── Search mode ── */
+                <>
+                  <p className="text-sm text-slate-500 mb-4">
+                    {displayItems.length > 0
+                      ? <>{displayItems.length} result{displayItems.length !== 1 ? 's' : ''} · adding to <span className="font-semibold text-teal-700">{currentRoom.name}</span></>
+                      : <>No items found for <span className="font-semibold text-slate-700">"{search}"</span></>
+                    }
+                  </p>
+                  {displayItems.length > 0 ? (
+                    <div className="grid grid-cols-5 gap-3">
+                      {displayItems.map(({ id, name, icon, volumeCuFt }) => {
+                        const entry = roomData[name] ?? { count: 0, note: '' };
+                        return (
+                          <ItemSquare
+                            key={id}
+                            name={name}
+                            icon={icon}
+                            count={entry.count}
+                            note={entry.note}
+                            volumeCuFt={volumeCuFt}
+                            onIncrement={() => increment(currentRoom.name, name)}
+                            onDecrement={() => decrement(currentRoom.name, name)}
+                            onSetCount={n => setItemCount(currentRoom.name, name, n)}
+                            onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                      <Search className="w-8 h-8 mb-3 opacity-40" />
+                      <p className="text-sm">Try a different search term</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* ── Normal mode ── */
+                <>
+                  {/* Room header */}
+                  <div className="flex items-start justify-between mb-5">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                        {currentRoom.name}
+                      </h3>
+                      {curRoomVol > 0 && (
+                        <p className="text-sm text-slate-500 tabular-nums mt-0.5">
+                          <span className="font-semibold text-teal-700">{fmtFt(curRoomVol)} ft³</span>
+                          {' '}·{' '}
+                          <span className="font-semibold text-teal-700">{fmtM3(curRoomVol)} m³</span>
+                        </p>
+                      )}
+                    </div>
+                    {curRoomCount > 0 && (
+                      <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-700 text-xs font-bold tabular-nums flex-shrink-0">
+                        {curRoomCount} item{curRoomCount !== 1 ? 's' : ''}
+                      </span>
                     )}
                   </div>
-                  {curRoomCount > 0 && (
-                    <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-700 text-xs font-bold tabular-nums flex-shrink-0">
-                      {curRoomCount} item{curRoomCount !== 1 ? 's' : ''}
-                    </span>
+
+                  {/* Standard category items */}
+                  <div className="grid grid-cols-5 gap-3">
+                    {catItems.map(({ id, name, icon, volumeCuFt }) => {
+                      const entry = roomData[name] ?? { count: 0, note: '' };
+                      return (
+                        <ItemSquare
+                          key={id}
+                          name={name}
+                          icon={icon}
+                          count={entry.count}
+                          note={entry.note}
+                          volumeCuFt={volumeCuFt}
+                          onIncrement={() => increment(currentRoom.name, name)}
+                          onDecrement={() => decrement(currentRoom.name, name)}
+                          onSetCount={n => setItemCount(currentRoom.name, name, n)}
+                          onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Extra items added via search from other categories */}
+                  {extraItems.length > 0 && (
+                    <div className="mt-6 pt-5 border-t border-slate-200">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                        Added from search
+                      </p>
+                      <div className="grid grid-cols-5 gap-3">
+                        {extraItems.map(({ id, name, icon, volumeCuFt }) => {
+                          const entry = roomData[name] ?? { count: 0, note: '' };
+                          return (
+                            <ItemSquare
+                              key={id}
+                              name={name}
+                              icon={icon}
+                              count={entry.count}
+                              note={entry.note}
+                              volumeCuFt={volumeCuFt}
+                              onIncrement={() => increment(currentRoom.name, name)}
+                              onDecrement={() => decrement(currentRoom.name, name)}
+                              onSetCount={n => setItemCount(currentRoom.name, name, n)}
+                              onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
-                </div>
-              )}
-
-              {/* Search context pill */}
-              {searchTerm && (
-                <p className="text-sm text-slate-500 mb-4">
-                  {displayItems.length > 0
-                    ? <>{displayItems.length} result{displayItems.length !== 1 ? 's' : ''} · adding to <span className="font-semibold text-teal-700">{currentRoom.name}</span></>
-                    : <>No items found for <span className="font-semibold text-slate-700">"{search}"</span></>
-                  }
-                </p>
-              )}
-
-              {displayItems.length > 0 ? (
-                <div className="grid grid-cols-5 gap-3">
-                  {displayItems.map(({ id, name, icon, volumeCuFt }) => {
-                    const entry = roomData[name] ?? { count: 0, note: '' };
-                    return (
-                      <ItemSquare
-                        key={id}
-                        name={name}
-                        icon={icon}
-                        count={entry.count}
-                        note={entry.note}
-                        volumeCuFt={volumeCuFt}
-                        onIncrement={() => increment(currentRoom.name, name)}
-                        onDecrement={() => decrement(currentRoom.name, name)}
-                        onSetCount={n => setItemCount(currentRoom.name, name, n)}
-                        onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
-                      />
-                    );
-                  })}
-                </div>
-              ) : !searchTerm ? null : (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                  <Search className="w-8 h-8 mb-3 opacity-40" />
-                  <p className="text-sm">Try a different search term</p>
-                </div>
+                </>
               )}
 
               <p className="text-xs text-slate-400 mt-6 text-center">
