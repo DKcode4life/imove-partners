@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X, ClipboardList, Minus, Plus, MessageSquare } from 'lucide-react';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
@@ -137,8 +137,6 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
 
 // ── Item square card ───────────────────────────────────────────────────────────
 
-const LONG_PRESS_MS = 500;
-
 function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrement, onSetCount, onOpenNote }: {
   name: string; icon: string; count: number; note: string; volumeCuFt: number;
   onIncrement: () => void;
@@ -149,32 +147,8 @@ function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrem
   const [editingCount, setEditingCount] = useState(false);
   const [raw,          setRaw]          = useState('');
 
-  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pressState = useRef<'pending' | 'fired' | 'idle'>('idle');
-
   const active  = count > 0;
   const hasNote = note.trim().length > 0;
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    pressState.current = 'pending';
-    timerRef.current = setTimeout(() => {
-      pressState.current = 'fired';
-      if (navigator.vibrate) navigator.vibrate(25);
-      onOpenNote();
-    }, LONG_PRESS_MS);
-  };
-
-  const handlePointerUp = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (pressState.current === 'pending') onIncrement();
-    pressState.current = 'idle';
-  };
-
-  const handlePointerCancel = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    pressState.current = 'idle';
-  };
 
   const startCountEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -223,29 +197,23 @@ function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrem
         )
       )}
 
-      {/* Note indicator */}
-      {hasNote && (
-        <button
-          onClick={e => { e.stopPropagation(); onOpenNote(); }}
-          title="Has note — tap to edit"
-          className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center hover:bg-amber-200 transition-colors"
-        >
-          <MessageSquare className="w-2.5 h-2.5" />
-        </button>
-      )}
-
-      {/* Emoji — tap = add, long press = note */}
+      {/* Note indicator — always visible; amber when has note, dimmed when empty */}
       <button
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerCancel}
-        onPointerCancel={handlePointerCancel}
-        onContextMenu={e => e.preventDefault()}
-        title="Tap to add · hold to add a note"
-        className="text-3xl leading-none mb-1.5 select-none hover:scale-110 transition-transform active:scale-95 touch-none"
+        onClick={e => { e.stopPropagation(); onOpenNote(); }}
+        title={hasNote ? 'Has note — tap to edit' : 'Add a note'}
+        className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-colors ${
+          hasNote
+            ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+            : 'bg-slate-100 text-slate-300 hover:bg-slate-200 hover:text-slate-500'
+        }`}
       >
-        {icon}
+        <MessageSquare className="w-2.5 h-2.5" />
       </button>
+
+      {/* Icon — display only */}
+      <div className="text-3xl leading-none mb-1.5 select-none">
+        {icon}
+      </div>
 
       {/* Name */}
       <p className={`text-[10px] font-medium text-center leading-tight px-1 ${
@@ -266,19 +234,19 @@ function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrem
         <button
           onClick={onDecrement}
           disabled={!active}
-          className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all active:scale-90 ${
+          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all active:scale-90 ${
             active
               ? 'text-slate-400 hover:bg-red-50 hover:text-red-400'
               : 'text-slate-200 cursor-not-allowed'
           }`}
         >
-          <Minus className="w-3 h-3" />
+          <Minus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={onIncrement}
-          className="w-6 h-6 rounded-lg flex items-center justify-center text-teal-500 hover:bg-teal-100 transition-all active:scale-90"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-teal-500 hover:bg-teal-100 transition-all active:scale-90"
         >
-          <Plus className="w-3 h-3" />
+          <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
@@ -426,7 +394,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                     {' '}total &nbsp;·&nbsp; {grandItemCount} item{grandItemCount !== 1 ? 's' : ''} across {roomsWithItems} room{roomsWithItems !== 1 ? 's' : ''}
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-500">Tap to add · hold to add a note</p>
+                  <p className="text-xs text-slate-500">Use + / − to add items · tap the note icon for notes</p>
                 )}
               </div>
             </div>
@@ -520,7 +488,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
               </div>
 
               <p className="text-xs text-slate-400 mt-6 text-center">
-                Tap icon or + to add · hold icon to add a note · tap teal badge to edit count
+                Use + / − to add items · tap the note icon to add a note · tap teal badge to edit count
               </p>
             </div>
 
