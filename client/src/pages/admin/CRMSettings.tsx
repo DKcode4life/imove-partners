@@ -4,11 +4,14 @@ import {
   Plus, Pencil, Trash2, Check, X, GripVertical,
   AlertCircle, CheckCircle, Eye, EyeOff, KeyRound,
   Phone, Mail, CreditCard, StickyNote, MapPin,
+  Package, ChevronDown, ChevronRight, RotateCcw, List, LayoutGrid,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../lib/api';
+import type { CatalogCategory, CatalogItem } from '../../data/inventoryCatalog';
+import { loadCatalog, saveCatalog, resetCatalog } from '../../lib/catalogStorage';
 import type {
   CompanySettings, JobStatusSetting, LeadSourceSetting, MoveTypeSetting, PlannerAsset, Contract,
 } from '../../types';
@@ -1319,6 +1322,491 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
   );
 }
 
+// ── Inventory tab ─────────────────────────────────────────────────────────────
+
+const FT3_TO_M3 = 0.028317;
+
+type EditingItem = { categoryId: string; itemId: string; name: string; icon: string; volumeCuFt: string };
+
+function useCatalog() {
+  const [catalog, setCatalog] = useState<CatalogCategory[]>(loadCatalog);
+  const update = (next: CatalogCategory[]) => { setCatalog(next); saveCatalog(next); };
+  const updateItem = (categoryId: string, itemId: string, patch: Partial<CatalogItem>) =>
+    update(catalog.map(c => c.id !== categoryId ? c : { ...c, items: c.items.map(i => i.id !== itemId ? i : { ...i, ...patch }) }));
+  const deleteItem = (categoryId: string, itemId: string) =>
+    update(catalog.map(c => c.id !== categoryId ? c : { ...c, items: c.items.filter(i => i.id !== itemId) }));
+  const addItem = (categoryId: string, item: CatalogItem) =>
+    update(catalog.map(c => c.id !== categoryId ? c : { ...c, items: [...c.items, item] }));
+  const reorderItems = (categoryId: string, fromIdx: number, toIdx: number) =>
+    update(catalog.map(c => {
+      if (c.id !== categoryId) return c;
+      const items = [...c.items];
+      const [moved] = items.splice(fromIdx, 1);
+      items.splice(toIdx, 0, moved);
+      return { ...c, items };
+    }));
+  const reset = () => setCatalog(resetCatalog());
+  return { catalog, updateItem, deleteItem, addItem, reorderItems, reset };
+}
+
+function IconDisplay({ value }: { value: string }) {
+  if (value.startsWith('data:image')) {
+    return <img src={value} alt="" className="w-7 h-7 object-contain rounded" />;
+  }
+  return <span className="text-xl leading-none">{value}</span>;
+}
+
+function IconInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const isImage = value.startsWith('data:image');
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { if (ev.target?.result) onChange(ev.target.result as string); };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-9 h-9 rounded-lg border border-slate-200 flex items-center justify-center bg-white overflow-hidden flex-shrink-0">
+        {isImage
+          ? <img src={value} alt="" className="w-full h-full object-contain" />
+          : <span className="text-lg">{value || '📦'}</span>
+        }
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {!isImage && (
+          <input
+            type="text"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            maxLength={4}
+            className="w-12 text-center rounded border border-slate-200 px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-teal-300"
+            placeholder="📦"
+          />
+        )}
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="text-xs px-1.5 py-0.5 rounded border border-slate-200 text-slate-400 hover:text-teal-600 hover:border-teal-300 transition-colors whitespace-nowrap"
+        >
+          {isImage ? 'Change' : 'Upload'}
+        </button>
+        {isImage && (
+          <button
+            type="button"
+            onClick={() => onChange('📦')}
+            className="text-xs px-1.5 py-0.5 rounded border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 transition-colors"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+function InvEditRow({ item, onSave, onCancel }: {
+  item: EditingItem;
+  onSave: (name: string, icon: string, vol: number) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(item.name);
+  const [icon, setIcon] = useState(item.icon);
+  const [vol,  setVol]  = useState(item.volumeCuFt);
+  const volNum = parseFloat(vol);
+  const valid  = name.trim().length > 0 && !isNaN(volNum) && volNum >= 0;
+  const save   = () => { if (valid) onSave(name.trim(), icon.trim() || '📦', volNum); };
+  return (
+    <tr className="bg-teal-50/50">
+      <td className="px-2 py-2 w-8" />
+      <td className="px-3 py-2">
+        <IconInput value={icon} onChange={setIcon} />
+      </td>
+      <td className="px-3 py-2">
+        <input autoFocus type="text" value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+          className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300" placeholder="Item name" />
+      </td>
+      <td className="px-3 py-2">
+        <input type="number" min="0" step="0.5" value={vol} onChange={e => setVol(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+          className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-300" />
+      </td>
+      <td className="px-3 py-2 text-xs text-slate-400 tabular-nums text-right">
+        {!isNaN(volNum) ? (volNum * FT3_TO_M3).toFixed(3) : '—'}
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1.5 justify-end">
+          <button onClick={save} disabled={!valid} className="p-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40 transition-colors"><Check className="w-3.5 h-3.5" /></button>
+          <button onClick={onCancel} className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 transition-colors"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function InvAddRow({ onSave, onCancel }: {
+  onSave: (name: string, icon: string, vol: number) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [icon, setIcon] = useState('');
+  const [vol,  setVol]  = useState('');
+  const volNum = parseFloat(vol);
+  const valid  = name.trim().length > 0 && !isNaN(volNum) && volNum >= 0;
+  const save   = () => { if (valid) onSave(name.trim(), icon.trim() || '📦', volNum); };
+  return (
+    <tr className="bg-teal-50/30 border-t border-teal-100">
+      <td className="px-2 py-2 w-8" />
+      <td className="px-3 py-2">
+        <IconInput value={icon} onChange={setIcon} />
+      </td>
+      <td className="px-3 py-2">
+        <input autoFocus type="text" value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+          className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300" placeholder="New item name" />
+      </td>
+      <td className="px-3 py-2">
+        <input type="number" min="0" step="0.5" value={vol} onChange={e => setVol(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+          className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-300" placeholder="0" />
+      </td>
+      <td className="px-3 py-2 text-xs text-slate-400 tabular-nums text-right">
+        {!isNaN(volNum) && vol ? (volNum * FT3_TO_M3).toFixed(3) : '—'}
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1.5 justify-end">
+          <button onClick={save} disabled={!valid} className="p-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40 transition-colors"><Check className="w-3.5 h-3.5" /></button>
+          <button onClick={onCancel} className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 transition-colors"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function InvCategoryCard({
+  category, editingItem, addingCategoryId, confirmDelete,
+  onStartEdit, onSaveEdit, onCancelEdit,
+  onStartAdd, onSaveAdd, onCancelAdd,
+  onDelete, onConfirmDelete, onCancelDelete, onReorder, viewMode,
+}: {
+  category: CatalogCategory;
+  editingItem: EditingItem | null;
+  addingCategoryId: string | null;
+  confirmDelete: { categoryId: string; itemId: string } | null;
+  onStartEdit: (item: CatalogItem) => void;
+  onSaveEdit: (name: string, icon: string, vol: number) => void;
+  onCancelEdit: () => void;
+  onStartAdd: () => void;
+  onSaveAdd: (name: string, icon: string, vol: number) => void;
+  onCancelAdd: () => void;
+  onDelete: (itemId: string) => void;
+  onConfirmDelete: (itemId: string) => void;
+  onCancelDelete: () => void;
+  onReorder: (fromIdx: number, toIdx: number) => void;
+  viewMode: 'table' | 'grid';
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const isAdding = addingCategoryId === category.id;
+
+  const handleDragStart = (idx: number, e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+    setTimeout(() => setDragIdx(idx), 0);
+  };
+  const handleDragOver = (e: React.DragEvent, idx: number) => { e.preventDefault(); setDragOverIdx(idx); };
+  const handleDrop = (toIdx: number) => {
+    if (dragIdx !== null && dragIdx !== toIdx) onReorder(dragIdx, toIdx);
+    setDragIdx(null); setDragOverIdx(null);
+  };
+  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null); };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <button onClick={() => setExpanded(e => !e)} className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center">
+            <Package className="w-4 h-4 text-white" />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-bold text-slate-900">{category.name}</p>
+            <p className="text-xs text-slate-400">{category.items.length} items</p>
+          </div>
+        </div>
+        {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-slate-100">
+          {viewMode === 'grid' ? (
+            /* ── Grid view ── */
+            <div className="p-4">
+              <div className="grid grid-cols-5 gap-2">
+                {category.items.map((item, idx) => {
+                  const isConfirm = confirmDelete?.categoryId === category.id && confirmDelete?.itemId === item.id;
+                  const isDragging = dragIdx === idx;
+                  const isDragOver = dragOverIdx === idx && dragIdx !== idx;
+                  return (
+                    <div
+                      key={item.id}
+                      draggable={!isConfirm}
+                      onDragStart={e => handleDragStart(idx, e)}
+                      onDragOver={e => handleDragOver(e, idx)}
+                      onDrop={() => handleDrop(idx)}
+                      onDragEnd={handleDragEnd}
+                      className={`relative group flex flex-col items-center gap-2 p-3 rounded-xl border-2 select-none cursor-grab active:cursor-grabbing transition-all ${
+                        isDragging  ? 'opacity-30 border-slate-200 bg-white' :
+                        isDragOver  ? 'border-teal-400 bg-teal-50 shadow-md scale-[1.03]' :
+                        'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+                      }`}
+                    >
+                      {/* Delete confirm overlay */}
+                      {isConfirm && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 rounded-xl z-10 gap-2">
+                          <p className="text-xs font-semibold text-red-600">Delete?</p>
+                          <div className="flex gap-1.5">
+                            <button onClick={() => onDelete(item.id)} className="px-2.5 py-1 text-xs bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors">Yes</button>
+                            <button onClick={onCancelDelete} className="px-2.5 py-1 text-xs border border-slate-200 text-slate-500 rounded-lg font-semibold hover:bg-slate-50 transition-colors">No</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Hover actions */}
+                      {!isConfirm && (
+                        <div className="absolute top-1.5 right-1.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => onStartEdit(item)}
+                            className="p-1 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-teal-600 hover:border-teal-300 shadow-sm transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => onConfirmDelete(item.id)}
+                            className="p-1 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 shadow-sm transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Icon */}
+                      <div className="w-10 h-10 flex items-center justify-center mt-2">
+                        <IconDisplay value={item.icon} />
+                      </div>
+
+                      {/* Name */}
+                      <p className="text-xs font-medium text-slate-600 text-center leading-tight line-clamp-2 w-full pb-1">{item.name}</p>
+                    </div>
+                  );
+                })}
+
+                {/* Add card */}
+                {!isAdding && (
+                  <button
+                    onClick={onStartAdd}
+                    className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50/30 transition-all min-h-[100px]"
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span className="text-xs font-medium">Add item</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Add row inline when adding in grid mode */}
+              {isAdding && (
+                <div className="mt-3 bg-teal-50/30 border border-teal-100 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      <InvAddRow onSave={onSaveAdd} onCancel={onCancelAdd} />
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Table view ── */
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100 text-xs text-slate-400 uppercase tracking-wide">
+                      <th className="px-2 py-2.5 w-8" />
+                      <th className="px-3 py-2.5 text-left font-semibold w-24">Icon</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Item name</th>
+                      <th className="px-3 py-2.5 text-right font-semibold w-24">ft³</th>
+                      <th className="px-3 py-2.5 text-right font-semibold w-24">m³</th>
+                      <th className="px-3 py-2.5 text-right font-semibold w-28">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {category.items.map((item, idx) => {
+                      const isEditing = editingItem?.categoryId === category.id && editingItem?.itemId === item.id;
+                      const isConfirm = confirmDelete?.categoryId === category.id && confirmDelete?.itemId === item.id;
+                      if (isEditing) return <InvEditRow key={item.id} item={editingItem!} onSave={onSaveEdit} onCancel={onCancelEdit} />;
+                      const isDragging = dragIdx === idx;
+                      const isDragOver = dragOverIdx === idx && dragIdx !== idx;
+                      return (
+                        <tr
+                          key={item.id}
+                          draggable={!isConfirm}
+                          onDragStart={e => handleDragStart(idx, e)}
+                          onDragOver={e => handleDragOver(e, idx)}
+                          onDrop={() => handleDrop(idx)}
+                          onDragEnd={handleDragEnd}
+                          className={`transition-colors group select-none ${isDragging ? 'opacity-30' : ''} ${isDragOver ? 'bg-teal-50 border-t-2 border-teal-400' : 'hover:bg-slate-50/50'}`}
+                        >
+                          <td className="px-2 py-2 w-8">
+                            <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing" />
+                          </td>
+                          <td className="px-3 py-2"><IconDisplay value={item.icon} /></td>
+                          <td className="px-3 py-2 text-slate-800 font-medium">{item.name}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-600">{item.volumeCuFt}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-400 text-xs">{(item.volumeCuFt * FT3_TO_M3).toFixed(3)}</td>
+                          <td className="px-3 py-2">
+                            {isConfirm ? (
+                              <div className="flex items-center gap-1 justify-end">
+                                <span className="text-xs text-red-600 font-medium">Delete?</span>
+                                <button onClick={() => onDelete(item.id)} className="px-2 py-1 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors">Yes</button>
+                                <button onClick={onCancelDelete} className="px-2 py-1 rounded-lg border border-slate-200 text-xs font-semibold text-slate-500 hover:bg-slate-100 transition-colors">No</button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => onStartEdit(item)} className="p-1 rounded text-slate-400 hover:text-teal-600 hover:bg-teal-50 transition-colors" title="Edit"><Pencil className="w-3 h-3" /></button>
+                                <button onClick={() => onConfirmDelete(item.id)} className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Delete"><Trash2 className="w-3 h-3" /></button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {isAdding && <InvAddRow onSave={onSaveAdd} onCancel={onCancelAdd} />}
+                  </tbody>
+                </table>
+              </div>
+              {!isAdding && (
+                <div className="px-4 py-3 border-t border-slate-100">
+                  <button onClick={onStartAdd} className="flex items-center gap-1.5 text-sm text-teal-600 font-semibold hover:text-teal-800 transition-colors">
+                    <Plus className="w-4 h-4" />
+                    Add item
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InventoryTab() {
+  const { catalog, updateItem, deleteItem, addItem, reorderItems, reset } = useCatalog();
+  const [editingItem,      setEditingItem]      = useState<EditingItem | null>(null);
+  const [addingCategoryId, setAddingCategoryId] = useState<string | null>(null);
+  const [confirmDelete,    setConfirmDelete]    = useState<{ categoryId: string; itemId: string } | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [viewMode,         setViewMode]         = useState<'table' | 'grid'>('table');
+  const totalItems = catalog.reduce((s, c) => s + c.items.length, 0);
+
+  const handleStartEdit = (categoryId: string, item: CatalogItem) => {
+    setAddingCategoryId(null); setConfirmDelete(null);
+    setEditingItem({ categoryId, itemId: item.id, name: item.name, icon: item.icon, volumeCuFt: String(item.volumeCuFt) });
+  };
+  const handleSaveEdit = (name: string, icon: string, volumeCuFt: number) => {
+    if (!editingItem) return;
+    updateItem(editingItem.categoryId, editingItem.itemId, { name, icon, volumeCuFt });
+    setEditingItem(null);
+  };
+  const handleSaveAdd = (categoryId: string, name: string, icon: string, volumeCuFt: number) => {
+    addItem(categoryId, { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, name, icon, volumeCuFt });
+    setAddingCategoryId(null);
+  };
+  const handleDelete = (categoryId: string, itemId: string) => { deleteItem(categoryId, itemId); setConfirmDelete(null); };
+  const handleReset = () => { reset(); setEditingItem(null); setAddingCategoryId(null); setConfirmDelete(null); setShowResetConfirm(false); };
+
+  const switchView = (mode: 'table' | 'grid') => {
+    setEditingItem(null);
+    setAddingCategoryId(null);
+    setViewMode(mode);
+  };
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm text-slate-500">Manage items, icons, and volumes for each room category. Changes save automatically and appear in the Survey Tool.</p>
+          <p className="text-xs text-slate-400 mt-1">{totalItems} items across {catalog.length} categories</p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* View toggle */}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+            <button
+              onClick={() => switchView('table')}
+              title="Table view"
+              className={`p-2 transition-colors ${viewMode === 'table' ? 'bg-slate-800 text-white' : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => switchView('grid')}
+              title="Grid view"
+              className={`p-2 transition-colors ${viewMode === 'grid' ? 'bg-slate-800 text-white' : 'bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+          </div>
+          {/* Reset */}
+          {!showResetConfirm ? (
+            <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors">
+              <RotateCcw className="w-4 h-4" />
+              Reset to defaults
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-red-600 font-medium">Reset all customisations?</span>
+              <button onClick={handleReset} className="px-3 py-1.5 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors">Reset</button>
+              <button onClick={() => setShowResetConfirm(false)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-100 transition-colors">Cancel</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {catalog.map(category => (
+          <InvCategoryCard
+            key={category.id}
+            category={category}
+            editingItem={editingItem}
+            addingCategoryId={addingCategoryId}
+            confirmDelete={confirmDelete}
+            onStartEdit={item => handleStartEdit(category.id, item)}
+            onSaveEdit={handleSaveEdit}
+            onCancelEdit={() => setEditingItem(null)}
+            onStartAdd={() => { setEditingItem(null); setConfirmDelete(null); setAddingCategoryId(category.id); }}
+            onSaveAdd={(name, icon, vol) => handleSaveAdd(category.id, name, icon, vol)}
+            onCancelAdd={() => setAddingCategoryId(null)}
+            onDelete={itemId => handleDelete(category.id, itemId)}
+            onConfirmDelete={itemId => { setEditingItem(null); setConfirmDelete({ categoryId: category.id, itemId }); }}
+            onCancelDelete={() => setConfirmDelete(null)}
+            onReorder={(from, to) => reorderItems(category.id, from, to)}
+            viewMode={viewMode}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Settings page ────────────────────────────────────────────────────────
 
 const TABS = [
@@ -1327,6 +1815,7 @@ const TABS = [
   { label: 'Staff / Users',    icon: <Users className="w-4 h-4" /> },
   { label: 'Vehicles',         icon: <Truck className="w-4 h-4" /> },
   { label: 'Contracts',        icon: <FileText className="w-4 h-4" /> },
+  { label: 'Inventory',        icon: <Package className="w-4 h-4" /> },
 ];
 
 export default function CRMSettings() {
@@ -1340,7 +1829,7 @@ export default function CRMSettings() {
       {/* Page header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="text-sm text-slate-500 mt-1">Manage company information, job configuration, staff, vehicles, and contracts.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage company information, job configuration, staff, vehicles, contracts, and survey inventory.</p>
       </div>
 
       {/* Tab navigation */}
@@ -1367,6 +1856,7 @@ export default function CRMSettings() {
       {activeTab === 2 && <StaffTab showToast={showToast} />}
       {activeTab === 3 && <VehiclesTab showToast={showToast} />}
       {activeTab === 4 && <ContractsTab showToast={showToast} />}
+      {activeTab === 5 && <InventoryTab />}
 
       {/* Toast */}
       {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
