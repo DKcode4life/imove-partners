@@ -49,6 +49,7 @@ type SurveyData = Record<string, RoomRecord>;
 type CustomRoom = { id: string; name: string; categoryId: string };
 
 const storageKey     = (jobId: string | undefined) => `crm-survey-${jobId}`;
+const searchDataKey  = (jobId: string | undefined) => `crm-survey-search-${jobId}`;
 const customRoomsKey = (jobId: string | undefined) => `crm-survey-rooms-${jobId}`;
 
 function loadCustomRooms(jobId: string | undefined): CustomRoom[] {
@@ -78,6 +79,22 @@ function loadData(jobId: string | undefined): SurveyData {
   } catch {
     return {};
   }
+}
+
+function loadSearchData(jobId: string | undefined): SurveyData {
+  if (!jobId) return {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(searchDataKey(jobId)) || '{}') as
+      Record<string, Record<string, number | ItemEntry>>;
+    const out: SurveyData = {};
+    for (const [room, items] of Object.entries(raw)) {
+      out[room] = {};
+      for (const [item, val] of Object.entries(items)) {
+        out[room][item] = typeof val === 'number' ? { count: val, note: '' } : val;
+      }
+    }
+    return out;
+  } catch { return {}; }
 }
 
 // ── Image compression ──────────────────────────────────────────────────────────
@@ -345,13 +362,15 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const [open,           setOpen]           = useState(false);
   const [data,           setData]           = useState<SurveyData>(() => loadData(jobId));
   const [selectedRoomId, setSelectedRoomId] = useState(SURVEY_ROOMS[0].id);
-  const [noteModal,      setNoteModal]      = useState<{ room: string; item: string; icon: string } | null>(null);
+  const [noteModal,      setNoteModal]      = useState<{ room: string; item: string; icon: string; isSearch: boolean } | null>(null);
   const [customRooms,    setCustomRooms]    = useState<CustomRoom[]>(() => loadCustomRooms(jobId));
   const [addingRoomType, setAddingRoomType] = useState<'bedroom' | 'room' | null>(null);
   const [newRoomName,    setNewRoomName]    = useState('');
   const [search,         setSearch]         = useState('');
+  const [searchData,     setSearchData]     = useState<SurveyData>(() => loadSearchData(jobId));
 
   useEffect(() => { setData(loadData(jobId)); }, [jobId]);
+  useEffect(() => { setSearchData(loadSearchData(jobId)); }, [jobId]);
   useEffect(() => { setCustomRooms(loadCustomRooms(jobId)); }, [jobId]);
   useEffect(() => { setSearch(''); }, [selectedRoomId]);
 
@@ -429,10 +448,54 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     setEntry(room, item, { count: Math.max(e.count, (note || photo) ? 1 : e.count), note, photo });
   };
 
+  // ── Search-specific data (separate store so catItems grid is unaffected) ──────
+
+  const persistSearch = useCallback((next: SurveyData) => {
+    setSearchData(next);
+    if (jobId) localStorage.setItem(searchDataKey(jobId), JSON.stringify(next));
+  }, [jobId]);
+
+  const cloneSearch    = () => JSON.parse(JSON.stringify(searchData)) as SurveyData;
+  const getSearchEntry = (room: string, item: string): ItemEntry =>
+    searchData[room]?.[item] ?? { count: 0, note: '' };
+
+  const setSearchEntry = (room: string, item: string, entry: ItemEntry) => {
+    const next = cloneSearch();
+    if (entry.count <= 0 && !entry.note && !entry.photo) {
+      if (next[room]) {
+        delete next[room][item];
+        if (!Object.keys(next[room]).length) delete next[room];
+      }
+    } else {
+      if (!next[room]) next[room] = {};
+      next[room][item] = entry;
+    }
+    persistSearch(next);
+  };
+
+  const searchIncrement = (room: string, item: string) => {
+    const e = getSearchEntry(room, item);
+    setSearchEntry(room, item, { ...e, count: e.count + 1 });
+  };
+  const searchDecrement = (room: string, item: string) => {
+    const e = getSearchEntry(room, item);
+    if (e.count <= 0) return;
+    setSearchEntry(room, item, { ...e, count: e.count - 1 });
+  };
+  const searchSetCount = (room: string, item: string, n: number) => {
+    const e = getSearchEntry(room, item);
+    setSearchEntry(room, item, { ...e, count: Math.max(0, n) });
+  };
+  const searchSaveNote = (room: string, item: string, note: string, photo: string | undefined) => {
+    const e = getSearchEntry(room, item);
+    setSearchEntry(room, item, { count: Math.max(e.count, (note || photo) ? 1 : e.count), note, photo });
+  };
+
   // ── Derived stats ────────────────────────────────────────────────────────────
 
   const roomItemCount = (roomName: string) =>
-    Object.values(data[roomName] || {}).reduce((s, e) => s + e.count, 0);
+    Object.values(data[roomName] || {}).reduce((s, e) => s + e.count, 0) +
+    Object.values(searchData[roomName] || {}).reduce((s, e) => s + e.count, 0);
 
   const grandItemCount = allRooms.reduce(
     (s, r) => s + roomItemCount(r.name), 0);
@@ -440,12 +503,14 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const roomsWithItems = allRooms.filter(r => roomItemCount(r.name) > 0).length;
 
   const getRoomVol = (r: { name: string; categoryId: string }) =>
-    roomVolumeFt(r.name, data[r.name] ?? {}, catalog, r.categoryId);
+    roomVolumeFt(r.name, data[r.name] ?? {}, catalog, r.categoryId) +
+    roomVolumeFt(r.name, searchData[r.name] ?? {}, catalog, '__all__');
 
   const totalVolFt = allRooms.reduce((s, r) => s + getRoomVol(r), 0);
 
-  const currentRoom = allRooms.find(r => r.id === selectedRoomId) ?? allRooms[0];
-  const roomData    = data[currentRoom.name] ?? {};
+  const currentRoom    = allRooms.find(r => r.id === selectedRoomId) ?? allRooms[0];
+  const roomData       = data[currentRoom.name] ?? {};
+  const searchRoomData = searchData[currentRoom.name] ?? {};
   const catItems    = currentRoom.categoryId === '__all__'
     ? catalog.flatMap(c => c.items)
     : (catalog.find(c => c.id === currentRoom.categoryId)?.items ?? []);
@@ -457,11 +522,10 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     ? catalog.flatMap(c => c.items).filter(i => i.name.toLowerCase().includes(searchTerm))
     : catItems;
 
-  // Items added to this room via search that aren't in the room's standard category
+  // Items added to this room via the search bar (stored separately in searchData)
   const allCatalogFlat = catalog.flatMap(c => c.items);
   const extraItems = !searchTerm
-    ? Object.keys(roomData)
-        .filter(name => !catItems.some(i => i.name === name))
+    ? Object.keys(searchRoomData)
         .flatMap(name => { const item = allCatalogFlat.find(i => i.name === name); return item ? [item] : []; })
     : [];
 
@@ -661,7 +725,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                   {displayItems.length > 0 ? (
                     <div className="grid grid-cols-5 gap-3">
                       {displayItems.map(({ id, name, icon, volumeCuFt }) => {
-                        const entry = roomData[name] ?? { count: 0, note: '' };
+                        const entry = searchRoomData[name] ?? { count: 0, note: '' };
                         return (
                           <ItemSquare
                             key={id}
@@ -669,11 +733,12 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                             icon={icon}
                             count={entry.count}
                             note={entry.note}
+                            photo={entry.photo}
                             volumeCuFt={volumeCuFt}
-                            onIncrement={() => increment(currentRoom.name, name)}
-                            onDecrement={() => decrement(currentRoom.name, name)}
-                            onSetCount={n => setItemCount(currentRoom.name, name, n)}
-                            onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
+                            onIncrement={() => searchIncrement(currentRoom.name, name)}
+                            onDecrement={() => searchDecrement(currentRoom.name, name)}
+                            onSetCount={n => searchSetCount(currentRoom.name, name, n)}
+                            onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon, isSearch: true })}
                           />
                         );
                       })}
@@ -725,7 +790,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                           onIncrement={() => increment(currentRoom.name, name)}
                           onDecrement={() => decrement(currentRoom.name, name)}
                           onSetCount={n => setItemCount(currentRoom.name, name, n)}
-                          onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
+                          onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon, isSearch: false })}
                         />
                       );
                     })}
@@ -739,7 +804,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                       </p>
                       <div className="grid grid-cols-5 gap-3">
                         {extraItems.map(({ id, name, icon, volumeCuFt }) => {
-                          const entry = roomData[name] ?? { count: 0, note: '' };
+                          const entry = searchRoomData[name] ?? { count: 0, note: '' };
                           return (
                             <ItemSquare
                               key={id}
@@ -747,11 +812,12 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                               icon={icon}
                               count={entry.count}
                               note={entry.note}
+                              photo={entry.photo}
                               volumeCuFt={volumeCuFt}
-                              onIncrement={() => increment(currentRoom.name, name)}
-                              onDecrement={() => decrement(currentRoom.name, name)}
-                              onSetCount={n => setItemCount(currentRoom.name, name, n)}
-                              onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon })}
+                              onIncrement={() => searchIncrement(currentRoom.name, name)}
+                              onDecrement={() => searchDecrement(currentRoom.name, name)}
+                              onSetCount={n => searchSetCount(currentRoom.name, name, n)}
+                              onOpenNote={() => setNoteModal({ room: currentRoom.name, item: name, icon, isSearch: true })}
                             />
                           );
                         })}
@@ -771,9 +837,15 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
               <NoteModal
                 itemName={noteModal.item}
                 itemIcon={noteModal.icon}
-                currentNote={data[noteModal.room]?.[noteModal.item]?.note ?? ''}
-                currentPhoto={data[noteModal.room]?.[noteModal.item]?.photo}
-                onSave={(note, photo) => saveNote(noteModal.room, noteModal.item, note, photo)}
+                currentNote={noteModal.isSearch
+                  ? (searchData[noteModal.room]?.[noteModal.item]?.note ?? '')
+                  : (data[noteModal.room]?.[noteModal.item]?.note ?? '')}
+                currentPhoto={noteModal.isSearch
+                  ? searchData[noteModal.room]?.[noteModal.item]?.photo
+                  : data[noteModal.room]?.[noteModal.item]?.photo}
+                onSave={(note, photo) => noteModal.isSearch
+                  ? searchSaveNote(noteModal.room, noteModal.item, note, photo)
+                  : saveNote(noteModal.room, noteModal.item, note, photo)}
                 onClose={() => setNoteModal(null)}
               />
             )}
