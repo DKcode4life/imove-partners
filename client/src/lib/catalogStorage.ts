@@ -1,21 +1,41 @@
+import api from './api';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { DEFAULT_CATALOG } from '../data/inventoryCatalog';
 
-const STORAGE_KEY = 'imove-inventory-catalog';
+const LS_KEY = 'imove-inventory-catalog';
 
-export function loadCatalog(): CatalogCategory[] {
+// Load from the server (single source of truth across all devices).
+// Falls back to the localStorage cache if offline, then to the built-in defaults.
+export async function loadCatalog(): Promise<CatalogCategory[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as CatalogCategory[];
+    const r = await api.get<CatalogCategory[] | null>('/settings/catalog');
+    if (Array.isArray(r.data)) {
+      localStorage.setItem(LS_KEY, JSON.stringify(r.data));
+      return r.data;
+    }
+  } catch {
+    // Offline or not yet authenticated — use local cache
+  }
+  try {
+    const cached = localStorage.getItem(LS_KEY);
+    if (cached) return JSON.parse(cached) as CatalogCategory[];
   } catch {}
   return DEFAULT_CATALOG;
 }
 
-export function saveCatalog(catalog: CatalogCategory[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog));
+// Write to localStorage immediately (so the UI feels instant), then persist to the server.
+export async function saveCatalog(catalog: CatalogCategory[]): Promise<void> {
+  localStorage.setItem(LS_KEY, JSON.stringify(catalog));
+  try {
+    await api.put('/settings/catalog', catalog);
+  } catch {
+    // Changes are already in localStorage; server will sync next time
+  }
 }
 
+// Clear the local cache and return the defaults. The caller is expected to
+// follow up with saveCatalog(defaults) to wipe the server copy too.
 export function resetCatalog(): CatalogCategory[] {
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(LS_KEY);
   return DEFAULT_CATALOG;
 }

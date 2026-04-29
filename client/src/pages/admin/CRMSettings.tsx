@@ -1329,7 +1329,13 @@ const FT3_TO_M3 = 0.028317;
 type EditingItem = { categoryId: string; itemId: string; name: string; icon: string; volumeCuFt: string };
 
 function useCatalog() {
-  const [catalog, setCatalog] = useState<CatalogCategory[]>(loadCatalog);
+  const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  useEffect(() => {
+    loadCatalog().then(c => { setCatalog(c); setCatalogLoading(false); });
+  }, []);
+
   const update = (next: CatalogCategory[]) => { setCatalog(next); saveCatalog(next); };
   const updateItem = (categoryId: string, itemId: string, patch: Partial<CatalogItem>) =>
     update(catalog.map(c => c.id !== categoryId ? c : { ...c, items: c.items.map(i => i.id !== itemId ? i : { ...i, ...patch }) }));
@@ -1345,8 +1351,8 @@ function useCatalog() {
       items.splice(toIdx, 0, moved);
       return { ...c, items };
     }));
-  const reset = () => setCatalog(resetCatalog());
-  return { catalog, updateItem, deleteItem, addItem, reorderItems, reset };
+  const reset = () => update(resetCatalog());
+  return { catalog, catalogLoading, updateItem, deleteItem, addItem, reorderItems, reset };
 }
 
 function IconDisplay({ value }: { value: string }) {
@@ -1709,13 +1715,17 @@ function InvCategoryCard({
 }
 
 function InventoryTab() {
-  const { catalog, updateItem, deleteItem, addItem, reorderItems, reset } = useCatalog();
+  const { catalog, catalogLoading, updateItem, deleteItem, addItem, reorderItems, reset } = useCatalog();
   const [editingItem,      setEditingItem]      = useState<EditingItem | null>(null);
   const [addingCategoryId, setAddingCategoryId] = useState<string | null>(null);
   const [confirmDelete,    setConfirmDelete]    = useState<{ categoryId: string; itemId: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [viewMode,         setViewMode]         = useState<'table' | 'grid'>('table');
   const totalItems = catalog.reduce((s, c) => s + c.items.length, 0);
+
+  if (catalogLoading) {
+    return <div className="py-12 text-sm text-slate-400 text-center">Loading inventory…</div>;
+  }
 
   const handleStartEdit = (categoryId: string, item: CatalogItem) => {
     setAddingCategoryId(null); setConfirmDelete(null);

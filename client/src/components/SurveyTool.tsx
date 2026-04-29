@@ -288,7 +288,8 @@ function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrem
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
-  const [catalog]        = useState<CatalogCategory[]>(() => loadCatalog());
+  const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
+  useEffect(() => { loadCatalog().then(setCatalog); }, []);
   const [open,           setOpen]           = useState(false);
   const [data,           setData]           = useState<SurveyData>(() => loadData(jobId));
   const [selectedRoomId, setSelectedRoomId] = useState(SURVEY_ROOMS[0].id);

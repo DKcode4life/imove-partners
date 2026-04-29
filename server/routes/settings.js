@@ -302,4 +302,24 @@ router.delete('/move-types/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Inventory Catalog ─────────────────────────────────────────────────────────
+// Stored as a single JSON blob in CompanySetting so every device reads the same order.
+
+router.get('/catalog', wrap(async (_req, res) => {
+  const row = await prisma.companySetting.findUnique({ where: { key: 'inventory-catalog' } });
+  if (!row?.value) return res.json(null); // client falls back to DEFAULT_CATALOG
+  res.json(JSON.parse(row.value));
+}));
+
+router.put('/catalog', wrap(async (req, res) => {
+  if (!Array.isArray(req.body)) return res.status(400).json({ error: 'Expected array' });
+  const value = JSON.stringify(req.body);
+  await prisma.companySetting.upsert({
+    where:  { key: 'inventory-catalog' },
+    update: { value },
+    create: { key: 'inventory-catalog', value },
+  });
+  res.json({ ok: true });
+}));
+
 module.exports = router;
