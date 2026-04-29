@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, ClipboardList, Minus, Plus, MessageSquare, Search } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera } from 'lucide-react';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
 
@@ -42,7 +42,7 @@ function roomVolumeFt(
 
 // ── Data types & storage ───────────────────────────────────────────────────────
 
-type ItemEntry  = { count: number; note: string };
+type ItemEntry  = { count: number; note: string; photo?: string };
 type RoomRecord = Record<string, ItemEntry>;
 type SurveyData = Record<string, RoomRecord>;
 
@@ -80,31 +80,63 @@ function loadData(jobId: string | undefined): SurveyData {
   }
 }
 
+// ── Image compression ──────────────────────────────────────────────────────────
+
+function compressImage(file: File, maxPx = 1200, quality = 0.72): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 // ── Note modal ─────────────────────────────────────────────────────────────────
 
-function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
+function NoteModal({ itemName, itemIcon, currentNote, currentPhoto, onSave, onClose }: {
   itemName: string;
   itemIcon: string;
   currentNote: string;
-  onSave: (note: string) => void;
+  currentPhoto?: string;
+  onSave: (note: string, photo: string | undefined) => void;
   onClose: () => void;
 }) {
-  const [text, setText] = useState(currentNote);
+  const [text,  setText]  = useState(currentNote);
+  const [photo, setPhoto] = useState<string | undefined>(currentPhoto);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try { setPhoto(await compressImage(file)); } catch { /* skip on error */ }
+    e.target.value = '';
+  };
 
   return (
     <div
-      className="absolute inset-0 z-[10] flex items-center justify-center bg-black/30 backdrop-blur-sm p-6"
+      className="absolute inset-0 z-[10] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-3">
           <span className="text-2xl leading-none">{itemIcon}</span>
           <div className="flex-1">
             <h3 className="text-sm font-bold text-slate-900">{itemName}</h3>
-            <p className="text-xs text-slate-400">Add a note for this item</p>
+            <p className="text-xs text-slate-400">Note &amp; photo</p>
           </div>
           <button
             onClick={onClose}
@@ -114,17 +146,49 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
           </button>
         </div>
 
+        {/* Photo section */}
+        <div className="px-5 pb-3">
+          {photo ? (
+            <div className="relative rounded-xl overflow-hidden border border-slate-200">
+              <img src={photo} alt="Item photo" className="w-full max-h-44 object-cover" />
+              <button
+                onClick={() => setPhoto(undefined)}
+                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-teal-300 hover:text-teal-600 transition-colors"
+            >
+              <Camera className="w-4 h-4" />
+              <span className="text-xs font-medium">Take / attach photo</span>
+            </button>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFile}
+          />
+        </div>
+
+        {/* Note textarea */}
         <div className="px-5 pb-4">
           <textarea
             autoFocus
-            rows={4}
+            rows={3}
             placeholder="e.g. Needs disassembly · fragile · customer to pack separately…"
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 resize-none outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 transition"
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                onSave(text.trim());
+                onSave(text.trim(), photo);
                 onClose();
               }
             }}
@@ -132,6 +196,7 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
           <p className="text-[11px] text-slate-400 mt-1.5">⌘ Enter to save</p>
         </div>
 
+        {/* Buttons */}
         <div className="flex gap-2 px-5 pb-5">
           <button
             onClick={onClose}
@@ -140,10 +205,10 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
             Cancel
           </button>
           <button
-            onClick={() => { onSave(text.trim()); onClose(); }}
+            onClick={() => { onSave(text.trim(), photo); onClose(); }}
             className="flex-1 py-2 rounded-xl bg-teal-600 text-sm font-semibold text-white hover:bg-teal-700 transition-colors active:scale-[0.98]"
           >
-            Save Note
+            Save
           </button>
         </div>
       </div>
@@ -153,8 +218,8 @@ function NoteModal({ itemName, itemIcon, currentNote, onSave, onClose }: {
 
 // ── Item square card ───────────────────────────────────────────────────────────
 
-function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrement, onSetCount, onOpenNote }: {
-  name: string; icon: string; count: number; note: string; volumeCuFt: number;
+function ItemSquare({ name, icon, count, note, photo, volumeCuFt, onIncrement, onDecrement, onSetCount, onOpenNote }: {
+  name: string; icon: string; count: number; note: string; photo?: string; volumeCuFt: number;
   onIncrement: () => void;
   onDecrement: () => void;
   onSetCount: (n: number) => void;
@@ -163,8 +228,9 @@ function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrem
   const [editingCount, setEditingCount] = useState(false);
   const [raw,          setRaw]          = useState('');
 
-  const active  = count > 0;
-  const hasNote = note.trim().length > 0;
+  const active    = count > 0;
+  const hasNote   = note.trim().length > 0;
+  const hasPhoto  = !!photo;
 
   const startCountEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -213,17 +279,19 @@ function ItemSquare({ name, icon, count, note, volumeCuFt, onIncrement, onDecrem
         )
       )}
 
-      {/* Note indicator — always visible; amber when has note, dimmed when empty */}
+      {/* Note / photo indicator */}
       <button
         onClick={e => { e.stopPropagation(); onOpenNote(); }}
-        title={hasNote ? 'Has note — tap to edit' : 'Add a note'}
+        title={hasPhoto ? 'Has photo · tap to edit' : hasNote ? 'Has note · tap to edit' : 'Add note or photo'}
         className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-colors ${
-          hasNote
-            ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
-            : 'bg-slate-100 text-slate-300 hover:bg-slate-200 hover:text-slate-500'
+          hasPhoto
+            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+            : hasNote
+              ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+              : 'bg-slate-100 text-slate-300 hover:bg-slate-200 hover:text-slate-500'
         }`}
       >
-        <MessageSquare className="w-2.5 h-2.5" />
+        {hasPhoto ? <Camera className="w-2.5 h-2.5" /> : <MessageSquare className="w-2.5 h-2.5" />}
       </button>
 
       {/* Icon — display only */}
@@ -356,9 +424,9 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     setEntry(room, item, { ...e, count: Math.max(0, n) });
   };
 
-  const saveNote = (room: string, item: string, note: string) => {
+  const saveNote = (room: string, item: string, note: string, photo: string | undefined) => {
     const e = getEntry(room, item);
-    setEntry(room, item, { count: Math.max(e.count, note ? 1 : e.count), note });
+    setEntry(room, item, { count: Math.max(e.count, (note || photo) ? 1 : e.count), note, photo });
   };
 
   // ── Derived stats ────────────────────────────────────────────────────────────
@@ -652,6 +720,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                           icon={icon}
                           count={entry.count}
                           note={entry.note}
+                          photo={entry.photo}
                           volumeCuFt={volumeCuFt}
                           onIncrement={() => increment(currentRoom.name, name)}
                           onDecrement={() => decrement(currentRoom.name, name)}
@@ -703,7 +772,8 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                 itemName={noteModal.item}
                 itemIcon={noteModal.icon}
                 currentNote={data[noteModal.room]?.[noteModal.item]?.note ?? ''}
-                onSave={note => saveNote(noteModal.room, noteModal.item, note)}
+                currentPhoto={data[noteModal.room]?.[noteModal.item]?.photo}
+                onSave={(note, photo) => saveNote(noteModal.room, noteModal.item, note, photo)}
                 onClose={() => setNoteModal(null)}
               />
             )}
