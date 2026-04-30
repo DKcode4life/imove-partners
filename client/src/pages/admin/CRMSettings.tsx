@@ -609,6 +609,13 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const [adminForm, setAdminForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [adminSubmitting, setAdminSubmitting] = useState(false);
   const [adminError, setAdminError] = useState('');
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(true);
+  const [editAdminModalOpen, setEditAdminModalOpen] = useState(false);
+  const [editAdminForm, setEditAdminForm] = useState({ id: 0, name: '', email: '', password: '', confirmPassword: '' });
+  const [editAdminSubmitting, setEditAdminSubmitting] = useState(false);
+  const [editAdminError, setEditAdminError] = useState('');
+  const [confirmDeleteAdmin, setConfirmDeleteAdmin] = useState<any | null>(null);
 
   // Staff CRUD
   const [staff, setStaff] = useState<PlannerAsset[]>([]);
@@ -626,7 +633,21 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
     setStaff(r.data);
   }, []);
 
-  useEffect(() => { fetchStaff().finally(() => setLoadingStaff(false)); }, [fetchStaff]);
+  const fetchAdminUsers = useCallback(async () => {
+    try {
+      const r = await api.get('/auth/admin-users');
+      setAdminUsers(r.data);
+    } catch (err: any) {
+      console.error('Failed to fetch admin users:', err);
+    } finally {
+      setLoadingAdmins(false);
+    }
+  }, []);
+
+  useEffect(() => { 
+    fetchStaff().finally(() => setLoadingStaff(false)); 
+    fetchAdminUsers();
+  }, [fetchStaff, fetchAdminUsers]);
 
   const openAdd = () => { setEditTarget(null); setForm(EMPTY_STAFF); setFormError(''); setModalOpen(true); };
   const openEdit = (s: PlannerAsset) => {
@@ -699,26 +720,74 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
           </button>
         </div>
         
-        {/* Current admin */}
-        <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg">
-          <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
-            {user?.avatar
-              ? <img src={user.avatar} alt={user.name} className="w-full h-full rounded-full object-cover" />
-              : <span className="text-base font-bold text-slate-200">{user?.name?.charAt(0).toUpperCase()}</span>
-            }
+        {loadingAdmins ? (
+          <div className="py-4 text-sm text-slate-400 text-center">Loading admin users…</div>
+        ) : adminUsers.length === 0 ? (
+          <div className="py-4 text-sm text-slate-400 italic text-center">No admin users found.</div>
+        ) : (
+          <div className="space-y-3">
+            {adminUsers.map(admin => (
+              <div key={admin.id} className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg">
+                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
+                  {admin.avatar
+                    ? <img src={admin.avatar} alt={admin.name} className="w-full h-full rounded-full object-cover" />
+                    : <span className="text-base font-bold text-slate-200">{admin.name?.charAt(0).toUpperCase()}</span>
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-800">{admin.name}</p>
+                    {admin.id === user?.id && (
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">You</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-500">{admin.email}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Created {new Date(admin.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {admin.id === user?.id ? (
+                    <button 
+                      onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setPwdOpen(true); }} 
+                      className="btn-secondary flex items-center gap-2 text-sm"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                      Change Password
+                    </button>
+                  ) : (
+                    <>
+                      <button 
+                        onClick={() => {
+                          setEditAdminForm({ 
+                            id: admin.id, 
+                            name: admin.name, 
+                            email: admin.email, 
+                            password: '', 
+                            confirmPassword: '' 
+                          });
+                          setEditAdminError('');
+                          setEditAdminModalOpen(true);
+                        }}
+                        className="btn-secondary flex items-center gap-2 text-sm"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Edit
+                      </button>
+                      <button 
+                        onClick={() => setConfirmDeleteAdmin(admin)}
+                        className="btn-danger flex items-center gap-2 text-sm"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
-              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">You</span>
-            </div>
-            <p className="text-sm text-slate-500">{user?.email}</p>
-          </div>
-          <button onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setPwdOpen(true); }} className="btn-secondary flex items-center gap-2 text-sm">
-            <KeyRound className="w-4 h-4" />
-            Change Password
-          </button>
-        </div>
+        )}
         
         {/* Note about additional admins */}
         <p className="text-xs text-slate-400 mt-3">
@@ -903,6 +972,7 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             });
             setAdminModalOpen(false);
             setAdminForm({ name: '', email: '', password: '', confirmPassword: '' });
+            fetchAdminUsers();
             showToast('Admin user created successfully');
           } catch (err: any) {
             setAdminError(err.response?.data?.error || 'Failed to create admin user');
@@ -964,6 +1034,112 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Edit Admin modal */}
+      <Modal open={editAdminModalOpen} onClose={() => setEditAdminModalOpen(false)} title="Edit Admin User" size="md">
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          if (editAdminForm.password && editAdminForm.password !== editAdminForm.confirmPassword) {
+            setEditAdminError('Passwords do not match');
+            return;
+          }
+          if (editAdminForm.password && editAdminForm.password.length < 8) {
+            setEditAdminError('Password must be at least 8 characters');
+            return;
+          }
+          setEditAdminSubmitting(true);
+          setEditAdminError('');
+          try {
+            await api.put(`/auth/admin-users/${editAdminForm.id}`, {
+              name: editAdminForm.name.trim(),
+              email: editAdminForm.email.trim(),
+              password: editAdminForm.password || undefined
+            });
+            setEditAdminModalOpen(false);
+            setEditAdminForm({ id: 0, name: '', email: '', password: '', confirmPassword: '' });
+            fetchAdminUsers();
+            showToast('Admin user updated successfully');
+          } catch (err: any) {
+            setEditAdminError(err.response?.data?.error || 'Failed to update admin user');
+          } finally {
+            setEditAdminSubmitting(false);
+          }
+        }} className="space-y-4">
+          {editAdminError && (
+            <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{editAdminError}</div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Full Name <span className="text-red-400">*</span></label>
+            <input
+              type="text"
+              value={editAdminForm.name}
+              onChange={e => setEditAdminForm(f => ({ ...f, name: e.target.value }))}
+              className="input-field w-full"
+              placeholder="John Smith"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Email Address <span className="text-red-400">*</span></label>
+            <input
+              type="email"
+              value={editAdminForm.email}
+              onChange={e => setEditAdminForm(f => ({ ...f, email: e.target.value }))}
+              className="input-field w-full"
+              placeholder="john@example.com"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">New Password (leave blank to keep current)</label>
+            <input
+              type="password"
+              value={editAdminForm.password}
+              onChange={e => setEditAdminForm(f => ({ ...f, password: e.target.value }))}
+              className="input-field w-full"
+              placeholder="Leave blank to keep current password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={editAdminForm.confirmPassword}
+              onChange={e => setEditAdminForm(f => ({ ...f, confirmPassword: e.target.value }))}
+              className="input-field w-full"
+              placeholder="Repeat new password"
+            />
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" onClick={() => setEditAdminModalOpen(false)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={editAdminSubmitting} className="btn-primary">
+              {editAdminSubmitting ? 'Updating…' : 'Update Admin User'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Admin confirmation modal */}
+      <Modal open={!!confirmDeleteAdmin} onClose={() => setConfirmDeleteAdmin(null)} title="Delete Admin User" size="sm">
+        <p className="text-sm text-slate-600 mb-5">
+          Delete admin user <span className="font-semibold">{confirmDeleteAdmin?.name}</span> ({confirmDeleteAdmin?.email})? This action cannot be undone.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={() => setConfirmDeleteAdmin(null)} className="btn-secondary">Cancel</button>
+          <button onClick={async () => {
+            try {
+              await api.delete(`/auth/admin-users/${confirmDeleteAdmin?.id}`);
+              setConfirmDeleteAdmin(null);
+              fetchAdminUsers();
+              showToast('Admin user deleted successfully');
+            } catch (err: any) {
+              showToast(err.response?.data?.error || 'Failed to delete admin user', 'error');
+            }
+          }} className="btn-danger">
+            Delete Admin User
+          </button>
+        </div>
       </Modal>
     </div>
   );

@@ -280,4 +280,87 @@ router.get('/admin-users', authenticate, wrap(async (req, res) => {
   res.json(users);
 }));
 
+// DELETE /api/auth/admin-users/:id - Delete an admin user (admin only)
+router.delete('/admin-users/:id', authenticate, wrap(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can delete admin users' });
+  }
+
+  const userId = parseInt(req.params.id);
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
+
+  // Cannot delete yourself
+  if (userId === req.user.id) {
+    return res.status(400).json({ error: 'You cannot delete your own account' });
+  }
+
+  // Check if this is the last admin
+  const adminCount = await prisma.user.count({ where: { role: 'admin' } });
+  if (adminCount <= 1) {
+    return res.status(400).json({ error: 'Cannot delete the last admin account' });
+  }
+
+  // Delete the user
+  await prisma.user.delete({ where: { id: userId } });
+
+  res.json({ message: 'Admin user deleted successfully' });
+}));
+
+// PUT /api/auth/admin-users/:id - Update admin user (admin only)
+router.put('/admin-users/:id', authenticate, wrap(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can update admin users' });
+  }
+
+  const userId = parseInt(req.params.id);
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
+
+  const { name, email, password } = req.body;
+  
+  // Validate at least one field is provided
+  if (!name && !email && !password) {
+    return res.status(400).json({ error: 'At least one field (name, email, or password) must be provided' });
+  }
+
+  // Check if user exists and is an admin
+  const user = await prisma.user.findFirst({
+    where: { id: userId, role: 'admin' }
+  });
+
+  if (!user) {
+    return res.status(404).json({ error: 'Admin user not found' });
+  }
+
+  // Prepare update data
+  const updateData = {};
+  if (name !== undefined) updateData.name = name.trim();
+  if (email !== undefined) updateData.email = email.toLowerCase().trim();
+  if (password !== undefined) {
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    updateData.password_hash = bcrypt.hashSync(password, 10);
+  }
+
+  // Update the user
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: updateData,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      avatar: true,
+      created_at: true,
+    }
+  });
+
+  res.json(updatedUser);
+}));
+
 module.exports = router;
