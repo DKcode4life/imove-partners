@@ -1,7 +1,11 @@
 const config = require('../config');
 const { Resend } = require('resend');
 
-const resend = new Resend(config.email.resendApiKey);
+// Only create Resend instance if API key is provided
+let resend = null;
+if (config.email.resendApiKey && config.email.resendApiKey.trim()) {
+  resend = new Resend(config.email.resendApiKey);
+}
 
 async function send({ to, subject, html, from, attachments = [] }) {
   const provider = config.email.provider;
@@ -53,6 +57,11 @@ async function sendViaSMTP({ to, subject, html, from, attachments }) {
 
 async function sendViaResend({ to, subject, html, from, attachments }) {
   try {
+    if (!resend) {
+      console.warn('[email] Resend not configured. Would send to:', to, 'subject:', subject);
+      return { provider: 'resend', to, subject, status: 'skipped' };
+    }
+
     const emailData = {
       from: from || config.email.from,
       to,
