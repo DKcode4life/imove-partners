@@ -295,7 +295,7 @@ export default function CRMPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
         <div>
-          <h1 className="page-title tracking-tight">iMove CRM</h1>
+          <h1 className="page-title tracking-tight">iMove CRM new</h1>
           <p className="page-subtitle">Manage leads, quotations, move jobs, dates, notes, and client records</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
