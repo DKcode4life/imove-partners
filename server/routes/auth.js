@@ -220,4 +220,64 @@ router.put('/password', authenticate, wrap(async (req, res) => {
   res.json({ message: 'Password updated successfully' });
 }));
 
+// POST /api/auth/admin-users - Create a new admin user (admin only)
+router.post('/admin-users', authenticate, wrap(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can create admin users' });
+  }
+
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email, and password are required' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  // Check if email already exists
+  const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+  if (existing) {
+    return res.status(400).json({ error: 'User with this email already exists' });
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password_hash: bcrypt.hashSync(password, 10),
+      role: 'admin',
+    },
+  });
+
+  res.json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    created_at: user.created_at,
+  });
+}));
+
+// GET /api/auth/admin-users - List all admin users (admin only)
+router.get('/admin-users', authenticate, wrap(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can view admin users' });
+  }
+
+  const users = await prisma.user.findMany({
+    where: { role: 'admin' },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      avatar: true,
+      created_at: true,
+    },
+    orderBy: { created_at: 'desc' },
+  });
+
+  res.json(users);
+}));
+
 module.exports = router;

@@ -155,6 +155,29 @@ router.get('/jobs/:id', wrap(async (req, res) => {
   res.json({ ...job, activities });
 }));
 
+// GET /api/crm/jobs/:id/audit-trail - Get audit trail for a job
+router.get('/jobs/:id/audit-trail', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await prisma.crmJob.findUnique({ where: { id } });
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const auditTrail = await prisma.jobChangeLog.findMany({
+    where: { job_id: id },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+    orderBy: { created_at: 'desc' },
+  });
+
+  res.json(auditTrail);
+}));
+
 // POST /api/crm/jobs
 router.post('/jobs', wrap(async (req, res) => {
   const b = req.body;
@@ -203,12 +226,113 @@ router.post('/jobs', wrap(async (req, res) => {
 // PUT /api/crm/jobs/:id
 router.put('/jobs/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const existing = await prisma.crmJob.findUnique({ where: { id }, select: { id: true, status: true, lead_id: true } });
+  const existing = await prisma.crmJob.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Job not found' });
 
   const b = req.body;
   const oldStatus = existing.status;
   const newStatus = b.status || oldStatus;
+
+  // Helper function to compare values for audit trail
+  const getValue = (val) => val === undefined || val === null ? null : String(val);
+  const compareValue = (oldVal, newVal) => {
+    const oldStr = getValue(oldVal);
+    const newStr = getValue(newVal);
+    return oldStr !== newStr;
+  };
+
+  // Track changes for audit trail
+  const changes = [];
+  const userAgent = req.get('User-Agent') || null;
+  const ipAddress = req.ip || req.connection.remoteAddress || null;
+
+  // Define field mappings for comparison
+  const fieldMappings = [
+    { field: 'full_name', old: existing.full_name, new: b.full_name },
+    { field: 'email', old: existing.email, new: b.email },
+    { field: 'alt_email', old: existing.alt_email, new: b.alt_email },
+    { field: 'phone', old: existing.phone, new: b.phone },
+    { field: 'alt_phone', old: existing.alt_phone, new: b.alt_phone },
+    { field: 'client_notes', old: existing.client_notes, new: b.client_notes },
+    { field: 'lead_source', old: existing.lead_source, new: b.lead_source },
+    { field: 'estate_agent_name', old: existing.estate_agent_name, new: b.estate_agent_name },
+    { field: 'internal_ref', old: existing.internal_ref, new: b.internal_ref },
+    { field: 'status', old: existing.status, new: b.status },
+    { field: 'from_line1', old: existing.from_line1, new: b.from_line1 },
+    { field: 'from_line2', old: existing.from_line2, new: b.from_line2 },
+    { field: 'from_city', old: existing.from_city, new: b.from_city },
+    { field: 'from_postcode', old: existing.from_postcode, new: b.from_postcode },
+    { field: 'to_line1', old: existing.to_line1, new: b.to_line1 },
+    { field: 'to_line2', old: existing.to_line2, new: b.to_line2 },
+    { field: 'to_city', old: existing.to_city, new: b.to_city },
+    { field: 'to_postcode', old: existing.to_postcode, new: b.to_postcode },
+    { field: 'property_type_from', old: existing.property_type_from, new: b.property_type_from },
+    { field: 'property_type_to', old: existing.property_type_to, new: b.property_type_to },
+    { field: 'bedrooms', old: existing.bedrooms, new: b.bedrooms },
+    { field: 'parking_notes', old: existing.parking_notes, new: b.parking_notes },
+    { field: 'bedrooms_to', old: existing.bedrooms_to, new: b.bedrooms_to },
+    { field: 'parking_notes_to', old: existing.parking_notes_to, new: b.parking_notes_to },
+    { field: 'preferred_move_date', old: existing.preferred_move_date, new: b.preferred_move_date },
+    { field: 'confirmed_move_date', old: existing.confirmed_move_date, new: b.confirmed_move_date },
+    { field: 'flexibility_notes', old: existing.flexibility_notes, new: b.flexibility_notes },
+    { field: 'survey_required', old: existing.survey_required, new: b.survey_required },
+    { field: 'survey_type', old: existing.survey_type, new: b.survey_type },
+    { field: 'survey_date', old: existing.survey_date, new: b.survey_date },
+    { field: 'quote_amount', old: existing.quote_amount, new: b.quote_amount },
+    { field: 'quote_sent_date', old: existing.quote_sent_date, new: b.quote_sent_date },
+    { field: 'quote_accepted', old: existing.quote_accepted, new: b.quote_accepted },
+    { field: 'deposit_required', old: existing.deposit_required, new: b.deposit_required },
+    { field: 'deposit_paid', old: existing.deposit_paid, new: b.deposit_paid },
+    { field: 'internal_notes', old: existing.internal_notes, new: b.internal_notes },
+    { field: 'special_handling', old: existing.special_handling, new: b.special_handling },
+    { field: 'access_restrictions', old: existing.access_restrictions, new: b.access_restrictions },
+    { field: 'inventory_notes', old: existing.inventory_notes, new: b.inventory_notes },
+    { field: 'packing_required', old: existing.packing_required, new: b.packing_required },
+    { field: 'dismantling_required', old: existing.dismantling_required, new: b.dismantling_required },
+    { field: 'storage_required', old: existing.storage_required, new: b.storage_required },
+    { field: 'assigned_surveyor', old: existing.assigned_surveyor, new: b.assigned_surveyor },
+    { field: 'assigned_mover', old: existing.assigned_mover, new: b.assigned_mover },
+    { field: 'assigned_driver', old: existing.assigned_driver, new: b.assigned_driver },
+    { field: 'assigned_vehicle', old: existing.assigned_vehicle, new: b.assigned_vehicle },
+    { field: 'partner_commission_rate', old: existing.partner_commission_rate, new: b.partner_commission_rate },
+    { field: 'move_type', old: existing.move_type, new: b.move_type },
+    { field: 'is_key_worker', old: existing.is_key_worker, new: b.is_key_worker },
+    { field: 'floor_from', old: existing.floor_from, new: b.floor_from },
+    { field: 'has_lift_from', old: existing.has_lift_from, new: b.has_lift_from },
+    { field: 'prop_type_from_other', old: existing.prop_type_from_other, new: b.prop_type_from_other },
+    { field: 'floor_to', old: existing.floor_to, new: b.floor_to },
+    { field: 'has_lift_to', old: existing.has_lift_to, new: b.has_lift_to },
+    { field: 'prop_type_to_other', old: existing.prop_type_to_other, new: b.prop_type_to_other },
+  ];
+
+  // Check for changes
+  for (const mapping of fieldMappings) {
+    if (compareValue(mapping.old, mapping.new)) {
+      changes.push({
+        field_name: mapping.field,
+        old_value: getValue(mapping.old),
+        new_value: getValue(mapping.new),
+      });
+    }
+  }
+
+  // Log changes to audit trail
+  if (changes.length > 0) {
+    for (const change of changes) {
+      await prisma.jobChangeLog.create({
+        data: {
+          job_id: id,
+          user_id: req.user.id,
+          field_name: change.field_name,
+          old_value: change.old_value,
+          new_value: change.new_value,
+          change_type: 'update',
+          ip_address: ipAddress,
+          user_agent: userAgent,
+        },
+      });
+    }
+  }
 
   const updated = await prisma.crmJob.update({
     where: { id },

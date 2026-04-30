@@ -604,6 +604,12 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNext, setShowNext] = useState(false);
 
+  // Admin CRUD
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminForm, setAdminForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [adminSubmitting, setAdminSubmitting] = useState(false);
+  const [adminError, setAdminError] = useState('');
+
   // Staff CRUD
   const [staff, setStaff] = useState<PlannerAsset[]>([]);
   const [loadingStaff, setLoadingStaff] = useState(true);
@@ -685,7 +691,7 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-slate-700">Admin Accounts</h2>
           <button 
-            onClick={() => { /* TODO: Implement add admin modal */ }}
+            onClick={() => setAdminModalOpen(true)}
             className="btn-primary flex items-center gap-2 text-sm py-1.5"
           >
             <Plus className="w-4 h-4" />
@@ -871,6 +877,91 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
           <div className="flex gap-3 justify-end pt-1">
             <button type="button" onClick={() => setPwdOpen(false)} className="btn-secondary">Cancel</button>
             <button type="submit" disabled={pwdSaving} className="btn-primary">{pwdSaving ? 'Saving…' : 'Update Password'}</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Add Admin modal */}
+      <Modal open={adminModalOpen} onClose={() => setAdminModalOpen(false)} title="Add Admin User" size="md">
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          if (adminForm.password !== adminForm.confirmPassword) {
+            setAdminError('Passwords do not match');
+            return;
+          }
+          if (adminForm.password.length < 8) {
+            setAdminError('Password must be at least 8 characters');
+            return;
+          }
+          setAdminSubmitting(true);
+          setAdminError('');
+          try {
+            await api.post('/auth/admin', {
+              name: adminForm.name.trim(),
+              email: adminForm.email.trim(),
+              password: adminForm.password
+            });
+            setAdminModalOpen(false);
+            setAdminForm({ name: '', email: '', password: '', confirmPassword: '' });
+            showToast('Admin user created successfully');
+          } catch (err: any) {
+            setAdminError(err.response?.data?.error || 'Failed to create admin user');
+          } finally {
+            setAdminSubmitting(false);
+          }
+        }} className="space-y-4">
+          {adminError && (
+            <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{adminError}</div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Full Name <span className="text-red-400">*</span></label>
+            <input
+              type="text"
+              value={adminForm.name}
+              onChange={e => setAdminForm(f => ({ ...f, name: e.target.value }))}
+              className="input-field w-full"
+              placeholder="John Smith"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Email Address <span className="text-red-400">*</span></label>
+            <input
+              type="email"
+              value={adminForm.email}
+              onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
+              className="input-field w-full"
+              placeholder="john@example.com"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Password <span className="text-red-400">*</span></label>
+            <input
+              type="password"
+              value={adminForm.password}
+              onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))}
+              className="input-field w-full"
+              placeholder="At least 8 characters"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Confirm Password <span className="text-red-400">*</span></label>
+            <input
+              type="password"
+              value={adminForm.confirmPassword}
+              onChange={e => setAdminForm(f => ({ ...f, confirmPassword: e.target.value }))}
+              className="input-field w-full"
+              placeholder="Repeat password"
+              required
+            />
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" onClick={() => setAdminModalOpen(false)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={adminSubmitting} className="btn-primary">
+              {adminSubmitting ? 'Creating…' : 'Create Admin User'}
+            </button>
           </div>
         </form>
       </Modal>
