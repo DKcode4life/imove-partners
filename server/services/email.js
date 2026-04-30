@@ -19,31 +19,36 @@ async function send({ to, subject, html, from, attachments = [] }) {
 }
 
 async function sendViaSMTP({ to, subject, html, from, attachments }) {
-  const nodemailer = require('nodemailer');
-  const transport = nodemailer.createTransport({
-    host: config.email.smtp.host,
-    port: config.email.smtp.port,
-    secure: config.email.smtp.secure,
-    auth: { user: config.email.smtp.user, pass: config.email.smtp.pass },
-  });
-  
-  const mailOptions = {
-    from: from || config.email.from,
-    to,
-    subject,
-    html,
-  };
+  try {
+    const nodemailer = require('nodemailer');
+    const transport = nodemailer.createTransport({
+      host: config.email.smtp.host,
+      port: config.email.smtp.port,
+      secure: config.email.smtp.secure,
+      auth: { user: config.email.smtp.user, pass: config.email.smtp.pass },
+    });
+    
+    const mailOptions = {
+      from: from || config.email.from,
+      to,
+      subject,
+      html,
+    };
 
-  if (attachments && attachments.length > 0) {
-    mailOptions.attachments = attachments.map(att => ({
-      filename: att.filename,
-      content: att.content,
-      contentType: att.contentType,
-    }));
+    if (attachments && attachments.length > 0) {
+      mailOptions.attachments = attachments.map(att => ({
+        filename: att.filename,
+        content: att.content,
+        contentType: att.contentType,
+      }));
+    }
+
+    const info = await transport.sendMail(mailOptions);
+    return { provider: 'smtp', to, subject, status: 'sent', messageId: info.messageId };
+  } catch (error) {
+    console.error('[email] SMTP error:', error.message);
+    throw new Error(`SMTP failed: ${error.message}`);
   }
-
-  const info = await transport.sendMail(mailOptions);
-  return { provider: 'smtp', to, subject, status: 'sent', messageId: info.messageId };
 }
 
 async function sendViaResend({ to, subject, html, from, attachments }) {
