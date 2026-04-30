@@ -682,16 +682,30 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
     <div className="space-y-6 max-w-3xl">
       {/* Admin account block */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h2 className="text-sm font-semibold text-slate-700 mb-4">Admin Account</h2>
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-slate-700">Admin Accounts</h2>
+          <button 
+            onClick={() => { /* TODO: Implement add admin modal */ }}
+            className="btn-primary flex items-center gap-2 text-sm py-1.5"
+          >
+            <Plus className="w-4 h-4" />
+            Add Admin
+          </button>
+        </div>
+        
+        {/* Current admin */}
+        <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg">
+          <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
             {user?.avatar
               ? <img src={user.avatar} alt={user.name} className="w-full h-full rounded-full object-cover" />
-              : <span className="text-lg font-bold text-slate-200">{user?.name?.charAt(0).toUpperCase()}</span>
+              : <span className="text-base font-bold text-slate-200">{user?.name?.charAt(0).toUpperCase()}</span>
             }
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-slate-800">{user?.name}</p>
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">You</span>
+            </div>
             <p className="text-sm text-slate-500">{user?.email}</p>
           </div>
           <button onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setPwdOpen(true); }} className="btn-secondary flex items-center gap-2 text-sm">
@@ -699,6 +713,11 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             Change Password
           </button>
         </div>
+        
+        {/* Note about additional admins */}
+        <p className="text-xs text-slate-400 mt-3">
+          Additional admins can be added to help manage the CRM. Each admin will have their own login credentials.
+        </p>
       </div>
 
       {/* Staff list */}
