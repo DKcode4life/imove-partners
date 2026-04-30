@@ -11,7 +11,7 @@ import QuoteBuilder from '../../components/QuoteBuilder';
 import SurveyTool from '../../components/SurveyTool';
 import SurveyReport from '../../components/SurveyReport';
 import api from '../../lib/api';
-import type { CrmJob, CrmActivity, CrmStatus, PlannerAssignment } from '../../types';
+import type { CrmJob, CrmActivity, CrmStatus, JobStatusSetting, PlannerAssignment } from '../../types';
 import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
 
 // ── Status config ─────────────────────────────────────────────────────────────
@@ -22,6 +22,7 @@ const STATUS_CFG: Record<string, { bg: string; text: string; dot: string }> = {
   'Contacted':              { bg: 'bg-purple-50',  text: 'text-purple-700',  dot: 'bg-purple-500' },
   'Survey Physical':        { bg: 'bg-cyan-50',    text: 'text-cyan-700',    dot: 'bg-cyan-500' },
   'Survey Video':           { bg: 'bg-teal-50',    text: 'text-teal-700',    dot: 'bg-teal-500' },
+  'Estimate Sent':          { bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-400' },
   'Quote Sent':             { bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
   'Quote Chased':           { bg: 'bg-orange-50',  text: 'text-orange-700',  dot: 'bg-orange-500' },
   'Most Likely':            { bg: 'bg-yellow-50',  text: 'text-yellow-800',  dot: 'bg-yellow-500' },
@@ -59,31 +60,23 @@ function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: bool
 
 // ── Pipeline bar ─────────────────────────────────────────────────────────────
 
-const PIPELINE = CRM_STATUSES.filter(s => s !== 'Lost / Cancelled');
 const LOST = 'Lost / Cancelled' as const;
 
-const DOT_CFG: Record<string, { filled: string; ring: string; border: string; label: string }> = {
-  'New Lead':               { filled: 'bg-blue-500 border-blue-500',     ring: 'ring-blue-200',    border: 'border-blue-300',    label: 'text-blue-700' },
-  'Called V/M':             { filled: 'bg-violet-500 border-violet-500', ring: 'ring-violet-200',  border: 'border-violet-300',  label: 'text-violet-700' },
-  'Contacted':              { filled: 'bg-purple-500 border-purple-500', ring: 'ring-purple-200',  border: 'border-purple-300',  label: 'text-purple-700' },
-  'Survey Physical':        { filled: 'bg-cyan-500 border-cyan-500',     ring: 'ring-cyan-200',    border: 'border-cyan-300',    label: 'text-cyan-700' },
-  'Survey Video':           { filled: 'bg-teal-500 border-teal-500',     ring: 'ring-teal-200',    border: 'border-teal-300',    label: 'text-teal-700' },
-  'Quote Sent':             { filled: 'bg-amber-500 border-amber-500',   ring: 'ring-amber-200',   border: 'border-amber-300',   label: 'text-amber-700' },
-  'Quote Chased':           { filled: 'bg-orange-500 border-orange-500', ring: 'ring-orange-200',  border: 'border-orange-300',  label: 'text-orange-700' },
-  'Most Likely':            { filled: 'bg-yellow-500 border-yellow-500', ring: 'ring-yellow-200',  border: 'border-yellow-300',  label: 'text-yellow-700' },
-  'Quote Accepted':         { filled: 'bg-emerald-500 border-emerald-500', ring: 'ring-emerald-200', border: 'border-emerald-300', label: 'text-emerald-700' },
-  'Confirmed No Date':      { filled: 'bg-green-500 border-green-500',   ring: 'ring-green-200',   border: 'border-green-300',   label: 'text-green-700' },
-  'Confirmed Deposit':      { filled: 'bg-lime-500 border-lime-500',     ring: 'ring-lime-200',    border: 'border-lime-300',    label: 'text-lime-700' },
-  'Confirmed Paid':         { filled: 'bg-green-700 border-green-700',   ring: 'ring-green-200',   border: 'border-green-400',   label: 'text-green-800' },
-  'Completed':              { filled: 'bg-slate-400 border-slate-400',   ring: 'ring-slate-200',   border: 'border-slate-300',   label: 'text-slate-600' },
-  'Archived / Review Done': { filled: 'bg-gray-400 border-gray-400',     ring: 'ring-gray-200',    border: 'border-gray-300',    label: 'text-gray-600' },
-};
+// Fallback used until the dynamic /settings/statuses fetch returns
+const FALLBACK_PIPELINE: { name: string; color: string }[] = CRM_STATUSES
+  .filter(s => s !== LOST)
+  .map((name, i) => ({ name, color: ['#3b82f6','#8b5cf6','#7c3aed','#06b6d4','#0d9488','#fbbf24','#f59e0b','#f97316','#eab308','#10b981','#059669','#65a30d','#15803d','#94a3b8','#6b7280'][i] || '#94a3b8' }));
 
-function PipelineBar({ status, saving, onChange }: { status: string; saving: number | null; onChange: (s: CrmStatus) => void }) {
+function PipelineBar({ status, pipeline, saving, onChange }: {
+  status: string;
+  pipeline: { name: string; color: string }[];
+  saving: number | null;
+  onChange: (s: CrmStatus) => void;
+}) {
   const [hovered, setHovered] = useState<number | null>(null);
   const isLost  = status === LOST;
-  const mainIdx = PIPELINE.indexOf(status as never);
-  const pct     = mainIdx >= 0 ? (mainIdx / (PIPELINE.length - 1)) * 100 : 0;
+  const mainIdx = pipeline.findIndex(s => s.name === status);
+  const pct     = mainIdx >= 0 ? (mainIdx / Math.max(1, pipeline.length - 1)) * 100 : 0;
 
   return (
     <div className="card px-5 pt-5 pb-3 mb-6">
@@ -97,61 +90,63 @@ function PipelineBar({ status, saving, onChange }: { status: string; saving: num
           />
         )}
         <div className="relative flex justify-between">
-          {PIPELINE.map((s, i) => {
-            const isActive = s === status;
+          {pipeline.map((s, i) => {
+            const isActive = s.name === status;
             const isPast   = !isLost && i < mainIdx;
             const isSaving = saving === i;
             const isHover  = hovered === i;
-            const cfg      = DOT_CFG[s] ?? DOT_CFG['Completed'];
             const isFirst  = i === 0;
-            const isLast   = i === PIPELINE.length - 1;
+            const isLast   = i === pipeline.length - 1;
 
-            // Anchor edge labels so they don't spill outside the card.
             const labelAnchor = isFirst
               ? 'left-0 text-left'
               : isLast
                 ? 'right-0 text-right'
                 : 'left-1/2 -translate-x-1/2 text-center';
 
-            // Dot shape — active is bigger with a coloured ring + shadow; past
-            // is filled at the normal size; pending is hollow. Hover slightly
-            // scales pending/past dots for feedback.
-            const dotShape = isActive
-              ? `w-5 h-5 ${cfg.filled} ring-[4px] ${cfg.ring} shadow-md`
-              : isPast
-                ? `w-3 h-3 ${cfg.filled} ${isHover ? 'scale-125' : ''}`
-                : `w-3 h-3 bg-white ${cfg.border} ${isHover ? 'scale-125' : ''}`;
+            // Sizes only — colour is driven by inline style from the saved
+            // status colour so user-added statuses look right too.
+            const dotSize = isActive
+              ? 'w-5 h-5'
+              : `w-3 h-3 ${isHover ? 'scale-125' : ''}`;
 
-            // Label tone — inactive is faded slate, active gets the status
-            // colour at a larger weight + slightly larger size so it pops.
-            const labelTone = isActive
-              ? `text-[11px] font-bold ${cfg.label}`
+            const dotStyle: React.CSSProperties = isActive
+              ? { backgroundColor: s.color, borderColor: s.color, boxShadow: `0 0 0 4px ${s.color}33` }
+              : isPast
+                ? { backgroundColor: s.color, borderColor: s.color }
+                : { backgroundColor: '#fff', borderColor: `${s.color}80` };
+
+            const labelStyle: React.CSSProperties = isActive
+              ? { color: s.color, fontWeight: 700 }
               : isHover
-                ? `text-[10px] font-semibold ${cfg.label}`
+                ? { color: s.color, fontWeight: 600 }
                 : isPast
-                  ? 'text-[10px] font-medium text-slate-500'
-                  : 'text-[10px] font-medium text-slate-300';
+                  ? { color: '#64748b' }
+                  : { color: '#cbd5e1' };
+
+            const labelSize = isActive ? 'text-[11px]' : 'text-[10px]';
 
             return (
               <button
-                key={s}
+                key={s.name}
                 type="button"
-                onClick={() => onChange(s)}
+                onClick={() => onChange(s.name as CrmStatus)}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered(null)}
                 className="relative h-5 w-5 flex items-center justify-center cursor-pointer"
-                title={s}
+                title={s.name}
               >
                 <span
-                  className={`relative z-10 rounded-full border-2 transition-all duration-200 flex items-center justify-center pointer-events-none ${dotShape}`}
+                  className={`relative z-10 rounded-full border-2 transition-all duration-200 flex items-center justify-center pointer-events-none ${dotSize}`}
+                  style={dotStyle}
                 >
                   {isSaving && <span className="w-2 h-2 border border-white border-t-transparent rounded-full animate-spin" />}
                 </span>
                 <span
-                  className={`absolute top-8 leading-tight break-words transition-all duration-150 pointer-events-none ${labelAnchor} ${labelTone}`}
-                  style={{ width: 76 }}
+                  className={`absolute top-8 leading-tight break-words transition-all duration-150 pointer-events-none font-medium ${labelAnchor} ${labelSize}`}
+                  style={{ width: 76, ...labelStyle }}
                 >
-                  {s}
+                  {s.name}
                 </span>
               </button>
             );
@@ -343,7 +338,14 @@ export default function CRMDetailPage() {
   const [pipelineSaving,  setPipelineSaving]  = useState<number | null>(null);
   const [editingSection,  setEditingSection]  = useState<string | null>(null);
   const [sectionSaving,   setSectionSaving]   = useState(false);
+  const [pipelineStatuses, setPipelineStatuses] = useState<JobStatusSetting[]>([]);
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // Pipeline pulled from settings so user-added/renamed statuses appear here too
+  const pipeline = (pipelineStatuses.length
+    ? pipelineStatuses
+    : FALLBACK_PIPELINE.map((s, i) => ({ ...s, id: -i, sort_order: i, created_at: '' } as JobStatusSetting))
+  ).filter(s => s.name !== LOST);
 
   // ── All editable fields ────────────────────────────────────────────────────
   const [fullName,     setFullName]     = useState('');
@@ -452,6 +454,13 @@ export default function CRMDetailPage() {
       .catch(() => {});
   }, [id, navigate, populate]);
 
+  // Fetch dynamic pipeline statuses (sync with Settings → Job Statuses)
+  useEffect(() => {
+    api.get('/settings/statuses')
+      .then(r => { if (Array.isArray(r.data) && r.data.length) setPipelineStatuses(r.data); })
+      .catch(() => {});
+  }, []);
+
   // Fetch audit trail data
   useEffect(() => {
     if (!id) return;
@@ -544,7 +553,7 @@ export default function CRMDetailPage() {
 
   const handlePipelineChange = async (s: CrmStatus) => {
     if (s === status) return;
-    const idx = s === LOST ? -1 : PIPELINE.indexOf(s);
+    const idx = s === LOST ? -1 : pipeline.findIndex(p => p.name === s);
     setPipelineSaving(idx);
     try {
       const res = await api.put(`/crm/jobs/${id}`, { ...buildSavePayload(), status: s });
@@ -664,7 +673,7 @@ export default function CRMDetailPage() {
         </button>
       </div>
 
-      <PipelineBar status={status} saving={pipelineSaving} onChange={handlePipelineChange} />
+      <PipelineBar status={status} pipeline={pipeline} saving={pipelineSaving} onChange={handlePipelineChange} />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
@@ -876,7 +885,19 @@ export default function CRMDetailPage() {
 
           {/* Quote */}
           <Section title="Quote" accent="bg-amber-500">
-            <QuoteBuilder jobId={id} />
+            <QuoteBuilder
+              jobId={id}
+              onJobUpdated={() => {
+                if (!id) return;
+                api.get(`/crm/jobs/${id}`)
+                  .then(r => {
+                    setJob(r.data);
+                    setStatus(r.data.status);
+                    setActivities(r.data.activities || []);
+                  })
+                  .catch(() => {});
+              }}
+            />
           </Section>
         </div>
 

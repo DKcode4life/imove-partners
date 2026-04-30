@@ -117,6 +117,13 @@ function extractDepositSection(state: QuoteBuilderState): DepositSection {
 
 interface Props {
   jobId: number | string | undefined;
+  /**
+   * Fired after a server action that may have changed the parent job's
+   * status / quote_amount (sending a quote/invoice, marking paid, etc.).
+   * The parent should refetch the job so the pipeline chart and status
+   * badge reflect the auto-advanced stage.
+   */
+  onJobUpdated?: () => void;
 }
 
 type QuotationDraft = { items: LineItem[]; addons: AddonItem[] };
@@ -156,7 +163,7 @@ const REF_PLACEHOLDER: Record<DocumentType, string> = {
   'move-receipt':     'INV-?????',
 };
 
-export default function QuoteBuilder({ jobId }: Props) {
+export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
   const storageKey = jobId ? `crm-quote-${jobId}` : null;
 
   const [committed, setCommitted] = useState<QuoteBuilderState>(() => loadFromStorage(jobId));
@@ -520,6 +527,9 @@ export default function QuoteBuilder({ jobId }: Props) {
         });
       }
       setSendingToast({ kind: 'success', msg: 'Email sent successfully ✉️' });
+      // Server may have auto-advanced the job's pipeline status — let the
+      // parent page refetch so the chart + badge reflect the new stage.
+      onJobUpdated?.();
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || 'Failed to send email';
       setSendingToast({ kind: 'error', msg });
@@ -543,6 +553,7 @@ export default function QuoteBuilder({ jobId }: Props) {
       });
       setExistingDocs(prev => ({ ...prev, depositInvoicePaid: true }));
       setSendingToast({ kind: 'success', msg: 'Deposit marked as paid. You can now send the receipt.' });
+      onJobUpdated?.();
     } catch (err: any) {
       setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to mark deposit paid' });
     }
@@ -563,6 +574,7 @@ export default function QuoteBuilder({ jobId }: Props) {
       });
       setExistingDocs(prev => ({ ...prev, mainInvoicePaid: true }));
       setSendingToast({ kind: 'success', msg: 'Final payment recorded. You can now send the move receipt.' });
+      onJobUpdated?.();
     } catch (err: any) {
       setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to record payment' });
     }

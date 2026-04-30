@@ -262,6 +262,18 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
     console.error('[Invoice Email] update invoice.status failed:', e.message);
   }
 
+  // Auto-advance the job pipeline when a deposit invoice is emailed.
+  if (invoice.invoice_type === 'deposit') {
+    try {
+      await prisma.crmJob.update({
+        where: { id: jobId },
+        data: { status: 'Most Likely' },
+      });
+    } catch (e) {
+      console.error('[Invoice Email] update job.status failed:', e.message);
+    }
+  }
+
   try {
     await prisma.crmActivity.create({
       data: {
@@ -317,9 +329,17 @@ router.post('/jobs/:id/invoices/:invoiceId/payments', wrap(async (req, res) => {
       data: { status: 'paid', paid_at: new Date() },
     });
 
-    // Reflect on the parent job
+    // Reflect on the parent job — advance the pipeline stage
     if (invoice.invoice_type === 'deposit') {
-      await prisma.crmJob.update({ where: { id: jobId }, data: { deposit_paid: true } });
+      await prisma.crmJob.update({
+        where: { id: jobId },
+        data: { deposit_paid: true, status: 'Quote Accepted' },
+      });
+    } else if (invoice.invoice_type === 'main') {
+      await prisma.crmJob.update({
+        where: { id: jobId },
+        data: { status: 'Confirmed Paid' },
+      });
     }
   }
 

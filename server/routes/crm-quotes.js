@@ -335,7 +335,7 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
     await safeUpdate('job status', () => prisma.crmJob.update({
       where: { id: jobId },
       data: {
-        status: 'Quote Sent',
+        status: quote.quote_type === 'estimate' ? 'Estimate Sent' : 'Quote Sent',
         // quote_sent_date is a String column in the schema — store ISO date string
         quote_sent_date: new Date().toISOString().slice(0, 10),
         quote_amount: quote.total,

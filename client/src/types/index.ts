@@ -144,6 +144,7 @@ export type CrmStatus =
   | 'Contacted'
   | 'Survey Physical'
   | 'Survey Video'
+  | 'Estimate Sent'
   | 'Quote Sent'
   | 'Quote Chased'
   | 'Most Likely'
@@ -153,7 +154,8 @@ export type CrmStatus =
   | 'Confirmed Paid'
   | 'Completed'
   | 'Archived / Review Done'
-  | 'Lost / Cancelled';
+  | 'Lost / Cancelled'
+  | (string & {}); // allow user-added custom statuses from settings
 
 // Ordered pipeline stages; Lost / Cancelled is a separate ejection state handled by the UI
 export const CRM_STATUSES: CrmStatus[] = [
@@ -162,6 +164,7 @@ export const CRM_STATUSES: CrmStatus[] = [
   'Contacted',
   'Survey Physical',
   'Survey Video',
+  'Estimate Sent',
   'Quote Sent',
   'Quote Chased',
   'Most Likely',
