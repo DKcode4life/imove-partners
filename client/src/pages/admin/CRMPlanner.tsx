@@ -248,6 +248,9 @@ function AssetChip({
   const isAvailable = asset.availability === 'available';
   return (
     <div
+      data-drag-asset={(!reorderMode && isAvailable) ? String(asset.id) : undefined}
+      data-drag-reorder={reorderMode ? String(asset.id) : undefined}
+      onContextMenu={e => e.preventDefault()}
       draggable={reorderMode || isAvailable}
       onDragStart={e => {
         if (reorderMode) {
@@ -327,6 +330,115 @@ function AssetPanel({
   // "insert before" target: asset id, or 'end' to append at end of list
   const [reorderOverId, setReorderOverId] = useState<number | 'end' | null>(null);
 
+  // ── Touch reorder ────────────────────────────────────────────────────────
+  const reorderPanelRef   = useRef<HTMLDivElement>(null);
+  const reorderGhostRef   = useRef<HTMLDivElement | null>(null);
+  const reorderTouchStart = useRef<{ x: number; y: number } | null>(null);
+  const reorderTouching   = useRef(false);
+  // Always-current; updated inline so the effect closure stays fresh
+  const reorderModeRef      = useRef(false);
+  const handleReorderDropRef = useRef<(id: number | 'end') => void>(() => {});
+
+  useEffect(() => {
+    const el = reorderPanelRef.current;
+    if (!el) return;
+    const THRESHOLD = 6;
+
+    function elAt(x: number, y: number): HTMLElement | null {
+      const g = reorderGhostRef.current;
+      if (g) g.style.visibility = 'hidden';
+      const found = document.elementFromPoint(x, y) as HTMLElement | null;
+      if (g) g.style.visibility = '';
+      return found;
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      if (!reorderModeRef.current) return;
+      const tgt = e.target as HTMLElement;
+      const src = tgt.closest<HTMLElement>('[data-drag-reorder]');
+      if (!src) return;
+      reorderTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      reorderTouching.current   = false;
+      reorderDragId.current     = parseInt(src.dataset.dragReorder!);
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (!reorderModeRef.current || !reorderDragId.current) return;
+      const t = e.touches[0];
+
+      if (!reorderTouching.current) {
+        const { x, y } = reorderTouchStart.current!;
+        if (Math.hypot(t.clientX - x, t.clientY - y) < THRESHOLD) return;
+        reorderTouching.current = true;
+        const tgt = e.target as HTMLElement;
+        const src = tgt.closest<HTMLElement>('[data-drag-reorder]');
+        if (src) {
+          const rect = src.getBoundingClientRect();
+          const g    = src.cloneNode(true) as HTMLDivElement;
+          g.style.cssText = [
+            'position:fixed', `left:${rect.left}px`, `top:${rect.top}px`,
+            `width:${rect.width}px`, 'pointer-events:none', 'z-index:9999',
+            'opacity:0.88', 'transform:scale(1.04)',
+            'box-shadow:0 6px 20px rgba(0,0,0,0.2)', 'border-radius:8px', 'transition:none',
+          ].join(';');
+          document.body.appendChild(g);
+          reorderGhostRef.current = g;
+        }
+      }
+
+      e.preventDefault();
+      const g = reorderGhostRef.current;
+      if (g) {
+        g.style.left = (t.clientX - g.offsetWidth / 2) + 'px';
+        g.style.top  = (t.clientY - g.offsetHeight / 2) + 'px';
+      }
+
+      const under = elAt(t.clientX, t.clientY);
+      if (!under) return;
+      const targetEl = under.closest<HTMLElement>('[data-drag-reorder]');
+      if (targetEl && targetEl.dataset.dragReorder) {
+        const tid = parseInt(targetEl.dataset.dragReorder);
+        if (tid !== reorderDragId.current) setReorderOverId(tid);
+      } else {
+        setReorderOverId('end');
+      }
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      if (!reorderModeRef.current) return;
+      const dragging = reorderTouching.current;
+      reorderTouching.current   = false;
+      reorderTouchStart.current = null;
+      if (reorderGhostRef.current) { reorderGhostRef.current.remove(); reorderGhostRef.current = null; }
+      if (!dragging) { reorderDragId.current = null; setReorderOverId(null); return; }
+
+      const t     = e.changedTouches[0];
+      const under = elAt(t.clientX, t.clientY);
+      if (under) {
+        const targetEl = under.closest<HTMLElement>('[data-drag-reorder]');
+        if (targetEl?.dataset.dragReorder) {
+          handleReorderDropRef.current(parseInt(targetEl.dataset.dragReorder));
+        } else {
+          handleReorderDropRef.current('end');
+        }
+      } else {
+        reorderDragId.current = null;
+        setReorderOverId(null);
+      }
+    }
+
+    el.addEventListener('touchstart',  onTouchStart,  { passive: true });
+    el.addEventListener('touchmove',   onTouchMove,   { passive: false });
+    el.addEventListener('touchend',    onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      el.removeEventListener('touchstart',  onTouchStart);
+      el.removeEventListener('touchmove',   onTouchMove);
+      el.removeEventListener('touchend',    onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Build set of (asset_id, date) combos that are booked
   const bookedMap: Record<number, Set<string>> = {};
   for (const a of assignments) {
@@ -335,6 +447,9 @@ function AssetPanel({
   }
 
   // targetId: insert dragged item BEFORE this id; 'end' = append at end
+  // Keep always-current refs in sync (inline, before handleReorderDrop is defined)
+  reorderModeRef.current       = reorderMode;
+
   function handleReorderDrop(targetId: number | 'end') {
     const dragId = reorderDragId.current;
     reorderDragId.current = null;
@@ -356,6 +471,8 @@ function AssetPanel({
     setAssets(reindexed);
     onAssetsReordered(reindexed);
   }
+  // Update ref AFTER function is defined
+  handleReorderDropRef.current = handleReorderDrop;
 
   const drivers    = assets.filter(a => a.type === 'staff' && a.role === 'driver');
   const porters    = assets.filter(a => a.type === 'staff' && a.role === 'porter');
@@ -434,7 +551,7 @@ function AssetPanel({
           <p className="text-[10px] text-amber-600 mt-1 font-medium">Moving: {draggingAssignment.asset_name} — drop onto another job</p>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      <div ref={reorderPanelRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
         <Group title="Drivers"  items={drivers}    groupKey="drivers"  icon={<Users className="w-3 h-3" />} />
         <Group title="Porters"  items={porters}    groupKey="porters"  icon={<Users className="w-3 h-3" />} />
         {otherStaff.length > 0 && <Group title="Staff" items={otherStaff} groupKey="staff" icon={<Users className="w-3 h-3" />} />}
@@ -481,6 +598,8 @@ function AssignmentChip({
   return (
     <span
       data-assignment-chip
+      data-drag-assignment={onDragStart ? String(a.id) : undefined}
+      onContextMenu={e => e.preventDefault()}
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
@@ -538,6 +657,8 @@ function StaffAssignmentRow({
   return (
     <div
       data-assignment-chip
+      data-drag-assignment={onDragStart ? String(a.id) : undefined}
+      onContextMenu={e => e.preventDefault()}
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
@@ -657,6 +778,8 @@ function JobCard({
 
   return (
     <div
+      data-drag-card={`${item.source}:${item.id}`}
+      onContextMenu={e => e.preventDefault()}
       draggable
       onDragStart={e => {
         // Don't trigger card drag if dragging an assignment chip inside
@@ -709,6 +832,8 @@ function JobCard({
       {hasActiveDrag && !isExpanded && (
         <div className="flex gap-1.5 px-2.5 pb-2.5">
           <div
+            data-drop-zone="staff"
+            data-drop-card-key={cardKey}
             onDragOver={e => { e.preventDefault(); onDragOver('staff'); }}
             onDragLeave={onDragLeave}
             onDrop={e => { e.preventDefault(); onDropStaff(); }}
@@ -722,6 +847,8 @@ function JobCard({
             {dragOverZone === `${cardKey}|staff` ? 'Drop here' : 'Staff'}
           </div>
           <div
+            data-drop-zone="vehicle"
+            data-drop-card-key={cardKey}
             onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
             onDragLeave={onDragLeave}
             onDrop={e => { e.preventDefault(); onDropVehicle(); }}
@@ -773,6 +900,8 @@ function JobCard({
               <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£150/day</span>
             </p>
             <div
+              data-drop-zone="driver"
+              data-drop-card-key={cardKey}
               onDragOver={e => { e.preventDefault(); onDragOver('driver'); }}
               onDragLeave={onDragLeave}
               onDrop={e => { e.preventDefault(); onDropDriver(); }}
@@ -809,6 +938,8 @@ function JobCard({
               <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£125/day</span>
             </p>
             <div
+              data-drop-zone="porter"
+              data-drop-card-key={cardKey}
               onDragOver={e => { e.preventDefault(); onDragOver('porter'); }}
               onDragLeave={onDragLeave}
               onDrop={e => { e.preventDefault(); onDropPorter(); }}
@@ -844,6 +975,8 @@ function JobCard({
               <Truck className="w-3 h-3 text-teal-500" />Vehicles
             </p>
             <div
+              data-drop-zone="vehicle"
+              data-drop-card-key={cardKey}
               onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
               onDragLeave={onDragLeave}
               onDrop={e => { e.preventDefault(); onDropVehicle(); }}
@@ -1045,8 +1178,204 @@ function WeeklyView({
     if (isDifferentDate) onReschedule(item, targetDate);
   }
 
+  // ── Touch drag support ───────────────────────────────────────────────────
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const ghostRef       = useRef<HTMLDivElement | null>(null);
+  const activeTouchDrag = useRef<
+    | { type: 'asset';      asset:      PlannerAsset }
+    | { type: 'assignment'; assignment: PlannerAssignment }
+    | { type: 'card';       item:       PlannerCalendarItem }
+    | null
+  >(null);
+  const touchStartPos  = useRef<{ x: number; y: number } | null>(null);
+  const touchDragging  = useRef(false);
+
+  // Always-current refs so the touch useEffect (deps=[]) never goes stale
+  const assetsRef         = useRef(assets);         assetsRef.current         = assets;
+  const itemsRef          = useRef(items);           itemsRef.current          = items;
+  const onDropRef         = useRef(onDrop);          onDropRef.current         = onDrop;
+  const onRescheduleRef   = useRef(onReschedule);    onRescheduleRef.current   = onReschedule;
+  const handleGapDropRef  = useRef(handleGapDrop);   handleGapDropRef.current  = handleGapDrop;
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const THRESHOLD = 8;
+
+    function elAt(x: number, y: number): HTMLElement | null {
+      const g = ghostRef.current;
+      if (g) g.style.visibility = 'hidden';
+      const found = document.elementFromPoint(x, y) as HTMLElement | null;
+      if (g) g.style.visibility = '';
+      return found;
+    }
+
+    function makeGhost(source: HTMLElement) {
+      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
+      const rect = source.getBoundingClientRect();
+      const g = source.cloneNode(true) as HTMLDivElement;
+      g.style.cssText = [
+        'position:fixed',
+        `left:${rect.left}px`, `top:${rect.top}px`, `width:${rect.width}px`,
+        'pointer-events:none', 'z-index:9999', 'opacity:0.88',
+        'transform:scale(1.04)',
+        'box-shadow:0 8px 28px rgba(0,0,0,0.22)', 'border-radius:10px', 'transition:none',
+      ].join(';');
+      document.body.appendChild(g);
+      ghostRef.current = g;
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      const t   = e.touches[0];
+      const tgt = e.target as HTMLElement;
+      if (tgt.closest('button, input, select, textarea, a')) return;
+
+      const assetEl  = tgt.closest<HTMLElement>('[data-drag-asset]');
+      const assignEl = tgt.closest<HTMLElement>('[data-drag-assignment]');
+      const cardEl   = tgt.closest<HTMLElement>('[data-drag-card]');
+      if (!assetEl && !assignEl && !cardEl) return;
+
+      touchStartPos.current  = { x: t.clientX, y: t.clientY };
+      touchDragging.current  = false;
+      activeTouchDrag.current = null;
+
+      if (assetEl) {
+        const id    = parseInt(assetEl.dataset.dragAsset!);
+        const asset = assetsRef.current.find(a => a.id === id);
+        if (!asset || asset.availability !== 'available') return;
+        activeTouchDrag.current = { type: 'asset', asset };
+      } else if (assignEl) {
+        const id = parseInt(assignEl.dataset.dragAssignment!);
+        let found: PlannerAssignment | undefined;
+        for (const it of itemsRef.current) {
+          found = (it.assignments || []).find(a => a.id === id);
+          if (found) break;
+        }
+        if (!found) return;
+        activeTouchDrag.current = { type: 'assignment', assignment: found };
+      } else if (cardEl) {
+        const [src, rawId] = cardEl.dataset.dragCard!.split(':');
+        const it = itemsRef.current.find(i => i.source === src && i.id === parseInt(rawId));
+        if (!it) return;
+        activeTouchDrag.current = { type: 'card', item: it };
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (!activeTouchDrag.current) return;
+      const t = e.touches[0];
+
+      if (!touchDragging.current) {
+        const { x, y } = touchStartPos.current!;
+        if (Math.hypot(t.clientX - x, t.clientY - y) < THRESHOLD) return;
+        touchDragging.current = true;
+
+        const tgt     = e.target as HTMLElement;
+        const drag    = activeTouchDrag.current;
+        const srcEl   = tgt.closest<HTMLElement>(
+          drag.type === 'asset' ? '[data-drag-asset]' :
+          drag.type === 'assignment' ? '[data-drag-assignment]' : '[data-drag-card]'
+        );
+        if (srcEl) makeGhost(srcEl);
+
+        if (drag.type === 'asset')       setDraggingAsset(drag.asset);
+        else if (drag.type === 'assignment') setDraggingAssignment(drag.assignment);
+        else if (drag.type === 'card')   setDraggingJobCard(drag.item);
+      }
+
+      e.preventDefault();
+      const g = ghostRef.current;
+      if (g) {
+        g.style.left = (t.clientX - g.offsetWidth / 2)  + 'px';
+        g.style.top  = (t.clientY - g.offsetHeight / 2) + 'px';
+      }
+
+      const under = elAt(t.clientX, t.clientY);
+      if (!under) return;
+      const drag = activeTouchDrag.current!;
+
+      if (drag.type === 'asset' || drag.type === 'assignment') {
+        const z = under.closest<HTMLElement>('[data-drop-zone]');
+        setDragOverZone(z?.dataset.dropZone && z?.dataset.dropCardKey
+          ? `${z.dataset.dropCardKey}|${z.dataset.dropZone}` : null);
+      } else {
+        const gapEl  = under.closest<HTMLElement>('[data-drop-gap]');
+        const dateEl = under.closest<HTMLElement>('[data-drop-date]');
+        if (gapEl?.dataset.dropGap) {
+          setGapOverKey(gapEl.dataset.dropGap);
+          setDragOverDate(gapEl.dataset.dropGap.split('|')[0]);
+        } else if (dateEl?.dataset.dropDate) {
+          setDragOverDate(dateEl.dataset.dropDate);
+          setGapOverKey(null);
+        } else {
+          setDragOverDate(null); setGapOverKey(null);
+        }
+      }
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      if (!activeTouchDrag.current) return;
+      const drag = activeTouchDrag.current;
+      activeTouchDrag.current = null;
+
+      if (!touchDragging.current) {
+        touchDragging.current = false; touchStartPos.current = null; return;
+      }
+      touchDragging.current = false; touchStartPos.current = null;
+
+      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
+
+      const t     = e.changedTouches[0];
+      const under = elAt(t.clientX, t.clientY);
+
+      setDragOverZone(null); setDragOverDate(null); setGapOverKey(null);
+
+      if (drag.type === 'asset' || drag.type === 'assignment') {
+        if (under) {
+          const z = under.closest<HTMLElement>('[data-drop-zone]');
+          if (z?.dataset.dropZone && z?.dataset.dropCardKey) {
+            const zone    = z.dataset.dropZone as 'driver' | 'porter' | 'staff' | 'vehicle';
+            const cardKey = z.dataset.dropCardKey;
+            const m = /^(job|event)-(\d+)-/.exec(cardKey);
+            if (m) {
+              const it = itemsRef.current.find(i => i.source === m[1] && i.id === parseInt(m[2]));
+              if (it) onDropRef.current(it, zone);
+            }
+          }
+        }
+        setDraggingAsset(null); setDraggingAssignment(null);
+      } else {
+        let gapHandled = false;
+        if (under) {
+          const gapEl  = under.closest<HTMLElement>('[data-drop-gap]');
+          const dateEl = under.closest<HTMLElement>('[data-drop-date]');
+          if (gapEl?.dataset.dropGap) {
+            const [gd, gi] = gapEl.dataset.dropGap.split('|');
+            handleGapDropRef.current(gd, parseInt(gi));
+            gapHandled = true;
+          } else if (dateEl?.dataset.dropDate) {
+            const nd = dateEl.dataset.dropDate;
+            if (nd !== drag.item.date) onRescheduleRef.current(drag.item, nd);
+          }
+        }
+        if (!gapHandled) setDraggingJobCard(null);
+      }
+    }
+
+    el.addEventListener('touchstart',  onTouchStart,  { passive: true });
+    el.addEventListener('touchmove',   onTouchMove,   { passive: false });
+    el.addEventListener('touchend',    onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      el.removeEventListener('touchstart',  onTouchStart);
+      el.removeEventListener('touchmove',   onTouchMove);
+      el.removeEventListener('touchend',    onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div ref={containerRef} className="flex flex-1 overflow-hidden">
       <AssetPanel
         assets={assets}
         assignments={assignments}
@@ -1077,6 +1406,7 @@ function WeeklyView({
               const isOver = gapOverKey === key;
               return (
                 <div
+                  data-drop-gap={key}
                   className="relative py-1 -my-0.5 z-10"
                   onDragOver={e => { if (!draggingJobCard) return; e.preventDefault(); e.stopPropagation(); setGapOverKey(key); setDragOverDate(date); }}
                   onDragLeave={() => { if (gapOverKey === key) setGapOverKey(null); }}
@@ -1090,6 +1420,7 @@ function WeeklyView({
             return (
               <div
                 key={date}
+                data-drop-date={date}
                 className={`flex-1 border-r border-slate-200/70 flex flex-col transition-colors ${
                   isDraggingHere
                     ? 'bg-gradient-to-b from-indigo-50/80 to-indigo-50/30'
