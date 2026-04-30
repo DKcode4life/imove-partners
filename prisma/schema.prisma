@@ -594,3 +594,19 @@ model JobChangeLog {
   @@index([created_at])
   @@map("job_change_logs")
 }
+
+// API Keys for external integrations (AI assistants, third-party systems)
+model ApiKey {
+  id          Int       @id @default(autoincrement())
+  name        String                            // e.g. "Claude AI Assistant"
+  key_prefix  String    @unique                 // first 8 chars, shown to user (e.g. "imv_a3f8...")
+  key_hash    String                            // bcrypt hash of full key
+  scopes      String    @default("crm:read,crm:write")
+  is_active   Boolean   @default(true)
+  last_used_at DateTime?
+  last_used_ip String?
+  created_at  DateTime  @default(now())
+  expires_at  DateTime?
+
+  @@map("api_keys")
+}
