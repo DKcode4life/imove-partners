@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil } from 'lucide-react';
+import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send } from 'lucide-react';
+import api from '../lib/api';
+import SendDocumentModal, { type DocumentType, type SendDocumentData } from './SendDocumentModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -119,6 +121,22 @@ interface Props {
 
 type QuotationDraft = { items: LineItem[]; addons: AddonItem[] };
 
+type JobInfo = {
+  id: number;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+};
+
+type ExistingDocs = {
+  estimateQuoteId?: number;
+  fixedQuoteId?: number;
+  depositInvoiceId?: number;
+  depositInvoicePaid?: boolean;
+  mainInvoiceId?: number;
+  mainInvoicePaid?: boolean;
+};
+
 export default function QuoteBuilder({ jobId }: Props) {
   const storageKey = jobId ? `crm-quote-${jobId}` : null;
 
@@ -129,13 +147,61 @@ export default function QuoteBuilder({ jobId }: Props) {
   const [quotationDraft, setQuotationDraft] = useState<QuotationDraft | null>(null);
   const [depositDraft,   setDepositDraft]   = useState<DepositSection | null>(null);
 
+  // Send-to-client state
+  const [jobInfo, setJobInfo] = useState<JobInfo | null>(null);
+  const [existingDocs, setExistingDocs] = useState<ExistingDocs>({});
+  const [activeModal, setActiveModal] = useState<DocumentType | null>(null);
+  const [sendingToast, setSendingToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
+  const [busyAction, setBusyAction] = useState<DocumentType | null>(null);
+
   // Reload + reset drafts when the job switches
   useEffect(() => {
     setCommitted(loadFromStorage(jobId));
     setEstimateDraft(null);
     setQuotationDraft(null);
     setDepositDraft(null);
+    setExistingDocs({});
+    setJobInfo(null);
+
+    if (jobId) {
+      // Load job + existing quotes + invoices for the send panel
+      (async () => {
+        try {
+          const [jobRes, quotesRes, invRes] = await Promise.all([
+            api.get(`/crm/jobs/${jobId}`),
+            api.get(`/crm/jobs/${jobId}/quotes`).catch(() => ({ data: [] })),
+            api.get(`/crm/jobs/${jobId}/invoices`).catch(() => ({ data: [] })),
+          ]);
+          const j = jobRes.data;
+          setJobInfo({ id: j.id, full_name: j.full_name, email: j.email, phone: j.phone });
+
+          const quotes: any[] = quotesRes.data || [];
+          const invoices: any[] = invRes.data || [];
+          const estQ = quotes.find(q => q.quote_type === 'estimate');
+          const fixQ = quotes.find(q => q.quote_type === 'fixed');
+          const depInv = invoices.find(i => i.invoice_type === 'deposit');
+          const mainInv = invoices.find(i => i.invoice_type === 'main');
+          setExistingDocs({
+            estimateQuoteId: estQ?.id,
+            fixedQuoteId: fixQ?.id,
+            depositInvoiceId: depInv?.id,
+            depositInvoicePaid: depInv?.status === 'paid',
+            mainInvoiceId: mainInv?.id,
+            mainInvoicePaid: mainInv?.status === 'paid',
+          });
+        } catch (err) {
+          console.error('[QuoteBuilder] Failed to load job/docs:', err);
+        }
+      })();
+    }
   }, [jobId]);
+
+  // Auto-clear toast after 4 seconds
+  useEffect(() => {
+    if (!sendingToast) return;
+    const t = setTimeout(() => setSendingToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [sendingToast]);
 
   function persist(next: QuoteBuilderState) {
     if (!storageKey) return;
@@ -263,15 +329,316 @@ export default function QuoteBuilder({ jobId }: Props) {
     (depositSection.depositType === 'none' || depositSection.depositPaid) &&
     fixQuotationTotal > 0;
 
+  // ── Send-to-client helpers ─────────────────────────────────────────────────
+
+  const estimateTotal = listTotal(committed.estimateItems);
+  const hasEstimateItems = committed.estimateItems.length > 0;
+  const hasFixedItems = committed.quotationItems.length > 0 || quotationAddons.some(a => a.selected);
+  const fixedReadyToSend = hasFixedItems && fixQuotationTotal > 0;
+
+  /**
+   * Lazily create a Quote on the server (if one doesn't exist) and return its id.
+   */
+  async function ensureQuote(quote_type: 'estimate' | 'fixed'): Promise<number | null> {
+    if (!jobId) return null;
+    if (quote_type === 'estimate' && existingDocs.estimateQuoteId) return existingDocs.estimateQuoteId;
+    if (quote_type === 'fixed' && existingDocs.fixedQuoteId) return existingDocs.fixedQuoteId;
+
+    const items = quote_type === 'estimate'
+      ? committed.estimateItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price }))
+      : [
+          ...committed.quotationItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
+          ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: `${a.description} (add-on)`, quantity: 1, unit_price: a.price, total: a.price })),
+        ];
+
+    const total = quote_type === 'estimate' ? estimateTotal : fixQuotationTotal;
+    const ts = Date.now().toString().slice(-6);
+    const quote_number = quote_type === 'estimate' ? `EST-${ts}` : `QUO-${ts}`;
+
+    const res = await api.post(`/crm/jobs/${jobId}/quotes`, {
+      quote_type,
+      quote_number,
+      subtotal: total,
+      tax_amount: 0, // VAT already included in line prices for now
+      total,
+      deposit: quote_type === 'fixed' ? depositAmount : 0,
+      items,
+    });
+
+    const newId = res.data.id;
+    setExistingDocs(prev => quote_type === 'estimate'
+      ? { ...prev, estimateQuoteId: newId }
+      : { ...prev, fixedQuoteId: newId });
+    return newId;
+  }
+
+  /**
+   * Lazily create an Invoice (deposit or main) on the server and return its id.
+   */
+  async function ensureInvoice(invoice_type: 'deposit' | 'main'): Promise<number | null> {
+    if (!jobId) return null;
+    if (invoice_type === 'deposit' && existingDocs.depositInvoiceId) return existingDocs.depositInvoiceId;
+    if (invoice_type === 'main' && existingDocs.mainInvoiceId) return existingDocs.mainInvoiceId;
+
+    const fixedQuoteId = await ensureQuote('fixed');
+
+    const items = invoice_type === 'deposit'
+      ? [{ description: `Deposit for moving services`, quantity: 1, unit_price: depositAmount, total: depositAmount }]
+      : [
+          ...committed.quotationItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
+          ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: `${a.description} (add-on)`, quantity: 1, unit_price: a.price, total: a.price })),
+        ];
+
+    const total = invoice_type === 'deposit' ? depositAmount : fixQuotationTotal;
+
+    const res = await api.post(`/crm/jobs/${jobId}/invoices`, {
+      invoice_type,
+      quote_id: fixedQuoteId,
+      subtotal: total,
+      tax_amount: 0,
+      total,
+      items,
+    });
+
+    const newId = res.data.id;
+    setExistingDocs(prev => invoice_type === 'deposit'
+      ? { ...prev, depositInvoiceId: newId }
+      : { ...prev, mainInvoiceId: newId });
+    return newId;
+  }
+
+  /** Open the modal for a given document type */
+  function openSendModal(t: DocumentType) {
+    if (!jobInfo?.email) {
+      setSendingToast({ kind: 'error', msg: 'Customer has no email address on file. Add one in the Job Details panel.' });
+      return;
+    }
+    setActiveModal(t);
+  }
+
+  /** Modal onSend dispatcher — knows which endpoint to hit per document type */
+  async function handleSend(documentType: DocumentType, data: SendDocumentData) {
+    if (!jobId) throw new Error('No job ID');
+    setBusyAction(documentType);
+    try {
+      if (documentType === 'estimate-quote' || documentType === 'fixed-quote') {
+        const quoteId = await ensureQuote(documentType === 'estimate-quote' ? 'estimate' : 'fixed');
+        if (!quoteId) throw new Error('Failed to create quote');
+        await api.post(`/crm/jobs/${jobId}/quotes/${quoteId}/send-email`, {
+          to: data.to, cc: data.cc, bcc: data.bcc,
+          subject: data.subject, body_html: data.body_html, attach_pdf: data.attach_pdf,
+        });
+      } else if (documentType === 'deposit-invoice') {
+        const invId = await ensureInvoice('deposit');
+        if (!invId) throw new Error('Failed to create deposit invoice');
+        await api.post(`/crm/jobs/${jobId}/invoices/${invId}/send-email`, {
+          to: data.to, subject: data.subject, body_html: data.body_html, attach_pdf: data.attach_pdf,
+        });
+      } else if (documentType === 'main-invoice') {
+        const invId = await ensureInvoice('main');
+        if (!invId) throw new Error('Failed to create main invoice');
+        await api.post(`/crm/jobs/${jobId}/invoices/${invId}/send-email`, {
+          to: data.to, subject: data.subject, body_html: data.body_html, attach_pdf: data.attach_pdf,
+        });
+      } else if (documentType === 'deposit-receipt') {
+        const invId = existingDocs.depositInvoiceId;
+        if (!invId) throw new Error('No deposit invoice exists yet');
+        await api.post(`/crm/jobs/${jobId}/invoices/${invId}/send-receipt`, {
+          to: data.to, subject: data.subject, body_html: data.body_html,
+        });
+      } else if (documentType === 'move-receipt') {
+        const invId = existingDocs.mainInvoiceId;
+        if (!invId) throw new Error('No main invoice exists yet');
+        await api.post(`/crm/jobs/${jobId}/invoices/${invId}/send-receipt`, {
+          to: data.to, subject: data.subject, body_html: data.body_html,
+        });
+      }
+      setSendingToast({ kind: 'success', msg: 'Email sent successfully ✉️' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to send email';
+      setSendingToast({ kind: 'error', msg });
+      throw err;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  /** Mark deposit invoice as paid (records a payment for the full deposit amount) */
+  async function markDepositPaid() {
+    if (!jobId || !existingDocs.depositInvoiceId) {
+      setSendingToast({ kind: 'error', msg: 'Send the deposit invoice first.' });
+      return;
+    }
+    if (!confirm(`Mark deposit of ${fmt(depositAmount)} as received?`)) return;
+    try {
+      await api.post(`/crm/jobs/${jobId}/invoices/${existingDocs.depositInvoiceId}/payments`, {
+        amount: depositAmount,
+        method: 'bank_transfer',
+      });
+      setExistingDocs(prev => ({ ...prev, depositInvoicePaid: true }));
+      setSendingToast({ kind: 'success', msg: 'Deposit marked as paid. You can now send the receipt.' });
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to mark deposit paid' });
+    }
+  }
+
+  /** Mark main invoice as paid */
+  async function markMainPaid() {
+    if (!jobId || !existingDocs.mainInvoiceId) {
+      setSendingToast({ kind: 'error', msg: 'Send the final invoice first.' });
+      return;
+    }
+    const balance = fixQuotationTotal - (existingDocs.depositInvoicePaid ? depositAmount : 0);
+    if (!confirm(`Mark final balance of ${fmt(balance)} as received?`)) return;
+    try {
+      await api.post(`/crm/jobs/${jobId}/invoices/${existingDocs.mainInvoiceId}/payments`, {
+        amount: balance,
+        method: 'bank_transfer',
+      });
+      setExistingDocs(prev => ({ ...prev, mainInvoicePaid: true }));
+      setSendingToast({ kind: 'success', msg: 'Final payment recorded. You can now send the move receipt.' });
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to record payment' });
+    }
+  }
+
+  // Modal config for the currently-open modal
+  const modalConfig: { docNumber: string; amount: number; jobTotal?: number; previewUrl?: string } | null = activeModal
+    ? (() => {
+        const totalTs = Date.now().toString().slice(-6);
+        switch (activeModal) {
+          case 'estimate-quote': return {
+            docNumber: existingDocs.estimateQuoteId ? `EST-${existingDocs.estimateQuoteId}` : `EST-${totalTs}`,
+            amount: estimateTotal,
+            previewUrl: existingDocs.estimateQuoteId ? `/api/crm/jobs/${jobId}/quotes/${existingDocs.estimateQuoteId}/pdf` : undefined,
+          };
+          case 'fixed-quote': return {
+            docNumber: existingDocs.fixedQuoteId ? `QUO-${existingDocs.fixedQuoteId}` : `QUO-${totalTs}`,
+            amount: fixQuotationTotal,
+            previewUrl: existingDocs.fixedQuoteId ? `/api/crm/jobs/${jobId}/quotes/${existingDocs.fixedQuoteId}/pdf` : undefined,
+          };
+          case 'deposit-invoice': return {
+            docNumber: existingDocs.depositInvoiceId ? `DEP-${existingDocs.depositInvoiceId}` : `DEP-${totalTs}`,
+            amount: depositAmount,
+            jobTotal: fixQuotationTotal,
+            previewUrl: existingDocs.depositInvoiceId ? `/api/crm/jobs/${jobId}/invoices/${existingDocs.depositInvoiceId}/pdf` : undefined,
+          };
+          case 'deposit-receipt': return {
+            docNumber: existingDocs.depositInvoiceId ? `DEP-${existingDocs.depositInvoiceId}` : `DEP-${totalTs}`,
+            amount: depositAmount,
+            jobTotal: fixQuotationTotal,
+          };
+          case 'main-invoice': return {
+            docNumber: existingDocs.mainInvoiceId ? `INV-${existingDocs.mainInvoiceId}` : `INV-${totalTs}`,
+            amount: fixQuotationTotal,
+            previewUrl: existingDocs.mainInvoiceId ? `/api/crm/jobs/${jobId}/invoices/${existingDocs.mainInvoiceId}/pdf` : undefined,
+          };
+          case 'move-receipt': return {
+            docNumber: existingDocs.mainInvoiceId ? `INV-${existingDocs.mainInvoiceId}` : `INV-${totalTs}`,
+            amount: fixQuotationTotal,
+          };
+        }
+      })()
+    : null;
+
   return (
     <div className="space-y-5">
-      {/* Layout-only notice */}
-      <div className="flex items-start gap-2 rounded-lg bg-amber-50/70 border border-amber-200/60 px-3 py-2">
-        <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-800">
-          <span className="font-bold">Layout preview.</span> Items save in this browser only on
-          Save. Database persistence + email sending land in the next iteration.
-        </p>
+      {/* Toast */}
+      {sendingToast && (
+        <div className={`flex items-start gap-2 rounded-lg px-3 py-2.5 border ${
+          sendingToast.kind === 'success'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          {sendingToast.kind === 'success'
+            ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            : <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+          <p className="text-xs font-medium flex-1">{sendingToast.msg}</p>
+          <button onClick={() => setSendingToast(null)} className="text-xs hover:underline">Dismiss</button>
+        </div>
+      )}
+
+      {/* ── Send to Client panel ──────────────────────────────────────────── */}
+      <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-indigo-50/50 overflow-hidden shadow-sm">
+        <div className="px-4 py-3 border-b border-blue-200/70 bg-white/40 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold tracking-tight text-blue-700 flex items-center gap-1.5">
+              <Mail className="w-4 h-4" /> Send to Client
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
+              {jobInfo?.email
+                ? <>Will email to <span className="font-semibold text-slate-700">{jobInfo.email}</span></>
+                : <span className="text-amber-700">⚠ Customer has no email — add one in Job Details</span>}
+            </p>
+          </div>
+        </div>
+
+        <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+          <SendButton
+            label="Estimate Quote"
+            sub={hasEstimateItems ? fmt(estimateTotal) : 'Add items first'}
+            icon={<FileText className="w-4 h-4" />}
+            disabled={!hasEstimateItems || !jobInfo?.email}
+            busy={busyAction === 'estimate-quote'}
+            sent={!!existingDocs.estimateQuoteId}
+            onClick={() => openSendModal('estimate-quote')}
+            color="cyan"
+          />
+          <SendButton
+            label="Fixed Quote"
+            sub={fixedReadyToSend ? fmt(fixQuotationTotal) : 'Add items first'}
+            icon={<FileText className="w-4 h-4" />}
+            disabled={!fixedReadyToSend || !jobInfo?.email}
+            busy={busyAction === 'fixed-quote'}
+            sent={!!existingDocs.fixedQuoteId}
+            onClick={() => openSendModal('fixed-quote')}
+            color="emerald"
+          />
+          <SendButton
+            label="Deposit Invoice"
+            sub={depositAmount > 0 ? fmt(depositAmount) : 'Set deposit first'}
+            icon={<Receipt className="w-4 h-4" />}
+            disabled={depositAmount <= 0 || !fixedReadyToSend || !jobInfo?.email}
+            busy={busyAction === 'deposit-invoice'}
+            sent={!!existingDocs.depositInvoiceId}
+            onClick={() => openSendModal('deposit-invoice')}
+            color="amber"
+          />
+          <SendButton
+            label="Deposit Receipt"
+            sub={existingDocs.depositInvoicePaid ? 'Send confirmation' : 'Mark deposit paid first'}
+            icon={<Send className="w-4 h-4" />}
+            disabled={!existingDocs.depositInvoicePaid || !jobInfo?.email}
+            busy={busyAction === 'deposit-receipt'}
+            onClick={() => openSendModal('deposit-receipt')}
+            color="emerald"
+            secondaryAction={existingDocs.depositInvoiceId && !existingDocs.depositInvoicePaid
+              ? { label: 'Mark paid', onClick: markDepositPaid }
+              : undefined}
+          />
+          <SendButton
+            label="Final Invoice"
+            sub={fixedReadyToSend ? fmt(fixQuotationTotal - (existingDocs.depositInvoicePaid ? depositAmount : 0)) : 'Add items first'}
+            icon={<Receipt className="w-4 h-4" />}
+            disabled={!fixedReadyToSend || !jobInfo?.email}
+            busy={busyAction === 'main-invoice'}
+            sent={!!existingDocs.mainInvoiceId}
+            onClick={() => openSendModal('main-invoice')}
+            color="indigo"
+          />
+          <SendButton
+            label="Move Receipt"
+            sub={existingDocs.mainInvoicePaid ? 'Thank you & paid in full' : 'Mark final paid first'}
+            icon={<Send className="w-4 h-4" />}
+            disabled={!existingDocs.mainInvoicePaid || !jobInfo?.email}
+            busy={busyAction === 'move-receipt'}
+            onClick={() => openSendModal('move-receipt')}
+            color="emerald"
+            secondaryAction={existingDocs.mainInvoiceId && !existingDocs.mainInvoicePaid
+              ? { label: 'Mark paid', onClick: markMainPaid }
+              : undefined}
+          />
+        </div>
       </div>
 
       <LineItemBlock
@@ -320,6 +687,84 @@ export default function QuoteBuilder({ jobId }: Props) {
         remainingBalance={remainingBalance}
         fullyPaid={fullyPaid}
       />
+
+      {/* ── Send Document modal ───────────────────────────────────────────── */}
+      {activeModal && modalConfig && jobInfo && (
+        <SendDocumentModal
+          open={!!activeModal}
+          onClose={() => setActiveModal(null)}
+          documentType={activeModal}
+          customerName={jobInfo.full_name}
+          customerEmail={jobInfo.email || ''}
+          documentNumber={modalConfig.docNumber}
+          amount={modalConfig.amount}
+          jobTotal={modalConfig.jobTotal}
+          previewPdfUrl={modalConfig.previewUrl}
+          onSend={(data) => handleSend(activeModal, data)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Send-to-client button ─────────────────────────────────────────────────────
+
+const SEND_BTN_COLORS: Record<string, { ring: string; bg: string; iconBg: string; iconText: string; sentRing: string }> = {
+  cyan:    { ring: 'border-cyan-200 hover:border-cyan-400',      bg: 'hover:bg-cyan-50',    iconBg: 'bg-cyan-100',    iconText: 'text-cyan-600',    sentRing: 'border-cyan-500 ring-2 ring-cyan-200' },
+  emerald: { ring: 'border-emerald-200 hover:border-emerald-400', bg: 'hover:bg-emerald-50', iconBg: 'bg-emerald-100', iconText: 'text-emerald-600', sentRing: 'border-emerald-500 ring-2 ring-emerald-200' },
+  amber:   { ring: 'border-amber-200 hover:border-amber-400',     bg: 'hover:bg-amber-50',   iconBg: 'bg-amber-100',   iconText: 'text-amber-600',   sentRing: 'border-amber-500 ring-2 ring-amber-200' },
+  indigo:  { ring: 'border-indigo-200 hover:border-indigo-400',   bg: 'hover:bg-indigo-50',  iconBg: 'bg-indigo-100',  iconText: 'text-indigo-600',  sentRing: 'border-indigo-500 ring-2 ring-indigo-200' },
+};
+
+function SendButton({
+  label, sub, icon, disabled, busy, sent, onClick, color, secondaryAction,
+}: {
+  label: string;
+  sub: string;
+  icon: React.ReactNode;
+  disabled?: boolean;
+  busy?: boolean;
+  sent?: boolean;
+  onClick: () => void;
+  color: 'cyan' | 'emerald' | 'amber' | 'indigo';
+  secondaryAction?: { label: string; onClick: () => void };
+}) {
+  const c = SEND_BTN_COLORS[color];
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled || busy}
+        className={`w-full text-left px-3 py-2.5 rounded-lg border bg-white transition-all active:scale-[0.98] ${
+          sent ? c.sentRing : c.ring
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : c.bg}`}
+      >
+        <div className="flex items-start gap-2.5">
+          <div className={`w-8 h-8 rounded-lg ${c.iconBg} ${c.iconText} flex items-center justify-center flex-shrink-0`}>
+            {busy
+              ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              : sent
+                ? <Check className="w-4 h-4" strokeWidth={3} />
+                : icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-slate-800 leading-tight">{label}</p>
+            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+              {sent ? `Sent · ${sub}` : sub}
+            </p>
+          </div>
+        </div>
+      </button>
+      {secondaryAction && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); secondaryAction.onClick(); }}
+          className="mt-1 w-full px-2 py-1 text-[10px] font-semibold rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+        >
+          {secondaryAction.label}
+        </button>
+      )}
     </div>
   );
 }

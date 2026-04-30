@@ -90,33 +90,55 @@ async function sendViaResend({ to, subject, html, from, attachments }) {
   }
 }
 
-async function sendTemplated({ to, templateSlug, variables, attachments = [] }) {
+/**
+ * Send an email using either a stored template OR a direct subject/body override.
+ * If subjectOverride / bodyOverride are provided, they are used INSTEAD of the
+ * template's stored content (after variable substitution). The template is still
+ * looked up so we can log against template_id and use it as a fallback.
+ *
+ * @param {Object} opts
+ * @param {string} opts.to               recipient
+ * @param {string} opts.templateSlug     slug to load from EmailTemplate table
+ * @param {Object} [opts.variables]      key/value map for {{placeholders}}
+ * @param {string} [opts.subjectOverride] custom subject (skips template subject)
+ * @param {string} [opts.bodyOverride]    custom body HTML (skips template body)
+ * @param {Array}  [opts.attachments]
+ */
+async function sendTemplated({ to, templateSlug, variables, subjectOverride, bodyOverride, attachments = [] }) {
   const prisma = require('../db/prisma');
   const template = await prisma.emailTemplate.findUnique({ where: { slug: templateSlug } });
-  if (!template) throw new Error(`Email template "${templateSlug}" not found`);
+  if (!template && (!subjectOverride || !bodyOverride)) {
+    throw new Error(`Email template "${templateSlug}" not found and no override provided`);
+  }
 
-  let subject = template.subject;
-  let html = template.body_html;
+  let subject = subjectOverride || template.subject;
+  let html = bodyOverride || template.body_html;
 
+  // Variable substitution {{placeholder}} → value
   for (const [key, value] of Object.entries(variables || {})) {
     const placeholder = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-    subject = subject.replace(placeholder, String(value));
-    html = html.replace(placeholder, String(value));
+    subject = subject.replace(placeholder, String(value ?? ''));
+    html = html.replace(placeholder, String(value ?? ''));
   }
 
   const result = await send({ to, subject, html, attachments });
 
-  await prisma.emailLog.create({
-    data: {
-      to_email: to,
-      subject,
-      template_id: template.id,
-      job_id: variables?.job_id || null,
-      status: result.status === 'skipped' ? 'queued' : 'sent',
-      sent_at: result.status === 'skipped' ? null : new Date(),
-      message_id: result.messageId || null,
-    },
-  });
+  // Log to EmailLog (only fields that actually exist in the schema)
+  try {
+    await prisma.emailLog.create({
+      data: {
+        to_email: to,
+        subject,
+        template_id: template?.id || null,
+        job_id: variables?.job_id || null,
+        status: result.status === 'skipped' ? 'queued' : 'sent',
+        sent_at: result.status === 'skipped' ? null : new Date(),
+      },
+    });
+  } catch (logErr) {
+    console.error('[email] Failed to write EmailLog:', logErr.message);
+    // don't throw — the email itself was sent
+  }
 
   return result;
 }

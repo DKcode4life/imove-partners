@@ -348,19 +348,247 @@ async function generateQuotePDF(quoteData) {
   });
 }
 
-async function generateInvoicePDF(invoiceData) {
-  // For now, reuse quote template with different styling
-  const quoteData = {
-    ...invoiceData,
-    quote_type: 'invoice',
-    quote_number: invoiceData.invoice_number || `INV-${Date.now()}`,
-  };
-  
-  const result = await generateQuotePDF(quoteData);
-  return {
-    ...result,
-    filename: `invoice-${invoiceData.invoice_number}.pdf`,
-  };
+/**
+ * Generate a PDF for invoices (deposit or main) and receipts (deposit-paid or move-receipt).
+ * Single function with `mode` switching between styles.
+ *
+ * @param {Object} data
+ * @param {'deposit-invoice'|'main-invoice'|'deposit-receipt'|'move-receipt'} data.mode
+ * @param {string} data.invoice_number
+ * @param {string} data.customer_name
+ * @param {string} [data.customer_email]
+ * @param {string} [data.customer_phone]
+ * @param {string} [data.from_address]
+ * @param {string} [data.to_address]
+ * @param {string} [data.move_date]
+ * @param {string} [data.due_date]
+ * @param {Array}  [data.items]
+ * @param {number} [data.subtotal]
+ * @param {number} [data.tax_amount]
+ * @param {number} [data.total]
+ * @param {number} [data.deposit_paid]   amount already received (for main-invoice)
+ * @param {number} [data.amount_paid]    amount of this receipt (for receipts)
+ * @param {number} [data.balance]
+ * @param {string} [data.payment_method]
+ * @param {string} [data.payment_date]
+ * @param {string} [data.notes]
+ */
+async function generateInvoicePDF(data) {
+  const mode = data.mode || 'main-invoice';
+  const isReceipt = mode.endsWith('receipt');
+  const isDepositInv = mode === 'deposit-invoice';
+  const isMoveReceipt = mode === 'move-receipt';
+
+  // Title and badge colours per mode
+  const cfg = {
+    'deposit-invoice':  { title: 'DEPOSIT INVOICE',  badge: 'DEPOSIT REQUIRED', color: BRAND_COLORS.accent,  watermark: 'DEPOSIT' },
+    'main-invoice':     { title: 'INVOICE',          badge: 'PAYMENT DUE',      color: BRAND_COLORS.primary, watermark: null },
+    'deposit-receipt':  { title: 'RECEIPT',          badge: 'DEPOSIT PAID ✓',   color: BRAND_COLORS.success, watermark: 'PAID' },
+    'move-receipt':     { title: 'RECEIPT',          badge: 'PAID IN FULL ✓',   color: BRAND_COLORS.success, watermark: 'PAID IN FULL' },
+  }[mode];
+
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: 50,
+    info: {
+      Title: `${cfg.title} ${data.invoice_number || ''}`,
+      Author: 'iMove Partners',
+      Subject: `${cfg.title} for ${data.customer_name}`,
+      Creator: 'iMove Partners CRM',
+    },
+  });
+
+  const buffers = [];
+  doc.on('data', buffers.push.bind(buffers));
+  doc.on('end', () => {});
+
+  // ── HEADER ──────────────────────────────────────────────────────────
+  doc.fillColor(BRAND_COLORS.primary).font(FONTS.bold).fontSize(24).text('iMove', 50, 50);
+  doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(14).text('Partners', 50, 75);
+  doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text('Professional Removals & Relocations', 50, 95);
+
+  doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(28).text(cfg.title, 350, 50, { align: 'right' });
+  doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(12).text(`Ref: ${data.invoice_number || 'N/A'}`, 350, 85, { align: 'right' });
+
+  if (data.due_date && !isReceipt) {
+    doc.fillColor(BRAND_COLORS.accent).font(FONTS.bold).fontSize(10).text(`Due: ${data.due_date}`, 350, 100, { align: 'right' });
+  } else if (data.payment_date && isReceipt) {
+    doc.fillColor(BRAND_COLORS.success).font(FONTS.bold).fontSize(10).text(`Paid: ${data.payment_date}`, 350, 100, { align: 'right' });
+  }
+
+  doc.strokeColor(cfg.color).lineWidth(2).moveTo(50, 120).lineTo(550, 120).stroke();
+
+  // ── CUSTOMER INFO ───────────────────────────────────────────────────
+  doc.y = 140;
+  doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(14).text('Bill To:', 50, doc.y);
+  doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(12).text(data.customer_name || 'Customer', 50, doc.y + 18);
+
+  if (data.customer_email) {
+    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(data.customer_email, 50, doc.y + 36);
+  }
+  if (data.customer_phone) {
+    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(data.customer_phone, 50, doc.y + 50);
+  }
+
+  // Move details
+  if (data.from_address || data.to_address || data.move_date) {
+    doc.y += 80;
+    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(12).text('Move Details:', 50, doc.y);
+    doc.y += 18;
+    if (data.from_address) {
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(`From: ${data.from_address}`, 50, doc.y); doc.y += 14;
+    }
+    if (data.to_address) {
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(`To: ${data.to_address}`, 50, doc.y); doc.y += 14;
+    }
+    if (data.move_date) {
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(`Move date: ${data.move_date}`, 50, doc.y); doc.y += 14;
+    }
+  } else {
+    doc.y += 60;
+  }
+
+  // ── STATUS BADGE ────────────────────────────────────────────────────
+  doc.y += 10;
+  doc.fillColor(cfg.color).roundedRect(50, doc.y, 220, 28, 3).fill();
+  doc.fillColor('#ffffff').font(FONTS.bold).fontSize(13).text(cfg.badge, 60, doc.y + 8);
+  doc.y += 45;
+
+  // ── LINE ITEMS (only for invoices, not receipts) ────────────────────
+  if (!isReceipt && data.items && data.items.length > 0) {
+    doc.fillColor(BRAND_COLORS.light).roundedRect(50, doc.y, 500, 30, 3).fill();
+    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(11).text('Description', 60, doc.y + 10);
+    doc.text('Qty', 300, doc.y + 10, { width: 60, align: 'center' });
+    doc.text('Unit Price', 370, doc.y + 10, { width: 80, align: 'right' });
+    doc.text('Total', 460, doc.y + 10, { width: 80, align: 'right' });
+    doc.y += 35;
+
+    data.items.forEach((item, index) => {
+      const bgColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+      doc.fillColor(bgColor).rect(50, doc.y, 500, 25).fill();
+      doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(10)
+         .text(item.description || '', 60, doc.y + 8, { width: 230 });
+      doc.text(String(item.quantity || 1), 300, doc.y + 8, { width: 60, align: 'center' });
+      doc.text(`£${(item.unit_price || 0).toFixed(2)}`, 370, doc.y + 8, { width: 80, align: 'right' });
+      doc.text(`£${(item.total || 0).toFixed(2)}`, 460, doc.y + 8, { width: 80, align: 'right' });
+      doc.y += 25;
+    });
+  }
+
+  // ── TOTALS / RECEIPT BLOCK ──────────────────────────────────────────
+  doc.y += 20;
+  const subtotal = data.subtotal || 0;
+  const taxAmount = data.tax_amount || 0;
+  const total = data.total || 0;
+  const depositPaid = data.deposit_paid || 0;
+  const amountPaid = data.amount_paid || 0;
+  const balance = data.balance != null ? data.balance : (total - depositPaid);
+
+  if (isReceipt) {
+    // Big "amount paid" block
+    doc.fillColor(BRAND_COLORS.success).roundedRect(300, doc.y, 250, 60, 5).fill();
+    doc.fillColor('#ffffff').font(FONTS.regular).fontSize(11).text('Amount Received', 310, doc.y + 10);
+    doc.fillColor('#ffffff').font(FONTS.bold).fontSize(24).text(`£${amountPaid.toFixed(2)}`, 310, doc.y + 28);
+    doc.y += 80;
+
+    if (data.payment_method) {
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10)
+         .text(`Payment method: ${data.payment_method}`, 50, doc.y); doc.y += 14;
+    }
+    if (data.payment_date) {
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10)
+         .text(`Received on: ${data.payment_date}`, 50, doc.y); doc.y += 14;
+    }
+
+    // For deposit receipt, show remaining balance
+    if (mode === 'deposit-receipt' && balance > 0) {
+      doc.y += 10;
+      doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(12)
+         .text(`Remaining balance: £${balance.toFixed(2)}`, 50, doc.y);
+      doc.y += 16;
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(9)
+         .text('A separate invoice for the balance will be sent closer to the move date.', 50, doc.y);
+    }
+  } else {
+    // Subtotal / VAT / Total stack
+    doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(11)
+       .text('Subtotal:', 370, doc.y, { width: 80, align: 'right' });
+    doc.text(`£${subtotal.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
+    doc.y += 18;
+
+    if (taxAmount > 0) {
+      doc.text('VAT (20%):', 370, doc.y, { width: 80, align: 'right' });
+      doc.text(`£${taxAmount.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
+      doc.y += 18;
+    }
+
+    if (mode === 'main-invoice' && depositPaid > 0) {
+      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(11)
+         .text('Total:', 370, doc.y, { width: 80, align: 'right' });
+      doc.text(`£${total.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
+      doc.y += 18;
+      doc.fillColor(BRAND_COLORS.success).font(FONTS.regular).fontSize(11)
+         .text('Less deposit paid:', 350, doc.y, { width: 100, align: 'right' });
+      doc.text(`−£${depositPaid.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
+      doc.y += 18;
+    }
+
+    // Balance due (big)
+    doc.fillColor(BRAND_COLORS.primary).font(FONTS.bold).fontSize(14)
+       .text(mode === 'main-invoice' && depositPaid > 0 ? 'BALANCE DUE:' : 'TOTAL:', 350, doc.y, { width: 100, align: 'right' });
+    doc.text(`£${(mode === 'main-invoice' && depositPaid > 0 ? balance : total).toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
+    doc.y += 30;
+
+    // Bank transfer details box
+    doc.fillColor(BRAND_COLORS.light).roundedRect(50, doc.y, 500, 80, 5).fill();
+    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(11).text('Payment Details:', 60, doc.y + 10);
+    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(9)
+       .text('Bank transfer:', 60, doc.y + 28);
+    doc.font(FONTS.regular).fontSize(9)
+       .text('Account name: iMove Partners Ltd', 60, doc.y + 40)
+       .text('Sort code: XX-XX-XX    Account: XXXXXXXX', 60, doc.y + 52)
+       .text(`Reference: ${data.invoice_number || ''}`, 60, doc.y + 64);
+    doc.y += 100;
+  }
+
+  // ── NOTES ───────────────────────────────────────────────────────────
+  if (data.notes) {
+    doc.fillColor(BRAND_COLORS.light).roundedRect(50, doc.y, 500, 50, 5).fill();
+    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(10).text('Notes:', 60, doc.y + 10);
+    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(9).text(data.notes, 60, doc.y + 25, { width: 480 });
+    doc.y += 60;
+  }
+
+  // ── FOOTER ──────────────────────────────────────────────────────────
+  doc.y = 750;
+  doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(8)
+     .text('iMove Partners Ltd', 50, doc.y, { align: 'left' })
+     .text('Registered in England & Wales: 12345678', 300, doc.y, { align: 'center' })
+     .text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 550, doc.y, { align: 'right' });
+
+  doc.fillColor(BRAND_COLORS.primary).font(FONTS.regular).fontSize(8)
+     .text('hello@myimove.co.uk | 0208 058 0958 | www.myimove.co.uk', 300, doc.y + 12, { align: 'center' });
+
+  // Watermark
+  if (cfg.watermark) {
+    doc.fillColor('rgba(16, 185, 129, 0.08)').font(FONTS.bold).fontSize(80)
+       .text(cfg.watermark, 60, 350, { align: 'center', opacity: 0.08 });
+  }
+
+  doc.end();
+
+  return new Promise((resolve, reject) => {
+    doc.on('end', () => {
+      const buffer = Buffer.concat(buffers);
+      const prefix = isReceipt ? 'receipt' : 'invoice';
+      resolve({
+        buffer,
+        filename: `${prefix}-${data.invoice_number || Date.now()}.pdf`,
+        mimeType: 'application/pdf',
+      });
+    });
+    doc.on('error', reject);
+  });
 }
 
 async function renderHTMLToPDF(html, filename) {

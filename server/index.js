@@ -39,7 +39,8 @@ app.use('/api/partners',  require('./routes/partners'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/crm',       require('./routes/crm-ai'));   // AI routes first (API key only)
 app.use('/api/crm',       require('./routes/crm'));      // Everything else (JWT protected)
-app.use('/api/crm',       require('./routes/crm-quotes')); // Quote management
+app.use('/api/crm',       require('./routes/crm-quotes'));   // Quote management
+app.use('/api/crm',       require('./routes/crm-invoices')); // Invoice & receipt management
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/planner',   require('./routes/planner'));
 app.use('/api/settings',  require('./routes/settings'));

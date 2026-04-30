@@ -85,14 +85,13 @@ router.post('/jobs/:id/quotes', wrap(async (req, res) => {
         total: parseFloat(total) || 0,
         deposit: parseFloat(deposit) || 0,
         valid_until: valid_until || null,
-        created_by: req.user.id,
         items: {
-          create: items.map(item => ({
+          create: items.map((item, idx) => ({
             description: item.description || '',
             quantity: parseFloat(item.quantity) || 1,
             unit_price: parseFloat(item.unit_price) || 0,
             total: parseFloat(item.total) || 0,
-            notes: item.notes || null,
+            sort_order: idx,
           })),
         },
       },
@@ -272,19 +271,24 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
       job_id: jobId,
       customer_name: job.full_name,
       quote_number: quote.quote_number,
-      quote_type: quote.quote_type === 'fixed' ? 'Fixed Quote' : 'Estimate Quote',
-      quote_amount: `£${quote.total.toFixed(2)}`,
-      valid_until: quote.valid_until || '30 days',
-      move_date: job.confirmed_move_date || job.preferred_move_date || 'To be confirmed',
-      from_address: job.from_line1 || 'To be confirmed',
-      to_address: job.to_line1 || 'To be confirmed',
+      amount: quote.total.toFixed(2),
+      deposit: quote.deposit ? quote.deposit.toFixed(2) : '0.00',
+      valid_until: quote.valid_until || 'within 30 days',
+      move_date: job.confirmed_move_date || job.preferred_move_date || 'to be confirmed',
+      from_address: job.from_line1 || 'TBC',
+      to_address: job.to_line1 || 'TBC',
     };
 
-    // Send email
+    // Pick the right template based on quote type
+    const templateSlug = quote.quote_type === 'fixed' ? 'fixed-quote' : 'estimate-quote';
+
+    // Send email — pass user's edited subject/body from the modal as overrides
     const emailResult = await sendTemplated({
       to,
-      templateSlug: 'quote-sent',
+      templateSlug,
       variables,
+      subjectOverride: subject || undefined,
+      bodyOverride: body_html || undefined,
       attachments: pdfAttachment ? [pdfAttachment] : [],
     });
 

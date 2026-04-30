@@ -206,6 +206,102 @@ async function main() {
     await prisma.moveType.upsert({ where: { name }, update: {}, create: { name, sort_order: i } });
   }
 
+  // ─── Email templates (6 transactional) ───────────────────────────────────
+  const emailTemplates = [
+    {
+      slug: 'estimate-quote',
+      name: 'Estimate Quote',
+      subject: 'Your moving estimate from iMove Partners — Quote {{quote_number}}',
+      body_html: `<p>Hi {{customer_name}},</p>
+<p>Thank you for getting in touch with <strong>iMove Partners</strong>. Please find attached your <strong>estimate</strong> for the move from {{from_address}} to {{to_address}}.</p>
+<p>This estimate is based on the information provided so far and is subject to a final survey. The indicative total is <strong>£{{amount}}</strong> (including VAT).</p>
+<p>If you'd like to proceed, simply reply to this email and we'll arrange a survey to lock in a fixed price. The estimate is valid until <strong>{{valid_until}}</strong>.</p>
+<p>Any questions? Just hit reply.</p>
+<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      variables: '["customer_name","quote_number","from_address","to_address","amount","valid_until"]',
+    },
+    {
+      slug: 'fixed-quote',
+      name: 'Fixed Quote',
+      subject: 'Your fixed quote from iMove Partners — Quote {{quote_number}}',
+      body_html: `<p>Hi {{customer_name}},</p>
+<p>Following our conversation, please find attached your <strong>fixed quote</strong> for your upcoming move on <strong>{{move_date}}</strong>.</p>
+<p>The total cost is <strong>£{{amount}}</strong> (including VAT). This price is guaranteed and will not change provided the inventory and access details remain as discussed.</p>
+<p>To confirm your booking, please reply to this email or pay the deposit of <strong>£{{deposit}}</strong>. The quote is valid until <strong>{{valid_until}}</strong>.</p>
+<p>We look forward to making your move smooth and stress-free.</p>
+<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      variables: '["customer_name","quote_number","move_date","amount","deposit","valid_until"]',
+    },
+    {
+      slug: 'deposit-invoice',
+      name: 'Deposit Invoice',
+      subject: 'Deposit invoice for your move — Invoice {{invoice_number}}',
+      body_html: `<p>Hi {{customer_name}},</p>
+<p>Thank you for booking with <strong>iMove Partners</strong>! Please find attached your <strong>deposit invoice</strong> to secure your moving date of <strong>{{move_date}}</strong>.</p>
+<p>Amount due: <strong>£{{amount}}</strong><br/>Payment due by: <strong>{{due_date}}</strong></p>
+<p><strong>Bank transfer details:</strong><br/>
+Account name: iMove Partners Ltd<br/>
+Sort code: XX-XX-XX<br/>
+Account number: XXXXXXXX<br/>
+Reference: {{invoice_number}}</p>
+<p>Once we receive your deposit, your booking is confirmed and we'll send a receipt by email.</p>
+<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      variables: '["customer_name","invoice_number","amount","due_date","move_date"]',
+    },
+    {
+      slug: 'deposit-receipt',
+      name: 'Deposit Receipt',
+      subject: 'Deposit received — your move is confirmed!',
+      body_html: `<p>Hi {{customer_name}},</p>
+<p>Great news — we've received your deposit of <strong>£{{amount}}</strong>. Your move on <strong>{{move_date}}</strong> is now <strong>confirmed</strong>. 🎉</p>
+<p>Please find attached your official deposit receipt for your records.</p>
+<p>The remaining balance of <strong>£{{balance}}</strong> will be due closer to the move date — we'll send the final invoice nearer the time.</p>
+<p>If anything changes between now and your move date, just let us know.</p>
+<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      variables: '["customer_name","amount","balance","move_date"]',
+    },
+    {
+      slug: 'main-invoice',
+      name: 'Final Invoice',
+      subject: 'Final invoice for your move — Invoice {{invoice_number}}',
+      body_html: `<p>Hi {{customer_name}},</p>
+<p>Please find attached the <strong>final invoice</strong> for your move on <strong>{{move_date}}</strong>.</p>
+<p>Total: <strong>£{{total}}</strong><br/>
+Less deposit paid: <strong>−£{{deposit_paid}}</strong><br/>
+<strong>Balance due: £{{balance}}</strong><br/>
+Payment due by: <strong>{{due_date}}</strong></p>
+<p><strong>Bank transfer details:</strong><br/>
+Account name: iMove Partners Ltd<br/>
+Sort code: XX-XX-XX<br/>
+Account number: XXXXXXXX<br/>
+Reference: {{invoice_number}}</p>
+<p>Thank you again for choosing iMove Partners.</p>
+<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      variables: '["customer_name","invoice_number","total","deposit_paid","balance","due_date","move_date"]',
+    },
+    {
+      slug: 'move-receipt',
+      name: 'Move Receipt (Paid in Full)',
+      subject: 'Payment received — thank you from iMove Partners!',
+      body_html: `<p>Hi {{customer_name}},</p>
+<p>Your final balance of <strong>£{{amount}}</strong> has been received in full. Thank you for choosing <strong>iMove Partners</strong> for your move! 🚚✨</p>
+<p>Please find attached your official receipt — your move is now <strong>paid in full</strong>.</p>
+<p>We hope you're settling in nicely. If you've got a moment, we'd love a quick review on Google or Trustpilot — it really helps a small business like ours.</p>
+<p>And if you ever know someone who's moving, our referral programme rewards both of you. Just hit reply and we'll send the details.</p>
+<p>All the best in your new home,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      variables: '["customer_name","amount","total"]',
+    },
+  ];
+
+  for (const tpl of emailTemplates) {
+    await prisma.emailTemplate.upsert({
+      where: { slug: tpl.slug },
+      update: { name: tpl.name, subject: tpl.subject, body_html: tpl.body_html, variables: tpl.variables },
+      create: tpl,
+    });
+  }
+  console.log(`✅ Seeded ${emailTemplates.length} email templates`);
+
   console.log('Seed complete.');
   console.log('  Admin:   info@myimove.co.uk / Marceot1');
   console.log('  Partner: john@premierproperties.co.uk / partner123');

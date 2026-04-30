@@ -263,14 +263,17 @@ model Quote {
   id           Int      @id @default(autoincrement())
   job_id       Int
   quote_number String   @unique
+  quote_type   String   @default("fixed") // estimate | fixed
   status       String   @default("draft") // draft | sent | accepted | declined | expired
   subtotal     Float    @default(0)
   tax_rate     Float    @default(20.0)
   tax_amount   Float    @default(0)
   total        Float    @default(0)
+  deposit      Float    @default(0)
   valid_until  String?
   notes        String?
   sent_at      DateTime?
+  sent_to      String?
   accepted_at  DateTime?
   created_at   DateTime @default(now())
   updated_at   DateTime @default(now()) @updatedAt
@@ -301,6 +304,7 @@ model Invoice {
   job_id         Int
   quote_id       Int?
   invoice_number String    @unique
+  invoice_type   String    @default("main") // deposit | main
   status         String    @default("draft") // draft | sent | paid | overdue | cancelled
   subtotal       Float     @default(0)
   tax_rate       Float     @default(20.0)
@@ -309,6 +313,7 @@ model Invoice {
   due_date       String?
   notes          String?
   sent_at        DateTime?
+  sent_to        String?
   paid_at        DateTime?
   created_at     DateTime  @default(now())
   updated_at     DateTime  @default(now()) @updatedAt
