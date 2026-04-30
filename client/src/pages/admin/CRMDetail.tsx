@@ -3,12 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
-  Navigation, MapPin,
+  Navigation, MapPin, FileText,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
 import QuoteBuilder from '../../components/QuoteBuilder';
 import SurveyTool from '../../components/SurveyTool';
+import SurveyReport from '../../components/SurveyReport';
 import api from '../../lib/api';
 import type { CrmJob, CrmActivity, CrmStatus, PlannerAssignment } from '../../types';
 import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
@@ -403,6 +404,7 @@ export default function CRMDetailPage() {
   const [plannerAssignments, setPlannerAssignments] = useState<PlannerAssignment[]>([]);
   const [routeInfo,    setRouteInfo]    = useState<{ direct: { miles: number; minutes: number } | null; total: { miles: number; minutes: number } | null } | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [showSurveyReport, setShowSurveyReport] = useState(false);
 
   const populate = useCallback((j: CrmJob) => {
     setFullName(j.full_name);        setEmail(j.email || '');         setAltEmail(j.alt_email || '');
@@ -976,7 +978,22 @@ export default function CRMDetailPage() {
 
           {/* Inventory Survey */}
           <Section title="Inventory Survey" accent="bg-teal-400">
-            <SurveyTool jobId={id} />
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-700 mb-1">Record and manage inventory items for each room</p>
+                  <p className="text-xs text-slate-400">Use the survey tool to add items, notes, and photos</p>
+                </div>
+                <button
+                  onClick={() => setShowSurveyReport(true)}
+                  className="btn-primary text-xs flex items-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  View Survey Report
+                </button>
+              </div>
+              <SurveyTool jobId={id} />
+            </div>
           </Section>
 
           {/* Operational Notes */}
@@ -1212,6 +1229,22 @@ export default function CRMDetailPage() {
       </Modal>
 
       {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
+
+      {/* Survey Report */}
+      {showSurveyReport && job && (
+        <SurveyReport
+          jobId={id!}
+          jobData={{
+            full_name: job.full_name,
+            from_line1: job.from_line1 || undefined,
+            from_postcode: job.from_postcode || undefined,
+            to_line1: job.to_line1 || undefined,
+            to_postcode: job.to_postcode || undefined,
+            survey_date: job.survey_date || undefined,
+          }}
+          onClose={() => setShowSurveyReport(false)}
+        />
+      )}
     </CRMLayout>
   );
 }
