@@ -91,6 +91,7 @@ function SimpleList({
   const [items, setItems] = useState<(LeadSourceSetting | MoveTypeSetting)[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [editVal, setEditVal] = useState('');
   const [addActive, setAddActive] = useState(false);
@@ -99,6 +100,14 @@ function SimpleList({
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const exitEditMode = () => {
+    setEditMode(false);
+    setEditId(null);
+    setConfirmDelete(null);
+    setAddActive(false);
+    setAddVal('');
+  };
 
   const fetchItems = useCallback(async () => {
     setFetchError(false);
@@ -183,9 +192,28 @@ function SimpleList({
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
-        <p className="text-xs text-slate-400 mt-0.5">{description} · drag to reorder</p>
+      <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {editMode ? `${description} · drag to reorder` : `${description} · click Edit to modify`}
+          </p>
+        </div>
+        {editMode ? (
+          <button
+            onClick={exitEditMode}
+            className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
+          >
+            Save
+          </button>
+        ) : (
+          <button
+            onClick={() => setEditMode(true)}
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors flex-shrink-0"
+          >
+            Edit
+          </button>
+        )}
       </div>
 
       {items.length === 0 && !addActive && (
@@ -196,16 +224,16 @@ function SimpleList({
         {items.map((item, idx) => (
           <div
             key={item.id}
-            draggable
-            onDragStart={e => handleDragStart(idx, e)}
-            onDragOver={e => handleDragOver(e, idx)}
-            onDrop={() => handleDrop(idx)}
+            draggable={editMode}
+            onDragStart={e => editMode && handleDragStart(idx, e)}
+            onDragOver={e => editMode && handleDragOver(e, idx)}
+            onDrop={() => editMode && handleDrop(idx)}
             onDragEnd={handleDragEnd}
             className={`group flex items-center gap-2 px-4 py-2.5 select-none transition-colors ${
-              dragOverIdx === idx && dragIdx !== idx ? 'bg-blue-50 border-t-2 border-blue-400' : 'hover:bg-slate-50'
+              dragOverIdx === idx && dragIdx !== idx ? 'bg-blue-50 border-t-2 border-blue-400' : editMode ? 'hover:bg-slate-50' : ''
             } ${dragIdx === idx ? 'opacity-30' : ''}`}
           >
-            <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing flex-shrink-0" />
+            {editMode && <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing flex-shrink-0" />}
             {editId === item.id ? (
               <>
                 <input
@@ -235,26 +263,29 @@ function SimpleList({
             ) : (
               <>
                 <span className="flex-1 text-sm text-slate-700">{item.name}</span>
-                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity flex-shrink-0">
-                  <button
-                    onClick={() => { setEditId(item.id); setEditVal(item.name); }}
-                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(item.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {editMode && (
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity flex-shrink-0">
+                    <button
+                      onClick={() => { setEditId(item.id); setEditVal(item.name); }}
+                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(item.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
         ))}
       </div>
 
+      {editMode && (
       <div className="border-t border-slate-100 px-4 py-3">
         {addActive ? (
           <div className="flex items-center gap-2">
@@ -280,6 +311,7 @@ function SimpleList({
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -290,6 +322,7 @@ function StatusesSection({ showToast }: { showToast: (m: string, t?: 'success' |
   const [statuses, setStatuses] = useState<JobStatusSetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('#64748b');
@@ -300,6 +333,15 @@ function StatusesSection({ showToast }: { showToast: (m: string, t?: 'success' |
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const exitEditMode = () => {
+    setEditMode(false);
+    setEditId(null);
+    setConfirmDelete(null);
+    setAddActive(false);
+    setAddName('');
+    setAddColor('#3b82f6');
+  };
 
   const fetchStatuses = useCallback(async () => {
     setFetchError(false);
@@ -384,25 +426,44 @@ function StatusesSection({ showToast }: { showToast: (m: string, t?: 'success' |
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h3 className="text-sm font-semibold text-slate-700">Job Statuses</h3>
-        <p className="text-xs text-slate-400 mt-0.5">Drag to reorder · click the colour dot to change it</p>
+      <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">Job Statuses</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {editMode ? 'Drag to reorder · click the colour dot to change it' : 'Click Edit to add, rename, reorder, or remove statuses'}
+          </p>
+        </div>
+        {editMode ? (
+          <button
+            onClick={exitEditMode}
+            className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
+          >
+            Save
+          </button>
+        ) : (
+          <button
+            onClick={() => setEditMode(true)}
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors flex-shrink-0"
+          >
+            Edit
+          </button>
+        )}
       </div>
 
       <div className="divide-y divide-slate-100">
         {statuses.map((s, idx) => (
           <div
             key={s.id}
-            draggable
-            onDragStart={e => handleDragStart(idx, e)}
-            onDragOver={e => handleDragOver(e, idx)}
-            onDrop={() => handleDrop(idx)}
+            draggable={editMode}
+            onDragStart={e => editMode && handleDragStart(idx, e)}
+            onDragOver={e => editMode && handleDragOver(e, idx)}
+            onDrop={() => editMode && handleDrop(idx)}
             onDragEnd={handleDragEnd}
             className={`group flex items-center gap-3 px-4 py-3 transition-colors select-none ${
-              dragOverIdx === idx && dragIdx !== idx ? 'bg-blue-50 border-t-2 border-blue-400' : 'hover:bg-slate-50'
+              dragOverIdx === idx && dragIdx !== idx ? 'bg-blue-50 border-t-2 border-blue-400' : editMode ? 'hover:bg-slate-50' : ''
             } ${dragIdx === idx ? 'opacity-30' : ''}`}
           >
-            <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing flex-shrink-0" />
+            {editMode && <GripVertical className="w-4 h-4 text-slate-300 cursor-grab active:cursor-grabbing flex-shrink-0" />}
             {editId === s.id ? (
               <>
                 <ColorSwatch color={editColor} onChange={setEditColor} />
@@ -435,26 +496,29 @@ function StatusesSection({ showToast }: { showToast: (m: string, t?: 'success' |
               <>
                 <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
                 <span className="flex-1 text-sm text-slate-700">{s.name}</span>
-                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity flex-shrink-0">
-                  <button
-                    onClick={() => { setEditId(s.id); setEditName(s.name); setEditColor(s.color); }}
-                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(s.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {editMode && (
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity flex-shrink-0">
+                    <button
+                      onClick={() => { setEditId(s.id); setEditName(s.name); setEditColor(s.color); }}
+                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(s.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
         ))}
       </div>
 
+      {editMode && (
       <div className="border-t border-slate-100 px-4 py-3">
         {addActive ? (
           <div className="flex items-center gap-2">
@@ -481,6 +545,7 @@ function StatusesSection({ showToast }: { showToast: (m: string, t?: 'success' |
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }
