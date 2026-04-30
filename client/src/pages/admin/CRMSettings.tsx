@@ -896,7 +896,7 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
           setAdminSubmitting(true);
           setAdminError('');
           try {
-            await api.post('/auth/admin', {
+            await api.post('/auth/admin-users', {
               name: adminForm.name.trim(),
               email: adminForm.email.trim(),
               password: adminForm.password
