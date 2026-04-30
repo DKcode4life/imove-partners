@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as ImageIcon } from 'lucide-react';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
+import ImageModal from './ImageModal';
 
 // ── Survey room definitions ────────────────────────────────────────────────────
 // Each room has a fixed display name (used as the key in SurveyData) and a
@@ -376,6 +377,11 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const [newRoomName,    setNewRoomName]    = useState('');
   const [search,         setSearch]         = useState('');
   const [searchData,     setSearchData]     = useState<SurveyData>(() => loadSearchData(jobId));
+  
+  // Image modal state
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [currentImage, setCurrentImage] = useState<string>('');
+  const [currentImageAlt, setCurrentImageAlt] = useState<string>('');
 
   useEffect(() => { setData(loadData(jobId)); }, [jobId]);
   useEffect(() => { setSearchData(loadSearchData(jobId)); }, [jobId]);
@@ -524,6 +530,13 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const searchSaveNote = (room: string, item: string, note: string, photo: string | undefined) => {
     const e = getSearchEntry(room, item);
     setSearchEntry(room, item, { count: Math.max(e.count, (note || photo) ? 1 : e.count), note, photo });
+  };
+
+  // Image modal helper
+  const openRoomPhoto = (dataUrl: string, roomName: string, index: number) => {
+    setCurrentImage(dataUrl);
+    setCurrentImageAlt(`${roomName} photo ${index + 1}`);
+    setImageModalOpen(true);
   };
 
   // ── Derived stats ────────────────────────────────────────────────────────────
@@ -877,7 +890,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                               src={dataUrl}
                               alt={`${currentRoom.name} photo ${i + 1}`}
                               className="w-24 h-20 rounded-xl object-cover border border-slate-200 hover:border-teal-300 cursor-pointer transition-colors"
-                              onClick={() => window.open(dataUrl, '_blank')}
+                              onClick={() => openRoomPhoto(dataUrl, currentRoom.name, i)}
                             />
                             <button
                               onClick={() => removeRoomPhoto(currentRoom.name, i)}
@@ -978,6 +991,14 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
           </div>
         </div>
       )}
+
+      {/* Image Modal */}
+      <ImageModal
+        open={imageModalOpen}
+        onClose={() => setImageModalOpen(false)}
+        imageUrl={currentImage}
+        altText={currentImageAlt}
+      />
     </>
   );
 }

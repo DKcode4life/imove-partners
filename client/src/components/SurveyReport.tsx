@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Printer, Download, X, Camera, MessageSquare, ChevronLeft } from 'lucide-react';
 import { loadCatalog } from '../lib/catalogStorage';
 import type { CatalogCategory } from '../data/inventoryCatalog';
+import ImageModal from './ImageModal';
 
 // ── Data types & storage ───────────────────────────────────────────────────────
 
@@ -123,6 +124,11 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
   const [roomPhotos, setRoomPhotos] = useState<Record<string, string[]>>({});
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
   const [showPhotos, setShowPhotos] = useState(true);
+  
+  // Image modal state
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [currentImage, setCurrentImage] = useState<string>('');
+  const [currentImageAlt, setCurrentImageAlt] = useState<string>('');
 
   useEffect(() => {
     loadCatalog().then(setCatalog);
@@ -181,6 +187,19 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
       ...prev,
       [roomName]: !prev[roomName]
     }));
+  };
+
+  // Image modal helpers
+  const openRoomPhoto = (dataUrl: string, roomName: string, index: number) => {
+    setCurrentImage(dataUrl);
+    setCurrentImageAlt(`${roomName} photo ${index + 1}`);
+    setImageModalOpen(true);
+  };
+
+  const openItemPhoto = (dataUrl: string, itemName: string) => {
+    setCurrentImage(dataUrl);
+    setCurrentImageAlt(`Photo for ${itemName}`);
+    setImageModalOpen(true);
   };
 
   const handlePrint = () => {
@@ -460,7 +479,7 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
                               src={dataUrl}
                               alt={`${room.name} photo ${i + 1}`}
                               className="w-32 h-24 rounded-xl object-cover border border-slate-200 hover:border-teal-300 cursor-pointer transition-colors"
-                              onClick={() => window.open(dataUrl, '_blank')}
+                              onClick={() => openRoomPhoto(dataUrl, room.name, i)}
                             />
                           </div>
                         ))}
@@ -515,7 +534,7 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
                                     <div className="flex items-start gap-1">
                                       <Camera className="w-3.5 h-3.5 text-blue-500 mt-0.5 flex-shrink-0" />
                                       <button
-                                        onClick={() => window.open(entry.photo, '_blank')}
+                                        onClick={() => openItemPhoto(entry.photo!, itemName)}
                                         className="text-xs text-blue-600 hover:underline"
                                       >
                                         View photo
@@ -547,6 +566,14 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
           </div>
         )}
       </div>
+
+      {/* Image Modal */}
+      <ImageModal
+        open={imageModalOpen}
+        onClose={() => setImageModalOpen(false)}
+        imageUrl={currentImage}
+        altText={currentImageAlt}
+      />
     </div>
   );
 }
