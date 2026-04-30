@@ -98,6 +98,154 @@ function Toast({ msg, type, onClose }: { msg: string; type: 'success' | 'error' 
   );
 }
 
+// ── Mobile detection ─────────────────────────────────────────────────────────
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const fn = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  }, []);
+  return mobile;
+}
+
+// ── Mobile assignment zone (dropdown + add button) ────────────────────────────
+
+function MobileAssignZone({
+  label,
+  colorClass,
+  assignments,
+  availableAssets,
+  vehicleAssignments,
+  onAdd,
+  onRemove,
+  onUpdateRate,
+  onUpdateVehicle,
+}: {
+  label: string;
+  colorClass: { border: string; bg: string; text: string; btnBg: string };
+  assignments: PlannerAssignment[];
+  availableAssets: PlannerAsset[];
+  vehicleAssignments?: PlannerAssignment[];
+  onAdd: (assetId: number) => void;
+  onRemove: (id: number) => void;
+  onUpdateRate?: (id: number, rate: number) => void;
+  onUpdateVehicle?: (id: number, vid: number | null) => void;
+}) {
+  const [selectedId, setSelectedId] = useState('');
+  const isVehicle = !onUpdateRate;
+
+  return (
+    <div>
+      <p className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1 ${colorClass.text}`}>
+        {label}
+      </p>
+      <div className="space-y-1 mb-2">
+        {assignments.map(a => (
+          <div
+            key={a.id}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${colorClass.bg} ${colorClass.border}`}
+          >
+            {!isVehicle ? <Users className="w-3 h-3 flex-shrink-0 opacity-60" /> : <Truck className="w-3 h-3 flex-shrink-0 opacity-60" />}
+            <span className={`font-semibold flex-1 min-w-0 truncate ${colorClass.text}`}>{a.asset_name}</span>
+
+            {/* Daily rate (staff only) */}
+            {onUpdateRate && <MobileRateInput a={a} onUpdateRate={onUpdateRate} />}
+
+            {/* Vehicle picker (drivers only) */}
+            {onUpdateVehicle && vehicleAssignments && vehicleAssignments.length > 0 && (
+              <select
+                value={a.vehicle_asset_id != null ? String(a.vehicle_asset_id) : ''}
+                onChange={e => { e.stopPropagation(); onUpdateVehicle(a.id, e.target.value ? Number(e.target.value) : null); }}
+                onClick={e => e.stopPropagation()}
+                className="flex-shrink-0 text-[10px] border border-slate-200 rounded bg-white text-slate-600 py-0.5 px-1 max-w-[76px]"
+              >
+                <option value="">No van</option>
+                {vehicleAssignments.map(v => (
+                  <option key={v.asset_id} value={String(v.asset_id)}>{v.asset_name}</option>
+                ))}
+              </select>
+            )}
+
+            <button
+              onClick={e => { e.stopPropagation(); onRemove(a.id); }}
+              className="flex-shrink-0 opacity-50 hover:opacity-100 hover:text-red-500 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {availableAssets.length > 0 && (
+        <div className="flex gap-2">
+          <select
+            value={selectedId}
+            onChange={e => setSelectedId(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            className="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-2 bg-white text-slate-700 focus:outline-none focus:border-indigo-300"
+          >
+            <option value="">Select {label.toLowerCase()}…</option>
+            {availableAssets.map(a => (
+              <option key={a.id} value={String(a.id)}>{a.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={e => {
+              e.stopPropagation();
+              if (!selectedId) return;
+              onAdd(parseInt(selectedId));
+              setSelectedId('');
+            }}
+            disabled={!selectedId}
+            className={`px-3 py-2 text-xs font-semibold rounded-lg text-white transition-opacity disabled:opacity-35 ${colorClass.btnBg}`}
+          >
+            Add
+          </button>
+        </div>
+      )}
+      {availableAssets.length === 0 && assignments.length === 0 && (
+        <p className="text-[10px] text-slate-400 italic">None available</p>
+      )}
+    </div>
+  );
+}
+
+function MobileRateInput({ a, onUpdateRate }: { a: PlannerAssignment; onUpdateRate: (id: number, rate: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal]         = useState('');
+  function commit() {
+    const n = parseFloat(val);
+    if (!isNaN(n) && n >= 0) onUpdateRate(a.id, n);
+    setEditing(false);
+  }
+  if (editing) return (
+    <span className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+      <span className="text-[10px] text-slate-400">£</span>
+      <input
+        type="number" min="0" step="5" autoFocus value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+        className="w-10 text-[10px] border-b border-indigo-300 bg-transparent outline-none text-slate-700"
+      />
+      <span className="text-[10px] text-slate-400">/day</span>
+    </span>
+  );
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); setVal(String(a.daily_rate ?? '')); setEditing(true); }}
+      className="flex-shrink-0 text-[10px] font-semibold bg-white/80 border border-slate-200/60 rounded px-1.5 py-0.5 text-slate-600 tabular-nums"
+    >
+      {a.daily_rate != null ? `£${a.daily_rate}/d` : '+rate'}
+    </button>
+  );
+}
+
 // ── Category badge ────────────────────────────────────────────────────────────
 
 function CatBadge({ cat, size = 'sm' }: { cat: string; size?: 'xs' | 'sm' }) {
@@ -330,115 +478,6 @@ function AssetPanel({
   // "insert before" target: asset id, or 'end' to append at end of list
   const [reorderOverId, setReorderOverId] = useState<number | 'end' | null>(null);
 
-  // ── Touch reorder ────────────────────────────────────────────────────────
-  const reorderPanelRef   = useRef<HTMLDivElement>(null);
-  const reorderGhostRef   = useRef<HTMLDivElement | null>(null);
-  const reorderTouchStart = useRef<{ x: number; y: number } | null>(null);
-  const reorderTouching   = useRef(false);
-  // Always-current; updated inline so the effect closure stays fresh
-  const reorderModeRef      = useRef(false);
-  const handleReorderDropRef = useRef<(id: number | 'end') => void>(() => {});
-
-  useEffect(() => {
-    const el = reorderPanelRef.current;
-    if (!el) return;
-    const THRESHOLD = 6;
-
-    function elAt(x: number, y: number): HTMLElement | null {
-      const g = reorderGhostRef.current;
-      if (g) g.style.visibility = 'hidden';
-      const found = document.elementFromPoint(x, y) as HTMLElement | null;
-      if (g) g.style.visibility = '';
-      return found;
-    }
-
-    function onTouchStart(e: TouchEvent) {
-      if (!reorderModeRef.current) return;
-      const tgt = e.target as HTMLElement;
-      const src = tgt.closest<HTMLElement>('[data-drag-reorder]');
-      if (!src) return;
-      reorderTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      reorderTouching.current   = false;
-      reorderDragId.current     = parseInt(src.dataset.dragReorder!);
-    }
-
-    function onTouchMove(e: TouchEvent) {
-      if (!reorderModeRef.current || !reorderDragId.current) return;
-      const t = e.touches[0];
-
-      if (!reorderTouching.current) {
-        const { x, y } = reorderTouchStart.current!;
-        if (Math.hypot(t.clientX - x, t.clientY - y) < THRESHOLD) return;
-        reorderTouching.current = true;
-        const tgt = e.target as HTMLElement;
-        const src = tgt.closest<HTMLElement>('[data-drag-reorder]');
-        if (src) {
-          const rect = src.getBoundingClientRect();
-          const g    = src.cloneNode(true) as HTMLDivElement;
-          g.style.cssText = [
-            'position:fixed', `left:${rect.left}px`, `top:${rect.top}px`,
-            `width:${rect.width}px`, 'pointer-events:none', 'z-index:9999',
-            'opacity:0.88', 'transform:scale(1.04)',
-            'box-shadow:0 6px 20px rgba(0,0,0,0.2)', 'border-radius:8px', 'transition:none',
-          ].join(';');
-          document.body.appendChild(g);
-          reorderGhostRef.current = g;
-        }
-      }
-
-      e.preventDefault();
-      const g = reorderGhostRef.current;
-      if (g) {
-        g.style.left = (t.clientX - g.offsetWidth / 2) + 'px';
-        g.style.top  = (t.clientY - g.offsetHeight / 2) + 'px';
-      }
-
-      const under = elAt(t.clientX, t.clientY);
-      if (!under) return;
-      const targetEl = under.closest<HTMLElement>('[data-drag-reorder]');
-      if (targetEl && targetEl.dataset.dragReorder) {
-        const tid = parseInt(targetEl.dataset.dragReorder);
-        if (tid !== reorderDragId.current) setReorderOverId(tid);
-      } else {
-        setReorderOverId('end');
-      }
-    }
-
-    function onTouchEnd(e: TouchEvent) {
-      if (!reorderModeRef.current) return;
-      const dragging = reorderTouching.current;
-      reorderTouching.current   = false;
-      reorderTouchStart.current = null;
-      if (reorderGhostRef.current) { reorderGhostRef.current.remove(); reorderGhostRef.current = null; }
-      if (!dragging) { reorderDragId.current = null; setReorderOverId(null); return; }
-
-      const t     = e.changedTouches[0];
-      const under = elAt(t.clientX, t.clientY);
-      if (under) {
-        const targetEl = under.closest<HTMLElement>('[data-drag-reorder]');
-        if (targetEl?.dataset.dragReorder) {
-          handleReorderDropRef.current(parseInt(targetEl.dataset.dragReorder));
-        } else {
-          handleReorderDropRef.current('end');
-        }
-      } else {
-        reorderDragId.current = null;
-        setReorderOverId(null);
-      }
-    }
-
-    el.addEventListener('touchstart',  onTouchStart,  { passive: true });
-    el.addEventListener('touchmove',   onTouchMove,   { passive: false });
-    el.addEventListener('touchend',    onTouchEnd);
-    el.addEventListener('touchcancel', onTouchEnd);
-    return () => {
-      el.removeEventListener('touchstart',  onTouchStart);
-      el.removeEventListener('touchmove',   onTouchMove);
-      el.removeEventListener('touchend',    onTouchEnd);
-      el.removeEventListener('touchcancel', onTouchEnd);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Build set of (asset_id, date) combos that are booked
   const bookedMap: Record<number, Set<string>> = {};
   for (const a of assignments) {
@@ -447,9 +486,6 @@ function AssetPanel({
   }
 
   // targetId: insert dragged item BEFORE this id; 'end' = append at end
-  // Keep always-current refs in sync (inline, before handleReorderDrop is defined)
-  reorderModeRef.current       = reorderMode;
-
   function handleReorderDrop(targetId: number | 'end') {
     const dragId = reorderDragId.current;
     reorderDragId.current = null;
@@ -471,8 +507,6 @@ function AssetPanel({
     setAssets(reindexed);
     onAssetsReordered(reindexed);
   }
-  // Update ref AFTER function is defined
-  handleReorderDropRef.current = handleReorderDrop;
 
   const drivers    = assets.filter(a => a.type === 'staff' && a.role === 'driver');
   const porters    = assets.filter(a => a.type === 'staff' && a.role === 'porter');
@@ -551,7 +585,7 @@ function AssetPanel({
           <p className="text-[10px] text-amber-600 mt-1 font-medium">Moving: {draggingAssignment.asset_name} — drop onto another job</p>
         )}
       </div>
-      <div ref={reorderPanelRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
         <Group title="Drivers"  items={drivers}    groupKey="drivers"  icon={<Users className="w-3 h-3" />} />
         <Group title="Porters"  items={porters}    groupKey="porters"  icon={<Users className="w-3 h-3" />} />
         {otherStaff.length > 0 && <Group title="Staff" items={otherStaff} groupKey="staff" icon={<Users className="w-3 h-3" />} />}
@@ -744,6 +778,8 @@ function JobCard({
   onDuplicate,
   onConvertToJob,
   navigate,
+  allAssets,
+  onAssign,
 }: {
   cardKey: string;
   item: PlannerCalendarItem;
@@ -768,7 +804,10 @@ function JobCard({
   onDuplicate: () => void;
   onConvertToJob?: () => void;
   navigate: (path: string) => void;
+  allAssets: PlannerAsset[];
+  onAssign: (asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
 }) {
+  const isMobile = useIsMobile();
   const c = catColor(item.category);
   const isSurveyEvent = item.source === 'event' && item.category === 'Survey';
   const staffAssignments   = (item.assignments || []).filter(a => a.asset_type === 'staff');
@@ -780,16 +819,15 @@ function JobCard({
     <div
       data-drag-card={`${item.source}:${item.id}`}
       onContextMenu={e => e.preventDefault()}
-      draggable
-      onDragStart={e => {
-        // Don't trigger card drag if dragging an assignment chip inside
+      draggable={!isMobile}
+      onDragStart={isMobile ? undefined : e => {
         if ((e.target as HTMLElement).closest('[data-assignment-chip]')) { e.preventDefault(); return; }
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', '1');
         setTimeout(() => onCardDragStart(), 0);
       }}
-      onDragEnd={onCardDragEnd}
-      className={`group relative rounded-xl border bg-gradient-to-br from-white via-white to-slate-50/60 transition-all duration-200 cursor-grab active:cursor-grabbing active:scale-[0.98] overflow-hidden backdrop-blur-sm ${
+      onDragEnd={isMobile ? undefined : onCardDragEnd}
+      className={`group relative rounded-xl border bg-gradient-to-br from-white via-white to-slate-50/60 transition-all duration-200 overflow-hidden backdrop-blur-sm ${isMobile ? '' : 'cursor-grab active:cursor-grabbing active:scale-[0.98]'} ${
         isExpanded
           ? 'border-indigo-200/80 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.18),0_2px_6px_-2px_rgba(15,23,42,0.06)] ring-1 ring-indigo-100'
           : 'border-slate-200/70 shadow-[0_1px_2px_0_rgba(15,23,42,0.04)] hover:border-slate-300 hover:shadow-[0_6px_16px_-6px_rgba(15,23,42,0.18),0_2px_4px_-2px_rgba(15,23,42,0.06)] hover:-translate-y-px'
@@ -893,115 +931,162 @@ function JobCard({
             )}
           </div>
 
-          {/* Drivers drop zone */}
-          <div>
-            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-              <Users className="w-3 h-3 text-indigo-500" />Drivers
-              <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£150/day</span>
-            </p>
-            <div
-              data-drop-zone="driver"
-              data-drop-card-key={cardKey}
-              onDragOver={e => { e.preventDefault(); onDragOver('driver'); }}
-              onDragLeave={onDragLeave}
-              onDrop={e => { e.preventDefault(); onDropDriver(); }}
-              className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-col gap-1 transition-all duration-150 ${
-                dragOverZone === `${cardKey}|driver`
-                  ? 'border-indigo-400 bg-gradient-to-br from-indigo-50 to-indigo-100/60 ring-2 ring-indigo-200/50'
-                  : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
-              }`}
-            >
-              {driverAssignments.map(a => (
-                <StaffAssignmentRow
-                  key={a.id} a={a}
-                  vehicleAssignments={vehicleAssignments}
-                  onRemove={() => onRemoveAssignment(a.id)}
-                  onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
-                  onUpdateVehicle={vid => onUpdateAssignment(a.id, { vehicle_asset_id: vid })}
-                  onDragStart={() => onAssignmentDragStart(a)}
-                  onDragEnd={onAssignmentDragEnd}
-                />
-              ))}
-              {driverAssignments.length === 0 && dragOverZone !== `${cardKey}|driver` && (
-                <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop drivers here</span>
-              )}
-              {dragOverZone === `${cardKey}|driver` && (
-                <span className="text-[10px] text-indigo-600 font-semibold self-center ml-1">Release to assign</span>
-              )}
+          {/* ── Mobile: dropdown assignment ── */}
+          {isMobile ? (
+            <div className="space-y-3">
+              <MobileAssignZone
+                label="Drivers"
+                colorClass={{ border: 'border-indigo-200/70', bg: 'bg-indigo-50', text: 'text-indigo-700', btnBg: 'bg-indigo-600' }}
+                assignments={driverAssignments}
+                availableAssets={allAssets.filter(a =>
+                  a.type === 'staff' && a.role === 'driver' && a.availability === 'available' &&
+                  !(item.assignments || []).some(x => x.asset_id === a.id)
+                )}
+                vehicleAssignments={vehicleAssignments}
+                onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'driver'); }}
+                onRemove={onRemoveAssignment}
+                onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
+                onUpdateVehicle={(id, vid) => onUpdateAssignment(id, { vehicle_asset_id: vid })}
+              />
+              <MobileAssignZone
+                label="Porters"
+                colorClass={{ border: 'border-violet-200/70', bg: 'bg-violet-50', text: 'text-violet-700', btnBg: 'bg-violet-600' }}
+                assignments={porterAssignments}
+                availableAssets={allAssets.filter(a =>
+                  a.type === 'staff' && a.availability === 'available' &&
+                  !(item.assignments || []).some(x => x.asset_id === a.id)
+                )}
+                onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'porter'); }}
+                onRemove={onRemoveAssignment}
+                onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
+              />
+              <MobileAssignZone
+                label="Vehicles"
+                colorClass={{ border: 'border-teal-200/70', bg: 'bg-teal-50', text: 'text-teal-700', btnBg: 'bg-teal-600' }}
+                assignments={vehicleAssignments}
+                availableAssets={allAssets.filter(a =>
+                  a.type === 'vehicle' && a.availability === 'available' &&
+                  !(item.assignments || []).some(x => x.asset_id === a.id)
+                )}
+                onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'vehicle'); }}
+                onRemove={onRemoveAssignment}
+              />
             </div>
-          </div>
+          ) : (
+            <>
+              {/* ── Desktop: drag-and-drop zones ── */}
 
-          {/* Porters drop zone */}
-          <div>
-            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-              <Users className="w-3 h-3 text-violet-500" />Porters
-              <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£125/day</span>
-            </p>
-            <div
-              data-drop-zone="porter"
-              data-drop-card-key={cardKey}
-              onDragOver={e => { e.preventDefault(); onDragOver('porter'); }}
-              onDragLeave={onDragLeave}
-              onDrop={e => { e.preventDefault(); onDropPorter(); }}
-              className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-col gap-1 transition-all duration-150 ${
-                dragOverZone === `${cardKey}|porter`
-                  ? 'border-violet-400 bg-gradient-to-br from-violet-50 to-violet-100/60 ring-2 ring-violet-200/50'
-                  : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
-              }`}
-            >
-              {porterAssignments.map(a => (
-                <StaffAssignmentRow
-                  key={a.id} a={a}
-                  vehicleAssignments={vehicleAssignments}
-                  onRemove={() => onRemoveAssignment(a.id)}
-                  onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
-                  onUpdateVehicle={vid => onUpdateAssignment(a.id, { vehicle_asset_id: vid })}
-                  onDragStart={() => onAssignmentDragStart(a)}
-                  onDragEnd={onAssignmentDragEnd}
-                />
-              ))}
-              {porterAssignments.length === 0 && dragOverZone !== `${cardKey}|porter` && (
-                <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop porters here</span>
-              )}
-              {dragOverZone === `${cardKey}|porter` && (
-                <span className="text-[10px] text-violet-600 font-semibold self-center ml-1">Release to assign</span>
-              )}
-            </div>
-          </div>
+              {/* Drivers drop zone */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                  <Users className="w-3 h-3 text-indigo-500" />Drivers
+                  <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£150/day</span>
+                </p>
+                <div
+                  data-drop-zone="driver"
+                  data-drop-card-key={cardKey}
+                  onDragOver={e => { e.preventDefault(); onDragOver('driver'); }}
+                  onDragLeave={onDragLeave}
+                  onDrop={e => { e.preventDefault(); onDropDriver(); }}
+                  className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-col gap-1 transition-all duration-150 ${
+                    dragOverZone === `${cardKey}|driver`
+                      ? 'border-indigo-400 bg-gradient-to-br from-indigo-50 to-indigo-100/60 ring-2 ring-indigo-200/50'
+                      : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
+                  }`}
+                >
+                  {driverAssignments.map(a => (
+                    <StaffAssignmentRow
+                      key={a.id} a={a}
+                      vehicleAssignments={vehicleAssignments}
+                      onRemove={() => onRemoveAssignment(a.id)}
+                      onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
+                      onUpdateVehicle={vid => onUpdateAssignment(a.id, { vehicle_asset_id: vid })}
+                      onDragStart={() => onAssignmentDragStart(a)}
+                      onDragEnd={onAssignmentDragEnd}
+                    />
+                  ))}
+                  {driverAssignments.length === 0 && dragOverZone !== `${cardKey}|driver` && (
+                    <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop drivers here</span>
+                  )}
+                  {dragOverZone === `${cardKey}|driver` && (
+                    <span className="text-[10px] text-indigo-600 font-semibold self-center ml-1">Release to assign</span>
+                  )}
+                </div>
+              </div>
 
-          {/* Vehicle drop zone */}
-          <div>
-            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-              <Truck className="w-3 h-3 text-teal-500" />Vehicles
-            </p>
-            <div
-              data-drop-zone="vehicle"
-              data-drop-card-key={cardKey}
-              onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
-              onDragLeave={onDragLeave}
-              onDrop={e => { e.preventDefault(); onDropVehicle(); }}
-              className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-wrap gap-1 transition-all duration-150 ${
-                dragOverZone === `${cardKey}|vehicle`
-                  ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-teal-100/60 ring-2 ring-teal-200/50'
-                  : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
-              }`}
-            >
-              {vehicleAssignments.map(a => (
-                <AssignmentChip
-                  key={a.id} a={a}
-                  onRemove={() => onRemoveAssignment(a.id)}
-                  onDragStart={() => onAssignmentDragStart(a)}
-                  onDragEnd={onAssignmentDragEnd}
-                />
-              ))}
-              {vehicleAssignments.length === 0 && dragOverZone !== `${cardKey}|vehicle` && (
-                <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop vehicles here</span>
-              )}
-              {dragOverZone === `${cardKey}|vehicle` && (
-                <span className="text-[10px] text-teal-600 font-semibold self-center ml-1">Release to assign</span>
-              )}
-            </div>
-          </div>
+              {/* Porters drop zone */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                  <Users className="w-3 h-3 text-violet-500" />Porters
+                  <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£125/day</span>
+                </p>
+                <div
+                  data-drop-zone="porter"
+                  data-drop-card-key={cardKey}
+                  onDragOver={e => { e.preventDefault(); onDragOver('porter'); }}
+                  onDragLeave={onDragLeave}
+                  onDrop={e => { e.preventDefault(); onDropPorter(); }}
+                  className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-col gap-1 transition-all duration-150 ${
+                    dragOverZone === `${cardKey}|porter`
+                      ? 'border-violet-400 bg-gradient-to-br from-violet-50 to-violet-100/60 ring-2 ring-violet-200/50'
+                      : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
+                  }`}
+                >
+                  {porterAssignments.map(a => (
+                    <StaffAssignmentRow
+                      key={a.id} a={a}
+                      vehicleAssignments={vehicleAssignments}
+                      onRemove={() => onRemoveAssignment(a.id)}
+                      onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
+                      onUpdateVehicle={vid => onUpdateAssignment(a.id, { vehicle_asset_id: vid })}
+                      onDragStart={() => onAssignmentDragStart(a)}
+                      onDragEnd={onAssignmentDragEnd}
+                    />
+                  ))}
+                  {porterAssignments.length === 0 && dragOverZone !== `${cardKey}|porter` && (
+                    <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop porters here</span>
+                  )}
+                  {dragOverZone === `${cardKey}|porter` && (
+                    <span className="text-[10px] text-violet-600 font-semibold self-center ml-1">Release to assign</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Vehicle drop zone */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                  <Truck className="w-3 h-3 text-teal-500" />Vehicles
+                </p>
+                <div
+                  data-drop-zone="vehicle"
+                  data-drop-card-key={cardKey}
+                  onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
+                  onDragLeave={onDragLeave}
+                  onDrop={e => { e.preventDefault(); onDropVehicle(); }}
+                  className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-wrap gap-1 transition-all duration-150 ${
+                    dragOverZone === `${cardKey}|vehicle`
+                      ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-teal-100/60 ring-2 ring-teal-200/50'
+                      : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
+                  }`}
+                >
+                  {vehicleAssignments.map(a => (
+                    <AssignmentChip
+                      key={a.id} a={a}
+                      onRemove={() => onRemoveAssignment(a.id)}
+                      onDragStart={() => onAssignmentDragStart(a)}
+                      onDragEnd={onAssignmentDragEnd}
+                    />
+                  ))}
+                  {vehicleAssignments.length === 0 && dragOverZone !== `${cardKey}|vehicle` && (
+                    <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop vehicles here</span>
+                  )}
+                  {dragOverZone === `${cardKey}|vehicle` && (
+                    <span className="text-[10px] text-teal-600 font-semibold self-center ml-1">Release to assign</span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-between gap-1.5 pt-1 flex-wrap">
@@ -1088,6 +1173,8 @@ function WeeklyView({
   onDuplicate,
   onConvertToJob,
   navigate,
+  allAssets,
+  onAssign,
 }: {
   weekDates: string[];
   items: PlannerCalendarItem[];
@@ -1117,7 +1204,10 @@ function WeeklyView({
   onDuplicate: (item: PlannerCalendarItem) => void;
   onConvertToJob: (item: PlannerCalendarItem) => void;
   navigate: (path: string) => void;
+  allAssets: PlannerAsset[];
+  onAssign: (item: PlannerCalendarItem, asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
 }) {
+  const isMobile = useIsMobile();
   const itemsByDate: Record<string, PlannerCalendarItem[]> = {};
   for (const item of items) {
     if (!item.date) continue;
@@ -1178,216 +1268,22 @@ function WeeklyView({
     if (isDifferentDate) onReschedule(item, targetDate);
   }
 
-  // ── Touch drag support ───────────────────────────────────────────────────
-  const containerRef   = useRef<HTMLDivElement>(null);
-  const ghostRef       = useRef<HTMLDivElement | null>(null);
-  const activeTouchDrag = useRef<
-    | { type: 'asset';      asset:      PlannerAsset }
-    | { type: 'assignment'; assignment: PlannerAssignment }
-    | { type: 'card';       item:       PlannerCalendarItem }
-    | null
-  >(null);
-  const touchStartPos  = useRef<{ x: number; y: number } | null>(null);
-  const touchDragging  = useRef(false);
-
-  // Always-current refs so the touch useEffect (deps=[]) never goes stale
-  const assetsRef         = useRef(assets);         assetsRef.current         = assets;
-  const itemsRef          = useRef(items);           itemsRef.current          = items;
-  const onDropRef         = useRef(onDrop);          onDropRef.current         = onDrop;
-  const onRescheduleRef   = useRef(onReschedule);    onRescheduleRef.current   = onReschedule;
-  const handleGapDropRef  = useRef(handleGapDrop);   handleGapDropRef.current  = handleGapDrop;
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const THRESHOLD = 8;
-
-    function elAt(x: number, y: number): HTMLElement | null {
-      const g = ghostRef.current;
-      if (g) g.style.visibility = 'hidden';
-      const found = document.elementFromPoint(x, y) as HTMLElement | null;
-      if (g) g.style.visibility = '';
-      return found;
-    }
-
-    function makeGhost(source: HTMLElement) {
-      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
-      const rect = source.getBoundingClientRect();
-      const g = source.cloneNode(true) as HTMLDivElement;
-      g.style.cssText = [
-        'position:fixed',
-        `left:${rect.left}px`, `top:${rect.top}px`, `width:${rect.width}px`,
-        'pointer-events:none', 'z-index:9999', 'opacity:0.88',
-        'transform:scale(1.04)',
-        'box-shadow:0 8px 28px rgba(0,0,0,0.22)', 'border-radius:10px', 'transition:none',
-      ].join(';');
-      document.body.appendChild(g);
-      ghostRef.current = g;
-    }
-
-    function onTouchStart(e: TouchEvent) {
-      const t   = e.touches[0];
-      const tgt = e.target as HTMLElement;
-      if (tgt.closest('button, input, select, textarea, a')) return;
-
-      const assetEl  = tgt.closest<HTMLElement>('[data-drag-asset]');
-      const assignEl = tgt.closest<HTMLElement>('[data-drag-assignment]');
-      const cardEl   = tgt.closest<HTMLElement>('[data-drag-card]');
-      if (!assetEl && !assignEl && !cardEl) return;
-
-      touchStartPos.current  = { x: t.clientX, y: t.clientY };
-      touchDragging.current  = false;
-      activeTouchDrag.current = null;
-
-      if (assetEl) {
-        const id    = parseInt(assetEl.dataset.dragAsset!);
-        const asset = assetsRef.current.find(a => a.id === id);
-        if (!asset || asset.availability !== 'available') return;
-        activeTouchDrag.current = { type: 'asset', asset };
-      } else if (assignEl) {
-        const id = parseInt(assignEl.dataset.dragAssignment!);
-        let found: PlannerAssignment | undefined;
-        for (const it of itemsRef.current) {
-          found = (it.assignments || []).find(a => a.id === id);
-          if (found) break;
-        }
-        if (!found) return;
-        activeTouchDrag.current = { type: 'assignment', assignment: found };
-      } else if (cardEl) {
-        const [src, rawId] = cardEl.dataset.dragCard!.split(':');
-        const it = itemsRef.current.find(i => i.source === src && i.id === parseInt(rawId));
-        if (!it) return;
-        activeTouchDrag.current = { type: 'card', item: it };
-      }
-    }
-
-    function onTouchMove(e: TouchEvent) {
-      if (!activeTouchDrag.current) return;
-      const t = e.touches[0];
-
-      if (!touchDragging.current) {
-        const { x, y } = touchStartPos.current!;
-        if (Math.hypot(t.clientX - x, t.clientY - y) < THRESHOLD) return;
-        touchDragging.current = true;
-
-        const tgt     = e.target as HTMLElement;
-        const drag    = activeTouchDrag.current;
-        const srcEl   = tgt.closest<HTMLElement>(
-          drag.type === 'asset' ? '[data-drag-asset]' :
-          drag.type === 'assignment' ? '[data-drag-assignment]' : '[data-drag-card]'
-        );
-        if (srcEl) makeGhost(srcEl);
-
-        if (drag.type === 'asset')       setDraggingAsset(drag.asset);
-        else if (drag.type === 'assignment') setDraggingAssignment(drag.assignment);
-        else if (drag.type === 'card')   setDraggingJobCard(drag.item);
-      }
-
-      e.preventDefault();
-      const g = ghostRef.current;
-      if (g) {
-        g.style.left = (t.clientX - g.offsetWidth / 2)  + 'px';
-        g.style.top  = (t.clientY - g.offsetHeight / 2) + 'px';
-      }
-
-      const under = elAt(t.clientX, t.clientY);
-      if (!under) return;
-      const drag = activeTouchDrag.current!;
-
-      if (drag.type === 'asset' || drag.type === 'assignment') {
-        const z = under.closest<HTMLElement>('[data-drop-zone]');
-        setDragOverZone(z?.dataset.dropZone && z?.dataset.dropCardKey
-          ? `${z.dataset.dropCardKey}|${z.dataset.dropZone}` : null);
-      } else {
-        const gapEl  = under.closest<HTMLElement>('[data-drop-gap]');
-        const dateEl = under.closest<HTMLElement>('[data-drop-date]');
-        if (gapEl?.dataset.dropGap) {
-          setGapOverKey(gapEl.dataset.dropGap);
-          setDragOverDate(gapEl.dataset.dropGap.split('|')[0]);
-        } else if (dateEl?.dataset.dropDate) {
-          setDragOverDate(dateEl.dataset.dropDate);
-          setGapOverKey(null);
-        } else {
-          setDragOverDate(null); setGapOverKey(null);
-        }
-      }
-    }
-
-    function onTouchEnd(e: TouchEvent) {
-      if (!activeTouchDrag.current) return;
-      const drag = activeTouchDrag.current;
-      activeTouchDrag.current = null;
-
-      if (!touchDragging.current) {
-        touchDragging.current = false; touchStartPos.current = null; return;
-      }
-      touchDragging.current = false; touchStartPos.current = null;
-
-      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
-
-      const t     = e.changedTouches[0];
-      const under = elAt(t.clientX, t.clientY);
-
-      setDragOverZone(null); setDragOverDate(null); setGapOverKey(null);
-
-      if (drag.type === 'asset' || drag.type === 'assignment') {
-        if (under) {
-          const z = under.closest<HTMLElement>('[data-drop-zone]');
-          if (z?.dataset.dropZone && z?.dataset.dropCardKey) {
-            const zone    = z.dataset.dropZone as 'driver' | 'porter' | 'staff' | 'vehicle';
-            const cardKey = z.dataset.dropCardKey;
-            const m = /^(job|event)-(\d+)-/.exec(cardKey);
-            if (m) {
-              const it = itemsRef.current.find(i => i.source === m[1] && i.id === parseInt(m[2]));
-              if (it) onDropRef.current(it, zone);
-            }
-          }
-        }
-        setDraggingAsset(null); setDraggingAssignment(null);
-      } else {
-        let gapHandled = false;
-        if (under) {
-          const gapEl  = under.closest<HTMLElement>('[data-drop-gap]');
-          const dateEl = under.closest<HTMLElement>('[data-drop-date]');
-          if (gapEl?.dataset.dropGap) {
-            const [gd, gi] = gapEl.dataset.dropGap.split('|');
-            handleGapDropRef.current(gd, parseInt(gi));
-            gapHandled = true;
-          } else if (dateEl?.dataset.dropDate) {
-            const nd = dateEl.dataset.dropDate;
-            if (nd !== drag.item.date) onRescheduleRef.current(drag.item, nd);
-          }
-        }
-        if (!gapHandled) setDraggingJobCard(null);
-      }
-    }
-
-    el.addEventListener('touchstart',  onTouchStart,  { passive: true });
-    el.addEventListener('touchmove',   onTouchMove,   { passive: false });
-    el.addEventListener('touchend',    onTouchEnd);
-    el.addEventListener('touchcancel', onTouchEnd);
-    return () => {
-      el.removeEventListener('touchstart',  onTouchStart);
-      el.removeEventListener('touchmove',   onTouchMove);
-      el.removeEventListener('touchend',    onTouchEnd);
-      el.removeEventListener('touchcancel', onTouchEnd);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
-    <div ref={containerRef} className="flex flex-1 overflow-hidden">
-      <AssetPanel
-        assets={assets}
-        assignments={assignments}
-        draggingAsset={draggingAsset}
-        draggingAssignment={draggingAssignment}
-        onJobDragStart={setDraggingAsset}
-        onJobDragEnd={() => setDraggingAsset(null)}
-        onAddAsset={onAddAsset}
-        onEditAsset={onEditAsset}
-        onDeleteAsset={onDeleteAsset}
-        onAssetsReordered={onAssetsReordered}
-      />
+    <div className="flex flex-1 overflow-hidden">
+      {!isMobile && (
+        <AssetPanel
+          assets={assets}
+          assignments={assignments}
+          draggingAsset={draggingAsset}
+          draggingAssignment={draggingAssignment}
+          onJobDragStart={setDraggingAsset}
+          onJobDragEnd={() => setDraggingAsset(null)}
+          onAddAsset={onAddAsset}
+          onEditAsset={onEditAsset}
+          onDeleteAsset={onDeleteAsset}
+          onAssetsReordered={onAssetsReordered}
+        />
+      )}
 
       {/* Day columns */}
       <div className="flex-1 overflow-x-auto">
@@ -1508,6 +1404,8 @@ function WeeklyView({
                           onDuplicate={() => onDuplicate(item)}
                           onConvertToJob={item.source === 'event' && item.category === 'Survey' ? () => onConvertToJob(item) : undefined}
                           navigate={navigate}
+                          allAssets={allAssets}
+                          onAssign={(asset, zone) => onAssign(item, asset, zone)}
                         />
                         {/* Gap after each item */}
                         {draggingJobCard && <Gap index={idx + 1} />}
@@ -2069,6 +1967,36 @@ export default function CRMPlanner() {
     }
   }
 
+  async function handleAssign(item: PlannerCalendarItem, asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') {
+    const assignedDate = item.date;
+    if (!assignedDate) return;
+    const defaultRate = zone === 'driver' ? 150 : zone === 'porter' ? 125 : null;
+    try {
+      const payload: Record<string, unknown> = {
+        asset_id: asset.id,
+        assigned_date: assignedDate,
+        assigned_role: zone === 'vehicle' ? null : zone,
+        daily_rate: defaultRate,
+      };
+      if (item.source === 'job')   payload.job_id   = item.id;
+      if (item.source === 'event') payload.event_id = item.id;
+      const r = await api.post('/planner/assignments', payload);
+      if (r.data.conflict) {
+        showToast(`${asset.name} is already assigned on another job this day`, 'warning');
+      } else {
+        showToast(`${asset.name} assigned to ${item.title}`, 'success');
+      }
+      await loadData();
+    } catch (err: unknown) {
+      const status = (err as { response?: { status: number } })?.response?.status;
+      if (status === 409) {
+        showToast(`${asset.name} is already assigned to this job`, 'warning');
+      } else {
+        showToast('Failed to assign', 'error');
+      }
+    }
+  }
+
   async function handleUpdateAssignment(id: number, data: { daily_rate?: number | null; vehicle_asset_id?: number | null }) {
     try {
       await api.patch(`/planner/assignments/${id}`, data);
@@ -2297,6 +2225,8 @@ export default function CRMPlanner() {
             onDuplicate={handleDuplicate}
             onConvertToJob={handleConvertToJob}
             navigate={navigate}
+            allAssets={assets}
+            onAssign={handleAssign}
           />
         )}
       </div>
