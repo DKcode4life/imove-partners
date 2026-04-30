@@ -20,7 +20,13 @@ app.use(cors({
   origin: (origin, cb) => {
     // Allow same-origin / non-CORS requests (server-side, curl, native apps)
     if (!origin) return cb(null, true);
+    // Always allow any *.myimove.co.uk subdomain in production
+    if (/^https:\/\/([a-z0-9-]+\.)*myimove\.co\.uk$/i.test(origin)) {
+      return cb(null, true);
+    }
+    // Allow configured origins (dev localhost etc.)
     if (config.corsOrigins.includes(origin)) return cb(null, true);
+    console.warn(`[CORS] rejected origin: ${origin}`);
     return cb(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
