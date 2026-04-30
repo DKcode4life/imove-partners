@@ -80,9 +80,11 @@ async function migrateStatuses() {
     }
   }
 
-  // Remove stale JobStatus rows (old names no longer in the canonical set and not in use)
-  const canonicalNames = DEFAULT_STATUSES.map(s => s.name);
-  const stale = await prisma.jobStatus.findMany({ where: { name: { notIn: canonicalNames } } });
+  // Remove ONLY the known-old names from the rename list (and only if no job
+  // still uses them). Custom statuses the user has added themselves must be
+  // preserved — anything not in CRM_JOB_RENAMES.old is left alone.
+  const renamedAwayNames = CRM_JOB_RENAMES.map(r => r.old);
+  const stale = await prisma.jobStatus.findMany({ where: { name: { in: renamedAwayNames } } });
   for (const row of stale) {
     const inUse = await prisma.crmJob.count({ where: { status: row.name } });
     if (inUse === 0) await prisma.jobStatus.delete({ where: { id: row.id } });
