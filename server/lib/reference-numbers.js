@@ -23,12 +23,22 @@ const REFERENCE_TYPES = {
  * The first issued number for any new prefix is 100 — i.e. the very first
  * estimate ever sent is EST-00100, the first fixed quote is iMQ-00100, etc.
  * From there each new document increments by 1 (00101, 00102, …).
- *
- * Note: legacy rows with parseable digits >= 100 will still be respected —
- * we always pick `max(existing-found, START_AT - 1) + 1`. So if you import
- * a batch of historical EST-12345 numbers, the next one will be EST-12346.
  */
 const START_AT = 100;
+
+/**
+ * Upper bound for "canonical" reference numbers we'll respect when computing
+ * the next one. Any row whose trailing digits exceed this is treated as
+ * legacy garbage (e.g. timestamp-based numbers like EST-896956 from the old
+ * generator) and ignored — otherwise a single bad row would push the entire
+ * sequence into the millions.
+ *
+ * Set to 99_999 — the canonical 5-digit format. Anything bigger is treated
+ * as legacy junk and ignored. If we ever organically reach 100k documents
+ * of any single type we can bump this up; until then 5-digit refs are the
+ * source of truth.
+ */
+const MAX_CANONICAL = 99999;
 
 /**
  * Compute the next reference number for the given type.
@@ -67,11 +77,14 @@ async function nextReferenceNumber(prisma, type) {
   for (const r of rows) {
     const value = r[field];
     if (!value) continue;
-    // Match trailing digits (handles both EST-00100 and legacy EST-882341)
     const m = value.match(/-(\d+)$/);
     if (!m) continue;
     const n = parseInt(m[1], 10);
-    if (Number.isFinite(n) && n > max) max = n;
+    // Skip non-canonical rows whose trailing digits are absurdly large
+    // (e.g. timestamp-based legacy numbers like EST-896956) so they don't
+    // poison the sequence and push every new ref into the millions.
+    if (!Number.isFinite(n) || n > MAX_CANONICAL) continue;
+    if (n > max) max = n;
   }
 
   const next = String(max + 1).padStart(5, '0');

@@ -334,6 +334,26 @@ router.post('/jobs/:id/invoices/:invoiceId/payments', wrap(async (req, res) => {
   res.status(201).json({ payment, invoiceFullyPaid: isFullyPaid });
 }));
 
+// ─── DELETE: remove an invoice (and its line items + payments) ──────────
+router.delete('/jobs/:id/invoices/:invoiceId', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id);
+  const invoiceId = parseInt(req.params.invoiceId);
+  if (isNaN(jobId) || isNaN(invoiceId)) return res.status(400).json({ error: 'Invalid IDs' });
+
+  const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, job_id: jobId } });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+  await prisma.payment.deleteMany({ where: { invoice_id: invoiceId } });
+  await prisma.invoiceItem.deleteMany({ where: { invoice_id: invoiceId } });
+  await prisma.invoice.delete({ where: { id: invoiceId } });
+
+  await prisma.crmActivity.create({
+    data: { job_id: jobId, type: 'note', note: `Deleted ${invoice.invoice_type} invoice ${invoice.invoice_number}` },
+  });
+
+  res.json({ success: true });
+}));
+
 // ─── POST: send a receipt for a paid invoice ─────────────────────────────
 router.post('/jobs/:id/invoices/:invoiceId/send-receipt', wrap(async (req, res) => {
   const jobId = parseInt(req.params.id);
