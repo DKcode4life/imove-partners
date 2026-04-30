@@ -130,11 +130,30 @@ type JobInfo = {
 
 type ExistingDocs = {
   estimateQuoteId?: number;
+  estimateQuoteNumber?: string;
   fixedQuoteId?: number;
+  fixedQuoteNumber?: string;
   depositInvoiceId?: number;
+  depositInvoiceNumber?: string;
   depositInvoicePaid?: boolean;
   mainInvoiceId?: number;
+  mainInvoiceNumber?: string;
   mainInvoicePaid?: boolean;
+};
+
+/**
+ * Pretty placeholder shown in the Send modal *before* a document has been
+ * created on the server. The moment the user presses Send, the server
+ * generates the real reference number (EST-#####, iMQ-#####, DEP-#####,
+ * INV-#####) and we swap this placeholder out for it permanently.
+ */
+const REF_PLACEHOLDER: Record<DocumentType, string> = {
+  'estimate-quote':   'EST-?????',
+  'fixed-quote':      'iMQ-?????',
+  'deposit-invoice':  'DEP-?????',
+  'deposit-receipt':  'DEP-?????',
+  'main-invoice':     'INV-?????',
+  'move-receipt':     'INV-?????',
 };
 
 export default function QuoteBuilder({ jobId }: Props) {
@@ -183,10 +202,14 @@ export default function QuoteBuilder({ jobId }: Props) {
           const mainInv = invoices.find(i => i.invoice_type === 'main');
           setExistingDocs({
             estimateQuoteId: estQ?.id,
+            estimateQuoteNumber: estQ?.quote_number,
             fixedQuoteId: fixQ?.id,
+            fixedQuoteNumber: fixQ?.quote_number,
             depositInvoiceId: depInv?.id,
+            depositInvoiceNumber: depInv?.invoice_number,
             depositInvoicePaid: depInv?.status === 'paid',
             mainInvoiceId: mainInv?.id,
+            mainInvoiceNumber: mainInv?.invoice_number,
             mainInvoicePaid: mainInv?.status === 'paid',
           });
         } catch (err) {
@@ -338,6 +361,12 @@ export default function QuoteBuilder({ jobId }: Props) {
 
   /**
    * Lazily create a Quote on the server (if one doesn't exist) and return its id.
+   *
+   * IMPORTANT: We deliberately do NOT send a `quote_number` — the server
+   * generates and persists the canonical reference number (EST-##### for
+   * estimates, iMQ-##### for fixed quotes). We then capture both the row id
+   * AND the saved `quote_number` into local state so every subsequent
+   * resend / modal preview shows the exact same number.
    */
   async function ensureQuote(quote_type: 'estimate' | 'fixed'): Promise<number | null> {
     if (!jobId) return null;
@@ -352,12 +381,10 @@ export default function QuoteBuilder({ jobId }: Props) {
         ];
 
     const total = quote_type === 'estimate' ? estimateTotal : fixQuotationTotal;
-    const ts = Date.now().toString().slice(-6);
-    const quote_number = quote_type === 'estimate' ? `EST-${ts}` : `QUO-${ts}`;
 
     const res = await api.post(`/crm/jobs/${jobId}/quotes`, {
       quote_type,
-      quote_number,
+      // No quote_number — server generates it.
       subtotal: total,
       tax_amount: 0, // VAT already included in line prices for now
       total,
@@ -365,15 +392,19 @@ export default function QuoteBuilder({ jobId }: Props) {
       items,
     });
 
-    const newId = res.data.id;
+    const newId: number = res.data.id;
+    const newNumber: string | undefined = res.data.quote_number;
     setExistingDocs(prev => quote_type === 'estimate'
-      ? { ...prev, estimateQuoteId: newId }
-      : { ...prev, fixedQuoteId: newId });
+      ? { ...prev, estimateQuoteId: newId, estimateQuoteNumber: newNumber }
+      : { ...prev, fixedQuoteId: newId, fixedQuoteNumber: newNumber });
     return newId;
   }
 
   /**
    * Lazily create an Invoice (deposit or main) on the server and return its id.
+   *
+   * Same contract as `ensureQuote`: server is the sole source of truth for
+   * the `invoice_number` (DEP-##### or INV-#####).
    */
   async function ensureInvoice(invoice_type: 'deposit' | 'main'): Promise<number | null> {
     if (!jobId) return null;
@@ -400,10 +431,11 @@ export default function QuoteBuilder({ jobId }: Props) {
       items,
     });
 
-    const newId = res.data.id;
+    const newId: number = res.data.id;
+    const newNumber: string | undefined = res.data.invoice_number;
     setExistingDocs(prev => invoice_type === 'deposit'
-      ? { ...prev, depositInvoiceId: newId }
-      : { ...prev, mainInvoiceId: newId });
+      ? { ...prev, depositInvoiceId: newId, depositInvoiceNumber: newNumber }
+      : { ...prev, mainInvoiceId: newId, mainInvoiceNumber: newNumber });
     return newId;
   }
 
@@ -502,39 +534,46 @@ export default function QuoteBuilder({ jobId }: Props) {
     }
   }
 
-  // Modal config for the currently-open modal
+  // Modal config for the currently-open modal.
+  //
+  // The displayed `docNumber` is the *real* saved reference number from the
+  // server (EST-#####, iMQ-#####, DEP-#####, INV-#####). Until a document
+  // has been created on first send, we show the prefix-only placeholder
+  // (e.g. "EST-?????") — never a randomly-generated stand-in. Once Send is
+  // pressed, the server-generated number replaces the placeholder and is
+  // pinned for the lifetime of that document, including all resends.
   const modalConfig: { docNumber: string; amount: number; jobTotal?: number; previewUrl?: string } | null = activeModal
     ? (() => {
-        const totalTs = Date.now().toString().slice(-6);
+        const placeholder = REF_PLACEHOLDER[activeModal];
         switch (activeModal) {
           case 'estimate-quote': return {
-            docNumber: existingDocs.estimateQuoteId ? `EST-${existingDocs.estimateQuoteId}` : `EST-${totalTs}`,
+            docNumber: existingDocs.estimateQuoteNumber ?? placeholder,
             amount: estimateTotal,
             previewUrl: existingDocs.estimateQuoteId ? `/api/crm/jobs/${jobId}/quotes/${existingDocs.estimateQuoteId}/pdf` : undefined,
           };
           case 'fixed-quote': return {
-            docNumber: existingDocs.fixedQuoteId ? `QUO-${existingDocs.fixedQuoteId}` : `QUO-${totalTs}`,
+            docNumber: existingDocs.fixedQuoteNumber ?? placeholder,
             amount: fixQuotationTotal,
             previewUrl: existingDocs.fixedQuoteId ? `/api/crm/jobs/${jobId}/quotes/${existingDocs.fixedQuoteId}/pdf` : undefined,
           };
           case 'deposit-invoice': return {
-            docNumber: existingDocs.depositInvoiceId ? `DEP-${existingDocs.depositInvoiceId}` : `DEP-${totalTs}`,
+            docNumber: existingDocs.depositInvoiceNumber ?? placeholder,
             amount: depositAmount,
             jobTotal: fixQuotationTotal,
             previewUrl: existingDocs.depositInvoiceId ? `/api/crm/jobs/${jobId}/invoices/${existingDocs.depositInvoiceId}/pdf` : undefined,
           };
           case 'deposit-receipt': return {
-            docNumber: existingDocs.depositInvoiceId ? `DEP-${existingDocs.depositInvoiceId}` : `DEP-${totalTs}`,
+            docNumber: existingDocs.depositInvoiceNumber ?? placeholder,
             amount: depositAmount,
             jobTotal: fixQuotationTotal,
           };
           case 'main-invoice': return {
-            docNumber: existingDocs.mainInvoiceId ? `INV-${existingDocs.mainInvoiceId}` : `INV-${totalTs}`,
+            docNumber: existingDocs.mainInvoiceNumber ?? placeholder,
             amount: fixQuotationTotal,
             previewUrl: existingDocs.mainInvoiceId ? `/api/crm/jobs/${jobId}/invoices/${existingDocs.mainInvoiceId}/pdf` : undefined,
           };
           case 'move-receipt': return {
-            docNumber: existingDocs.mainInvoiceId ? `INV-${existingDocs.mainInvoiceId}` : `INV-${totalTs}`,
+            docNumber: existingDocs.mainInvoiceNumber ?? placeholder,
             amount: fixQuotationTotal,
           };
         }

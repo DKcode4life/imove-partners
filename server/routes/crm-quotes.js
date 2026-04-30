@@ -4,6 +4,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { generateQuotePDF } = require('../services/pdf');
 const { sendTemplated } = require('../services/email');
+const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -43,7 +44,6 @@ router.post('/jobs/:id/quotes', wrap(async (req, res) => {
 
   const {
     quote_type = 'estimate',
-    quote_number,
     notes,
     subtotal,
     tax_amount,
@@ -53,13 +53,17 @@ router.post('/jobs/:id/quotes', wrap(async (req, res) => {
     items = [],
   } = req.body;
 
-  // Validate required fields
-  if (!quote_number) {
-    return res.status(400).json({ error: 'Quote number is required' });
-  }
+  // NOTE: We deliberately ignore any client-supplied `quote_number` — the
+  // reference number is *always* generated server-side via the shared
+  // numbering helper so it stays consistent (EST-##### or iMQ-#####) and
+  // can never drift out of sync with what's saved on the row.
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'At least one line item is required' });
+  }
+
+  if (!['estimate', 'fixed'].includes(quote_type)) {
+    return res.status(400).json({ error: "quote_type must be 'estimate' or 'fixed'" });
   }
 
   try {
@@ -73,39 +77,43 @@ router.post('/jobs/:id/quotes', wrap(async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    // Create quote
-    const quote = await prisma.quote.create({
-      data: {
-        job_id: jobId,
-        quote_type,
-        quote_number,
-        notes: notes || null,
-        subtotal: parseFloat(subtotal) || 0,
-        tax_amount: parseFloat(tax_amount) || 0,
-        total: parseFloat(total) || 0,
-        deposit: parseFloat(deposit) || 0,
-        valid_until: valid_until || null,
-        items: {
-          create: items.map((item, idx) => ({
-            description: item.description || '',
-            quantity: parseFloat(item.quantity) || 1,
-            unit_price: parseFloat(item.unit_price) || 0,
-            total: parseFloat(item.total) || 0,
-            sort_order: idx,
-          })),
+    // Generate the reference number + create the quote in one shot, retrying
+    // on the unlikely event of a unique-constraint collision under concurrency.
+    const refType = quote_type === 'fixed' ? 'fixed' : 'estimate';
+    const quote = await nextReferenceNumberWithRetry(prisma, refType, (quote_number) =>
+      prisma.quote.create({
+        data: {
+          job_id: jobId,
+          quote_type,
+          quote_number,
+          notes: notes || null,
+          subtotal: parseFloat(subtotal) || 0,
+          tax_amount: parseFloat(tax_amount) || 0,
+          total: parseFloat(total) || 0,
+          deposit: parseFloat(deposit) || 0,
+          valid_until: valid_until || null,
+          items: {
+            create: items.map((item, idx) => ({
+              description: item.description || '',
+              quantity: parseFloat(item.quantity) || 1,
+              unit_price: parseFloat(item.unit_price) || 0,
+              total: parseFloat(item.total) || 0,
+              sort_order: idx,
+            })),
+          },
         },
-      },
-      include: {
-        items: true,
-      },
-    });
+        include: {
+          items: true,
+        },
+      }),
+    );
 
     // Log activity
     await prisma.crmActivity.create({
       data: {
         job_id: jobId,
         type: 'note',
-        note: `Created ${quote_type === 'fixed' ? 'fixed' : 'estimate'} quote ${quote_number} for £${total.toFixed(2)}`,
+        note: `Created ${quote_type === 'fixed' ? 'fixed' : 'estimate'} quote ${quote.quote_number} for £${(parseFloat(total) || 0).toFixed(2)}`,
       },
     });
 

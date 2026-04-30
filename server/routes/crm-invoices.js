@@ -14,15 +14,10 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { generateInvoicePDF } = require('../services/pdf');
 const { sendTemplated } = require('../services/email');
+const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
-
-function generateInvoiceNumber(prefix = 'INV') {
-  const ts = Date.now().toString().slice(-6);
-  const rnd = Math.floor(Math.random() * 100).toString().padStart(2, '0');
-  return `${prefix}-${ts}${rnd}`;
-}
 
 function fullAddress(line1, line2, city, postcode) {
   if (!line1) return null;
@@ -95,29 +90,35 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
   const job = await prisma.crmJob.findUnique({ where: { id: jobId } });
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
-  const invoice = await prisma.invoice.create({
-    data: {
-      job_id: jobId,
-      quote_id: quote_id ? parseInt(quote_id) : null,
-      invoice_type,
-      invoice_number: generateInvoiceNumber(invoice_type === 'deposit' ? 'DEP' : 'INV'),
-      subtotal: parseFloat(subtotal) || 0,
-      tax_amount: parseFloat(tax_amount) || 0,
-      total: parseFloat(total) || 0,
-      due_date: due_date || null,
-      notes: notes || null,
-      items: {
-        create: items.map((item, idx) => ({
-          description: item.description || '',
-          quantity: parseFloat(item.quantity) || 1,
-          unit_price: parseFloat(item.unit_price) || 0,
-          total: parseFloat(item.total) || 0,
-          sort_order: idx,
-        })),
+  // Generate the reference number + create the invoice in a single retrying
+  // pass. The invoice_number is *always* server-generated (DEP-##### or
+  // INV-#####) — any value the client tries to send is ignored.
+  const refType = invoice_type; // 'deposit' or 'main' — matches REFERENCE_TYPES keys
+  const invoice = await nextReferenceNumberWithRetry(prisma, refType, (invoice_number) =>
+    prisma.invoice.create({
+      data: {
+        job_id: jobId,
+        quote_id: quote_id ? parseInt(quote_id) : null,
+        invoice_type,
+        invoice_number,
+        subtotal: parseFloat(subtotal) || 0,
+        tax_amount: parseFloat(tax_amount) || 0,
+        total: parseFloat(total) || 0,
+        due_date: due_date || null,
+        notes: notes || null,
+        items: {
+          create: items.map((item, idx) => ({
+            description: item.description || '',
+            quantity: parseFloat(item.quantity) || 1,
+            unit_price: parseFloat(item.unit_price) || 0,
+            total: parseFloat(item.total) || 0,
+            sort_order: idx,
+          })),
+        },
       },
-    },
-    include: { items: true, payments: true },
-  });
+      include: { items: true, payments: true },
+    }),
+  );
 
   await prisma.crmActivity.create({
     data: {
