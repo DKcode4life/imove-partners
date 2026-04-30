@@ -24,9 +24,36 @@ function generateInvoiceNumber(prefix = 'INV') {
   return `${prefix}-${ts}${rnd}`;
 }
 
-function fullAddress(line1, city, postcode) {
+function fullAddress(line1, line2, city, postcode) {
   if (!line1) return null;
-  return `${line1}, ${city || ''} ${postcode || ''}`.trim();
+  const parts = [line1];
+  if (line2) parts.push(line2);
+  if (city) parts.push(city);
+  const head = parts.join(', ');
+  return postcode ? `${head} ${postcode}` : head;
+}
+
+/**
+ * Extract all address + property fields from a CrmJob for PDF rendering.
+ * Keeps the three PDF call-sites DRY.
+ */
+function jobToPdfFields(job) {
+  return {
+    customer_name: job.full_name,
+    customer_email: job.email,
+    customer_phone: job.phone,
+    from_address: fullAddress(job.from_line1, job.from_line2, job.from_city, job.from_postcode),
+    to_address:   fullAddress(job.to_line1,   job.to_line2,   job.to_city,   job.to_postcode),
+    property_type_from: job.property_type_from,
+    property_type_to:   job.property_type_to,
+    bedrooms:           job.bedrooms,
+    bedrooms_to:        job.bedrooms_to,
+    floor_from:         job.floor_from,
+    floor_to:           job.floor_to,
+    has_lift_from:      job.has_lift_from,
+    has_lift_to:        job.has_lift_to,
+    move_date:          job.confirmed_move_date || job.preferred_move_date,
+  };
 }
 
 // ─── GET: list all invoices for a job ────────────────────────────────────
@@ -133,15 +160,11 @@ router.get('/jobs/:id/invoices/:invoiceId/pdf', wrap(async (req, res) => {
   const pdf = await generateInvoicePDF({
     mode: invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice',
     invoice_number: invoice.invoice_number,
-    customer_name: job.full_name,
-    customer_email: job.email,
-    customer_phone: job.phone,
-    from_address: fullAddress(job.from_line1, job.from_city, job.from_postcode),
-    to_address: fullAddress(job.to_line1, job.to_city, job.to_postcode),
-    move_date: job.confirmed_move_date || job.preferred_move_date,
+    ...jobToPdfFields(job),
     due_date: invoice.due_date,
     items: invoice.items.map(i => ({ description: i.description, quantity: i.quantity, unit_price: i.unit_price, total: i.total })),
     subtotal: invoice.subtotal,
+    tax_rate: invoice.tax_rate,
     tax_amount: invoice.tax_amount,
     total: invoice.total,
     deposit_paid: depositPaid,
@@ -191,15 +214,11 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
     const pdf = await generateInvoicePDF({
       mode: invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice',
       invoice_number: invoice.invoice_number,
-      customer_name: job.full_name,
-      customer_email: job.email,
-      customer_phone: job.phone,
-      from_address: fullAddress(job.from_line1, job.from_city, job.from_postcode),
-      to_address: fullAddress(job.to_line1, job.to_city, job.to_postcode),
-      move_date: job.confirmed_move_date || job.preferred_move_date,
+      ...jobToPdfFields(job),
       due_date: invoice.due_date,
       items: invoice.items.map(i => ({ description: i.description, quantity: i.quantity, unit_price: i.unit_price, total: i.total })),
       subtotal: invoice.subtotal,
+      tax_rate: invoice.tax_rate,
       tax_amount: invoice.tax_amount,
       total: invoice.total,
       deposit_paid: depositPaid,
@@ -232,18 +251,27 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
     attachments: pdfAttachment ? [pdfAttachment] : [],
   });
 
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { status: 'sent', sent_at: new Date(), sent_to: to },
-  });
+  // Best-effort post-send bookkeeping — must not mask a successful send.
+  try {
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'sent', sent_at: new Date(), sent_to: to },
+    });
+  } catch (e) {
+    console.error('[Invoice Email] update invoice.status failed:', e.message);
+  }
 
-  await prisma.crmActivity.create({
-    data: {
-      job_id: jobId,
-      type: 'note',
-      note: `${invoice.invoice_type === 'deposit' ? 'Deposit invoice' : 'Final invoice'} ${invoice.invoice_number} emailed to ${to}`,
-    },
-  });
+  try {
+    await prisma.crmActivity.create({
+      data: {
+        job_id: jobId,
+        type: 'note',
+        note: `${invoice.invoice_type === 'deposit' ? 'Deposit invoice' : 'Final invoice'} ${invoice.invoice_number} emailed to ${to}`,
+      },
+    });
+  } catch (e) {
+    console.error('[Invoice Email] activity log failed:', e.message);
+  }
 
   res.json({ success: true, email: emailResult, invoice: { id: invoice.id, invoice_number: invoice.invoice_number } });
 }));
@@ -345,17 +373,12 @@ router.post('/jobs/:id/invoices/:invoiceId/send-receipt', wrap(async (req, res) 
   const pdf = await generateInvoicePDF({
     mode: isMoveReceipt ? 'move-receipt' : 'deposit-receipt',
     invoice_number: invoice.invoice_number,
-    customer_name: job.full_name,
-    customer_email: job.email,
-    customer_phone: job.phone,
-    from_address: fullAddress(job.from_line1, job.from_city, job.from_postcode),
-    to_address: fullAddress(job.to_line1, job.to_city, job.to_postcode),
-    move_date: job.confirmed_move_date || job.preferred_move_date,
+    ...jobToPdfFields(job),
     amount_paid: totalPaid,
     total: invoice.total,
     balance,
     payment_method: lastPayment?.method,
-    payment_date: lastPayment?.paid_at?.toLocaleDateString('en-GB'),
+    payment_date: lastPayment?.paid_at,
     notes: invoice.notes,
   });
 
@@ -379,13 +402,17 @@ router.post('/jobs/:id/invoices/:invoiceId/send-receipt', wrap(async (req, res) 
     attachments: [{ filename: pdf.filename, content: pdf.buffer, contentType: pdf.mimeType }],
   });
 
-  await prisma.crmActivity.create({
-    data: {
-      job_id: jobId,
-      type: 'note',
-      note: `${isMoveReceipt ? 'Final move receipt' : 'Deposit receipt'} for ${invoice.invoice_number} emailed to ${to}`,
-    },
-  });
+  try {
+    await prisma.crmActivity.create({
+      data: {
+        job_id: jobId,
+        type: 'note',
+        note: `${isMoveReceipt ? 'Final move receipt' : 'Deposit receipt'} for ${invoice.invoice_number} emailed to ${to}`,
+      },
+    });
+  } catch (e) {
+    console.error('[Receipt Email] activity log failed:', e.message);
+  }
 
   res.json({ success: true, email: emailResult });
 }));

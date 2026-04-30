@@ -145,19 +145,29 @@ router.get('/jobs/:id/quotes/:quoteId/pdf', wrap(async (req, res) => {
     }
 
     // Prepare data for PDF generation
+    const j = quote.job;
     const pdfData = {
       quote_number: quote.quote_number,
       quote_type: quote.quote_type,
-      customer_name: quote.job.full_name,
-      customer_email: quote.job.email,
-      customer_phone: quote.job.phone,
-      from_address: quote.job.from_line1 
-        ? `${quote.job.from_line1}, ${quote.job.from_city || ''} ${quote.job.from_postcode || ''}`.trim()
+      customer_name: j.full_name,
+      customer_email: j.email,
+      customer_phone: j.phone,
+      from_address: j.from_line1
+        ? `${j.from_line1}${j.from_line2 ? ', ' + j.from_line2 : ''}, ${j.from_city || ''} ${j.from_postcode || ''}`.trim()
         : null,
-      to_address: quote.job.to_line1
-        ? `${quote.job.to_line1}, ${quote.job.to_city || ''} ${quote.job.to_postcode || ''}`.trim()
+      to_address: j.to_line1
+        ? `${j.to_line1}${j.to_line2 ? ', ' + j.to_line2 : ''}, ${j.to_city || ''} ${j.to_postcode || ''}`.trim()
         : null,
-      move_date: quote.job.confirmed_move_date || quote.job.preferred_move_date,
+      // Pass property fields so the PDF builder can assemble "Property details" lines
+      property_type_from: j.property_type_from,
+      property_type_to: j.property_type_to,
+      bedrooms: j.bedrooms,
+      bedrooms_to: j.bedrooms_to,
+      floor_from: j.floor_from,
+      floor_to: j.floor_to,
+      has_lift_from: j.has_lift_from,
+      has_lift_to: j.has_lift_to,
+      move_date: j.confirmed_move_date || j.preferred_move_date,
       items: quote.items.map(item => ({
         description: item.description,
         quantity: item.quantity,
@@ -165,6 +175,7 @@ router.get('/jobs/:id/quotes/:quoteId/pdf', wrap(async (req, res) => {
         total: item.total,
       })),
       subtotal: quote.subtotal,
+      tax_rate: quote.tax_rate,
       tax_amount: quote.tax_amount,
       total: quote.total,
       deposit: quote.deposit,
@@ -237,12 +248,21 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
         customer_name: job.full_name,
         customer_email: job.email,
         customer_phone: job.phone,
-        from_address: job.from_line1 
-          ? `${job.from_line1}, ${job.from_city || ''} ${job.from_postcode || ''}`.trim()
+        from_address: job.from_line1
+          ? `${job.from_line1}${job.from_line2 ? ', ' + job.from_line2 : ''}, ${job.from_city || ''} ${job.from_postcode || ''}`.trim()
           : null,
         to_address: job.to_line1
-          ? `${job.to_line1}, ${job.to_city || ''} ${job.to_postcode || ''}`.trim()
+          ? `${job.to_line1}${job.to_line2 ? ', ' + job.to_line2 : ''}, ${job.to_city || ''} ${job.to_postcode || ''}`.trim()
           : null,
+        // Property fields for "Property details" lines
+        property_type_from: job.property_type_from,
+        property_type_to: job.property_type_to,
+        bedrooms: job.bedrooms,
+        bedrooms_to: job.bedrooms_to,
+        floor_from: job.floor_from,
+        floor_to: job.floor_to,
+        has_lift_from: job.has_lift_from,
+        has_lift_to: job.has_lift_to,
         move_date: job.confirmed_move_date || job.preferred_move_date,
         items: quote.items.map(item => ({
           description: item.description,
@@ -251,6 +271,7 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
           total: item.total,
         })),
         subtotal: quote.subtotal,
+        tax_rate: quote.tax_rate,
         tax_amount: quote.tax_amount,
         total: quote.total,
         deposit: quote.deposit,
@@ -283,6 +304,9 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
     const templateSlug = quote.quote_type === 'fixed' ? 'fixed-quote' : 'estimate-quote';
 
     // Send email — pass user's edited subject/body from the modal as overrides
+    // NOTE: From this point on, any failure in the DB bookkeeping below MUST NOT
+    // cause this endpoint to return 5xx — otherwise the client shows
+    // "Failed to send email" even though the message has already gone out.
     const emailResult = await sendTemplated({
       to,
       templateSlug,
@@ -292,33 +316,36 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
       attachments: pdfAttachment ? [pdfAttachment] : [],
     });
 
-    // Update job status and quote sent date
-    await prisma.crmJob.update({
+    // Best-effort post-send bookkeeping. Each step is wrapped individually so
+    // a single failure (e.g. schema drift, concurrent edit) doesn't mask a
+    // successful send.
+    const safeUpdate = async (label, fn) => {
+      try { await fn(); }
+      catch (bookkeepErr) { console.error(`[Quote Email] post-send ${label} failed:`, bookkeepErr.message); }
+    };
+
+    await safeUpdate('job status', () => prisma.crmJob.update({
       where: { id: jobId },
       data: {
         status: 'Quote Sent',
-        quote_sent_date: new Date(),
+        // quote_sent_date is a String column in the schema — store ISO date string
+        quote_sent_date: new Date().toISOString().slice(0, 10),
         quote_amount: quote.total,
       },
-    });
+    }));
 
-    // Update quote sent status
-    await prisma.quote.update({
+    await safeUpdate('quote sent flag', () => prisma.quote.update({
       where: { id: quoteId },
-      data: {
-        sent_at: new Date(),
-        sent_to: to,
-      },
-    });
+      data: { sent_at: new Date(), sent_to: to },
+    }));
 
-    // Log activity
-    await prisma.crmActivity.create({
+    await safeUpdate('activity log', () => prisma.crmActivity.create({
       data: {
         job_id: jobId,
         type: 'note',
         note: `Quote ${quote.quote_number} emailed to ${to}`,
       },
-    });
+    }));
 
     res.json({
       success: true,
@@ -333,7 +360,7 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
     });
   } catch (error) {
     console.error('[Quote Email] Error sending email:', error);
-    res.status(500).json({ error: 'Failed to send quote email' });
+    res.status(500).json({ error: error?.message || 'Failed to send quote email' });
   }
 }));
 

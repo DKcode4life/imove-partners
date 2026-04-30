@@ -1,335 +1,560 @@
+/**
+ * iMove Relocations — PDF generator
+ *
+ * Renders all 6 document types in a consistent, branded layout:
+ *   - estimate-quote   : indicative pricing, ESTIMATE stamp
+ *   - fixed-quote      : final firm quote
+ *   - deposit-invoice  : request for deposit payment, with bank details
+ *   - main-invoice     : final invoice (less deposit if already paid), with bank details
+ *   - deposit-receipt  : PAID stamp, confirms deposit received
+ *   - move-receipt     : PAID IN FULL stamp, confirms full payment
+ *
+ * Design matches the iMove Quotation template provided by the client:
+ *   - Header: logo left · company contact centre · document type right
+ *   - Blurred watermark logo centred behind content
+ *   - Info row: Date · Customer · Invoice/Quote ID
+ *   - "Dear [Name]" greeting + intro paragraph
+ *   - Move details table (date / from+property / to+property)
+ *   - Services table with subtotal / VAT / total
+ *   - Optional Services table (quotes only, if any optional items)
+ *   - Thank-you closing + "Daniel · iMove Relocations Ltd" signature
+ *   - Bank details box (invoices only)
+ *   - Footer: company number + social badges + page number
+ */
+
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
 
-// Brand colors
-const BRAND_COLORS = {
-  primary: '#4f46e5',    // Indigo
-  secondary: '#0ea5e9',  // Sky blue
-  accent: '#f59e0b',     // Amber
-  dark: '#1e293b',       // Slate 800
-  light: '#f8fafc',      // Slate 50
-  gray: '#64748b',       // Slate 500
-  success: '#10b981',    // Emerald
+// ── Brand ──────────────────────────────────────────────────────────────────
+const C = {
+  blue:    '#2ea5dc', // iMove brand blue (the "i")
+  green:   '#a5d535', // iMove brand green (the "M")
+  dark:    '#1a1a1a',
+  body:    '#333333',
+  gray:    '#666666',
+  muted:   '#999999',
+  lightBg: '#f7f9fb',
+  border:  '#dfe4ea',
+  paid:    '#16a34a',
+  warn:    '#f59e0b',
+  white:   '#ffffff',
 };
 
-// Font paths (using default fonts for now, can add custom fonts later)
-const FONTS = {
-  regular: 'Helvetica',
-  bold: 'Helvetica-Bold',
-  italic: 'Helvetica-Oblique',
+const F = {
+  regular:    'Helvetica',
+  bold:       'Helvetica-Bold',
+  italic:     'Helvetica-Oblique',
   boldItalic: 'Helvetica-BoldOblique',
 };
 
-async function generateQuotePDF(quoteData) {
+const COMPANY = {
+  name:          'iMove Relocations Ltd',
+  phone:         '01638 255 255',
+  email:         'info@myimove.co.uk',
+  address:       '94C Hampstead Avenue, Mildenhall, Suffolk, IP28 7AS',
+  website:       'www.myimove.co.uk',
+  companyNumber: '16291851',
+  sortCode:      '04-00-03',
+  accountNumber: '66057796',
+  signOffName:   'Daniel',
+  socials:       'Google ★★★★★ 5.0   •   Facebook ★★★★★ 5 Star   •   TikTok @myimoveuk',
+};
+
+const ASSETS_DIR = path.join(__dirname, '..', 'assets');
+const LOGO_HEADER    = path.join(ASSETS_DIR, 'logo-header.png');
+const LOGO_WATERMARK = path.join(ASSETS_DIR, 'logo-watermark.png');
+
+// A4 page geometry
+const PAGE_W    = 595;
+const PAGE_H    = 842;
+const MARGIN    = 40;
+const CONTENT_W = PAGE_W - 2 * MARGIN;       // 515
+const LEFT      = MARGIN;                    // 40
+const RIGHT     = PAGE_W - MARGIN;           // 555
+const FOOTER_Y  = PAGE_H - 70;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmtMoney(n) {
+  const v = Number(n) || 0;
+  return `£${v.toFixed(2)}`;
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  try {
+    const dt = typeof d === 'string' ? new Date(d) : d;
+    if (isNaN(dt.getTime())) return String(d);
+    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch {
+    return String(d);
+  }
+}
+
+function buildPropertyDetails(parts) {
+  const clean = (parts || []).filter(p => p != null && p !== '' && p !== false);
+  return clean.length ? clean.join(' · ') : '—';
+}
+
+// ── Building blocks ────────────────────────────────────────────────────────
+function drawWatermark(doc) {
+  if (!fs.existsSync(LOGO_WATERMARK)) return;
+  try {
+    doc.save();
+    doc.opacity(0.06);
+    const wmW = 380;
+    const wmX = (PAGE_W - wmW) / 2;
+    const wmY = 260;
+    doc.image(LOGO_WATERMARK, wmX, wmY, { width: wmW });
+    doc.restore();
+    doc.opacity(1);
+  } catch (e) {
+    // non-fatal
+  }
+}
+
+function drawHeader(doc, docTitle) {
+  const headerY = 30;
+
+  // Logo top-left
+  if (fs.existsSync(LOGO_HEADER)) {
+    try {
+      doc.image(LOGO_HEADER, LEFT, headerY, { fit: [130, 60] });
+    } catch (e) {
+      // Fallback text
+      doc.fillColor(C.blue).font(F.bold).fontSize(22).text('iMove', LEFT, headerY + 20);
+    }
+  } else {
+    doc.fillColor(C.blue).font(F.bold).fontSize(22).text('iMove', LEFT, headerY + 20);
+  }
+
+  // Centre: company contact stack
+  const centerX = LEFT + 140;
+  const centerW = CONTENT_W - 280;
+
+  doc.fillColor(C.dark).font(F.bold).fontSize(11)
+     .text(COMPANY.name, centerX, headerY + 2, { width: centerW, align: 'center' });
+
+  doc.fillColor(C.gray).font(F.regular).fontSize(9)
+     .text(`${COMPANY.phone}   •   ${COMPANY.email}`, centerX, headerY + 18, { width: centerW, align: 'center' });
+
+  doc.text(COMPANY.address, centerX, headerY + 32, { width: centerW, align: 'center' });
+
+  doc.fillColor(C.blue).font(F.regular).fontSize(9)
+     .text(COMPANY.website, centerX, headerY + 46, { width: centerW, align: 'center' });
+
+  // Doc title top-right
+  doc.fillColor(C.dark).font(F.bold).fontSize(26)
+     .text(docTitle, RIGHT - 140, headerY + 18, { width: 140, align: 'right' });
+
+  // Divider (brand green)
+  const divY = headerY + 78;
+  doc.strokeColor(C.green).lineWidth(2)
+     .moveTo(LEFT, divY).lineTo(RIGHT, divY).stroke();
+
+  return divY + 18; // caller uses this Y to start content
+}
+
+function drawInfoRow(doc, y, data, docLabel) {
+  const cols = [
+    { label: 'Date',        value: fmtDate(data.date || new Date()) },
+    { label: 'Customer',    value: data.customer_name || '—' },
+    { label: `${docLabel} ID`, value: data.doc_number || '—' },
+  ];
+
+  const colW = CONTENT_W / 3;
+
+  cols.forEach((c, i) => {
+    const x = LEFT + colW * i;
+    doc.fillColor(C.gray).font(F.regular).fontSize(9)
+       .text(c.label.toUpperCase(), x, y, { width: colW - 8 });
+    doc.fillColor(C.dark).font(F.bold).fontSize(11)
+       .text(c.value, x, y + 14, { width: colW - 8 });
+  });
+
+  return y + 42;
+}
+
+function drawGreeting(doc, y, data, introLine) {
+  doc.fillColor(C.dark).font(F.bold).fontSize(11)
+     .text(`Dear ${data.customer_name || 'Customer'},`, LEFT, y);
+  y += 18;
+
+  doc.fillColor(C.body).font(F.regular).fontSize(10)
+     .text(introLine, LEFT, y, { width: CONTENT_W, align: 'left', lineGap: 2 });
+
+  return doc.y + 14;
+}
+
+function drawMoveDetails(doc, y, data) {
+  const rows = [
+    { label: 'Date of removal',  value: fmtDate(data.move_date) },
+    { label: 'Moving from',      value: data.from_address || '—' },
+    { label: 'Property details', value: data.from_property_details || '—' },
+    { label: 'Moving to',        value: data.to_address || '—' },
+    { label: 'Property details', value: data.to_property_details || '—' },
+  ];
+
+  const labelW = 150;
+  const rowH = 22;
+
+  rows.forEach((row, i) => {
+    // Alt row shading
+    if (i % 2 === 0) {
+      doc.fillColor(C.lightBg).rect(LEFT, y, CONTENT_W, rowH).fill();
+    }
+    // Label
+    doc.fillColor(C.gray).font(F.bold).fontSize(9)
+       .text(row.label.toUpperCase(), LEFT + 10, y + 7, { width: labelW - 10 });
+    // Value
+    doc.fillColor(C.dark).font(F.regular).fontSize(10)
+       .text(row.value, LEFT + labelW, y + 7, { width: CONTENT_W - labelW - 10 });
+    y += rowH;
+  });
+
+  // Bottom border
+  doc.strokeColor(C.border).lineWidth(0.5)
+     .moveTo(LEFT, y).lineTo(RIGHT, y).stroke();
+
+  return y + 16;
+}
+
+function drawServicesTable(doc, y, title, items, subtotal, taxRate, taxAmount, total) {
+  // Check if we have enough space; if not, add a new page
+  if (y > 640) {
+    doc.addPage();
+    drawWatermark(doc);
+    y = 50;
+  }
+
+  const HEADER_H = 26;
+  const ROW_H    = 22;
+  const amountX  = LEFT + CONTENT_W - 160;
+  const amountW  = 150;
+
+  // Header bar (dark)
+  doc.fillColor(C.dark).rect(LEFT, y, CONTENT_W, HEADER_H).fill();
+  doc.fillColor(C.white).font(F.bold).fontSize(11)
+     .text(title, LEFT + 12, y + 8)
+     .text('Amount (excl. VAT)', amountX, y + 8, { width: amountW, align: 'right' });
+  y += HEADER_H;
+
+  // Rows
+  if (!items || items.length === 0) {
+    doc.fillColor(C.muted).font(F.italic).fontSize(10)
+       .text('(no items)', LEFT + 12, y + 6);
+    y += ROW_H;
+  } else {
+    items.forEach((item, i) => {
+      const bg = i % 2 === 0 ? C.white : C.lightBg;
+      doc.fillColor(bg).rect(LEFT, y, CONTENT_W, ROW_H).fill();
+
+      doc.fillColor(C.dark).font(F.regular).fontSize(10)
+         .text(item.description || '', LEFT + 12, y + 6, { width: amountX - LEFT - 20 });
+
+      // amount ex VAT = item.total (what's stored is typically the line total)
+      // Since existing rows store ex-VAT totals per line (VAT is aggregated at footer),
+      // we show `total` here.
+      doc.fillColor(C.dark).text(fmtMoney(item.total || 0), amountX, y + 6, { width: amountW, align: 'right' });
+      y += ROW_H;
+    });
+  }
+
+  // Totals stack
+  const totalsRows = [
+    { label: `Sub-total ${title}`, value: fmtMoney(subtotal), bold: false, color: C.body },
+    { label: `${Number(taxRate || 0).toFixed(0)}% VAT`, value: fmtMoney(taxAmount), bold: false, color: C.body },
+    { label: `Total ${title}`,     value: fmtMoney(total),    bold: true,  color: C.dark },
+  ];
+
+  totalsRows.forEach((row, i) => {
+    // subtle top border on totals region
+    if (i === 0) {
+      doc.strokeColor(C.border).lineWidth(0.5)
+         .moveTo(LEFT, y).lineTo(RIGHT, y).stroke();
+    }
+    if (row.bold) {
+      doc.fillColor(C.lightBg).rect(LEFT, y, CONTENT_W, ROW_H).fill();
+    }
+    doc.fillColor(row.color).font(row.bold ? F.bold : F.regular).fontSize(10)
+       .text(row.label, LEFT + 12, y + 6, { width: amountX - LEFT - 20 })
+       .text(row.value, amountX, y + 6, { width: amountW, align: 'right' });
+    y += ROW_H;
+  });
+
+  return y + 14;
+}
+
+function drawDepositAdjustment(doc, y, depositPaid, total, balance) {
+  const amountX = LEFT + CONTENT_W - 160;
+  const amountW = 150;
+
+  doc.fillColor(C.paid).font(F.regular).fontSize(10)
+     .text('Less: deposit already paid', LEFT + 12, y + 6, { width: amountX - LEFT - 20 })
+     .text(`− ${fmtMoney(depositPaid)}`, amountX, y + 6, { width: amountW, align: 'right' });
+  y += 22;
+
+  // Balance due (bold, green line)
+  doc.fillColor(C.green).rect(LEFT, y, CONTENT_W, 30).fill();
+  doc.fillColor(C.white).font(F.bold).fontSize(13)
+     .text('BALANCE DUE', LEFT + 12, y + 9, { width: amountX - LEFT - 20 })
+     .text(fmtMoney(balance), amountX, y + 9, { width: amountW, align: 'right' });
+
+  return y + 42;
+}
+
+function drawReceiptBlock(doc, y, data) {
+  // Green success block
+  const boxH = 70;
+  doc.fillColor(C.paid).rect(LEFT, y, CONTENT_W, boxH).fill();
+
+  doc.fillColor(C.white).font(F.regular).fontSize(11)
+     .text('Amount Received', LEFT + 16, y + 12);
+
+  doc.fillColor(C.white).font(F.bold).fontSize(26)
+     .text(fmtMoney(data.amount_paid), LEFT + 16, y + 30);
+
+  // Right side: method & date
+  const rightX = LEFT + CONTENT_W - 220;
+  doc.fillColor(C.white).font(F.regular).fontSize(9)
+     .text('Payment Method', rightX, y + 14, { width: 200, align: 'right' });
+  doc.font(F.bold).fontSize(11)
+     .text((data.payment_method || 'Bank transfer').toUpperCase(), rightX, y + 26, { width: 200, align: 'right' });
+
+  doc.font(F.regular).fontSize(9)
+     .text('Received On', rightX, y + 42, { width: 200, align: 'right' });
+  doc.font(F.bold).fontSize(11)
+     .text(fmtDate(data.payment_date || new Date()), rightX, y + 54, { width: 200, align: 'right' });
+
+  y += boxH + 14;
+
+  // Deposit-receipt: remaining balance note
+  if (data.mode === 'deposit-receipt' && data.balance > 0) {
+    doc.fillColor(C.lightBg).rect(LEFT, y, CONTENT_W, 40).fill();
+    doc.strokeColor(C.border).lineWidth(0.5).rect(LEFT, y, CONTENT_W, 40).stroke();
+
+    doc.fillColor(C.dark).font(F.bold).fontSize(11)
+       .text(`Remaining balance: ${fmtMoney(data.balance)}`, LEFT + 12, y + 8);
+    doc.fillColor(C.gray).font(F.regular).fontSize(9)
+       .text('A separate invoice for the balance will be issued closer to your move date.', LEFT + 12, y + 24);
+
+    y += 50;
+  }
+
+  return y;
+}
+
+function drawBankBox(doc, y, reference) {
+  // Ensure space; new page if needed
+  if (y > 690) {
+    doc.addPage();
+    drawWatermark(doc);
+    y = 50;
+  }
+
+  const h = 92;
+  // Soft green-tinted background
+  doc.fillColor(C.lightBg).rect(LEFT, y, CONTENT_W, h).fill();
+  doc.strokeColor(C.green).lineWidth(1.5).rect(LEFT, y, CONTENT_W, h).stroke();
+
+  doc.fillColor(C.dark).font(F.bold).fontSize(11)
+     .text('Payment — Bank Transfer', LEFT + 14, y + 10);
+
+  const cells = [
+    ['Account name',    COMPANY.name],
+    ['Sort code',       COMPANY.sortCode],
+    ['Account number',  COMPANY.accountNumber],
+    ['Reference',       reference || '—'],
+  ];
+  const cellW = CONTENT_W / 4;
+  cells.forEach(([label, value], i) => {
+    const x = LEFT + cellW * i;
+    doc.fillColor(C.gray).font(F.regular).fontSize(8)
+       .text(label.toUpperCase(), x + 14, y + 38, { width: cellW - 14 });
+    doc.fillColor(C.dark).font(F.bold).fontSize(11)
+       .text(value, x + 14, y + 52, { width: cellW - 14 });
+  });
+
+  return y + h + 14;
+}
+
+function drawClosing(doc, y, docType) {
+  // New page if too tight
+  if (y > 720) {
+    doc.addPage();
+    drawWatermark(doc);
+    y = 50;
+  }
+
+  const closingMap = {
+    quote:   'Thank you for taking the time to review our quote. Should you have any inquiries or require further clarification, please feel free to reach out — your satisfaction is our priority.',
+    invoice: 'Thank you for choosing iMove Relocations. Payment details are provided above. Please ensure the reference number is included with your payment. If you have any questions regarding this invoice, please don\'t hesitate to contact us.',
+    receipt: 'Thank you for your payment — we truly appreciate your business. Please keep this receipt for your records, and don\'t hesitate to reach out if you have any questions.',
+  };
+
+  doc.fillColor(C.body).font(F.regular).fontSize(10)
+     .text(closingMap[docType] || closingMap.quote, LEFT, y, { width: CONTENT_W, lineGap: 2 });
+
+  y = doc.y + 22;
+
+  // Signature
+  doc.fillColor(C.dark).font(F.bold).fontSize(11)
+     .text(COMPANY.signOffName, LEFT, y);
+  doc.fillColor(C.gray).font(F.regular).fontSize(10)
+     .text(COMPANY.name, LEFT, y + 15);
+
+  return y + 36;
+}
+
+function drawStamp(doc, text, color) {
+  doc.save();
+  doc.opacity(0.12);
+  doc.fillColor(color).font(F.bold).fontSize(90)
+     .text(text, 0, 330, { width: PAGE_W, align: 'center' });
+  doc.restore();
+  doc.opacity(1);
+}
+
+function drawFooter(doc) {
+  const y = FOOTER_Y;
+
+  // Top separator
+  doc.strokeColor(C.green).lineWidth(1).moveTo(LEFT, y).lineTo(RIGHT, y).stroke();
+
+  // Left: company + number
+  doc.fillColor(C.dark).font(F.bold).fontSize(8)
+     .text(COMPANY.name, LEFT, y + 8);
+  doc.fillColor(C.gray).font(F.regular).fontSize(8)
+     .text(`Company number: ${COMPANY.companyNumber}`, LEFT, y + 20);
+
+  // Centre: socials
+  doc.fillColor(C.gray).font(F.regular).fontSize(8)
+     .text(COMPANY.socials, 0, y + 14, { width: PAGE_W, align: 'center' });
+
+  // Right: page number
+  const range = doc.bufferedPageRange ? doc.bufferedPageRange() : { start: 0, count: 1 };
+  const currentPage = (doc.page && doc.page.number) || 1;
+  const totalPages = range.count || 1;
+  doc.fillColor(C.muted).font(F.regular).fontSize(8)
+     .text(`Page ${currentPage} of ${totalPages}`, RIGHT - 80, y + 20, { width: 80, align: 'right' });
+}
+
+// ── Main renderer ──────────────────────────────────────────────────────────
+const DOC_CONFIG = {
+  'estimate-quote': {
+    headerWord: 'Quote',       docType: 'quote',   docLabel: 'Quote',
+    stamp: 'ESTIMATE',         stampColor: C.warn, showBank: false,
+  },
+  'fixed-quote': {
+    headerWord: 'Quote',       docType: 'quote',   docLabel: 'Quote',
+    stamp: null,                                   showBank: false,
+  },
+  'deposit-invoice': {
+    headerWord: 'Invoice',     docType: 'invoice', docLabel: 'Invoice',
+    stamp: null,                                   showBank: true,
+  },
+  'main-invoice': {
+    headerWord: 'Invoice',     docType: 'invoice', docLabel: 'Invoice',
+    stamp: null,                                   showBank: true,
+  },
+  'deposit-receipt': {
+    headerWord: 'Receipt',     docType: 'receipt', docLabel: 'Receipt',
+    stamp: 'PAID',             stampColor: C.paid, showBank: false,
+  },
+  'move-receipt': {
+    headerWord: 'Receipt',     docType: 'receipt', docLabel: 'Receipt',
+    stamp: 'PAID IN FULL',     stampColor: C.paid, showBank: false,
+  },
+};
+
+async function renderDocument(data) {
+  const mode = data.mode || 'fixed-quote';
+  const config = DOC_CONFIG[mode];
+  if (!config) throw new Error(`Unknown PDF mode: ${mode}`);
+
   const doc = new PDFDocument({
     size: 'A4',
-    margin: 50,
+    margin: 0, // we handle margins manually
+    bufferPages: true, // needed for correct page totals in footer
     info: {
-      Title: `Quote ${quoteData.quote_number}`,
-      Author: 'iMove Partners',
-      Subject: `Moving quote for ${quoteData.customer_name}`,
-      Keywords: 'quote, moving, relocation, iMove',
-      Creator: 'iMove Partners CRM',
+      Title:    `${config.docLabel} ${data.doc_number || ''}`,
+      Author:   COMPANY.name,
+      Subject:  `${config.docLabel} for ${data.customer_name || ''}`,
+      Keywords: `${config.docType}, iMove, relocations, moving`,
+      Creator:  'iMove CRM',
     },
   });
 
   const buffers = [];
-  doc.on('data', buffers.push.bind(buffers));
-  doc.on('end', () => {});
+  doc.on('data', b => buffers.push(b));
 
-  // ─── HEADER ──────────────────────────────────────────────────────────────
-  // Logo placeholder (you can add a real logo image later)
-  doc.fillColor(BRAND_COLORS.primary)
-     .font(FONTS.bold)
-     .fontSize(24)
-     .text('iMove', 50, 50);
-  
-  doc.fillColor(BRAND_COLORS.dark)
-     .font(FONTS.regular)
-     .fontSize(14)
-     .text('Partners', 50, 75);
-  
-  doc.fillColor(BRAND_COLORS.gray)
-     .font(FONTS.regular)
-     .fontSize(10)
-     .text('Professional Removals & Relocations', 50, 95);
+  // ── Page 1 ────────────────────────────────────────────────────────────
+  drawWatermark(doc);
 
-  // Quote header
-  doc.fillColor(BRAND_COLORS.dark)
-     .font(FONTS.bold)
-     .fontSize(28)
-     .text('QUOTATION', 350, 50, { align: 'right' });
-  
-  doc.fillColor(BRAND_COLORS.gray)
-     .font(FONTS.regular)
-     .fontSize(12)
-     .text(`Ref: ${quoteData.quote_number}`, 350, 85, { align: 'right' });
-  
-  if (quoteData.valid_until) {
-    doc.fillColor(BRAND_COLORS.accent)
-       .font(FONTS.bold)
-       .fontSize(10)
-       .text(`Valid until: ${quoteData.valid_until}`, 350, 100, { align: 'right' });
-  }
+  let y = drawHeader(doc, config.headerWord);
+  y = drawInfoRow(doc, y, data, config.docLabel);
 
-  // Horizontal line
-  doc.strokeColor(BRAND_COLORS.primary)
-     .lineWidth(2)
-     .moveTo(50, 120)
-     .lineTo(550, 120)
-     .stroke();
+  // Greeting + intro
+  const introByType = {
+    quote:   'Please find the quotation for our services outlined below. All prices are shown excluding VAT where applicable.',
+    invoice: 'Please find our invoice for the services below. Payment details are provided further down — kindly include the reference number when making your payment.',
+    receipt: 'Thank you — we have received your payment. This receipt confirms your payment details are below for your records.',
+  };
+  y = drawGreeting(doc, y, data, introByType[config.docType]);
 
-  // ─── CUSTOMER & JOB DETAILS ──────────────────────────────────────────────
-  doc.y = 140;
-  
-  // Customer info
-  doc.fillColor(BRAND_COLORS.dark)
-     .font(FONTS.bold)
-     .fontSize(14)
-     .text('Customer:', 50, doc.y);
-  
-  doc.fillColor(BRAND_COLORS.dark)
-     .font(FONTS.regular)
-     .fontSize(12)
-     .text(quoteData.customer_name, 120, doc.y);
-  
-  doc.y += 20;
-  
-  if (quoteData.customer_email) {
-    doc.fillColor(BRAND_COLORS.gray)
-       .font(FONTS.regular)
-       .fontSize(10)
-       .text(`Email: ${quoteData.customer_email}`, 50, doc.y);
-    doc.y += 15;
-  }
-  
-  if (quoteData.customer_phone) {
-    doc.fillColor(BRAND_COLORS.gray)
-       .font(FONTS.regular)
-       .fontSize(10)
-       .text(`Phone: ${quoteData.customer_phone}`, 50, doc.y);
-    doc.y += 15;
-  }
+  // Move details table
+  y = drawMoveDetails(doc, y, data);
 
-  // Job details
-  if (quoteData.from_address || quoteData.to_address) {
-    doc.y += 10;
-    doc.fillColor(BRAND_COLORS.dark)
-       .font(FONTS.bold)
-       .fontSize(14)
-       .text('Move Details:', 50, doc.y);
-    doc.y += 20;
-    
-    if (quoteData.from_address) {
-      doc.fillColor(BRAND_COLORS.dark)
-         .font(FONTS.regular)
-         .fontSize(10)
-         .text(`From: ${quoteData.from_address}`, 50, doc.y);
-      doc.y += 15;
+  // Services (skip the items table for receipts — show only the receipt block)
+  if (config.docType !== 'receipt') {
+    y = drawServicesTable(
+      doc, y,
+      'Services',
+      data.items || [],
+      data.subtotal || 0,
+      data.tax_rate || 20,
+      data.tax_amount || 0,
+      data.total || 0
+    );
+
+    // Optional Services (quotes only, if we have any optional items)
+    const optItems = data.optional_items || [];
+    if (optItems.length > 0 && config.docType === 'quote') {
+      const optSubtotal = optItems.reduce((s, i) => s + (Number(i.total) || 0), 0);
+      const optTaxRate = data.tax_rate || 20;
+      const optTax = optSubtotal * optTaxRate / 100;
+      const optTotal = optSubtotal + optTax;
+      y = drawServicesTable(doc, y, 'Optional Services', optItems, optSubtotal, optTaxRate, optTax, optTotal);
     }
-    
-    if (quoteData.to_address) {
-      doc.fillColor(BRAND_COLORS.dark)
-         .font(FONTS.regular)
-         .fontSize(10)
-         .text(`To: ${quoteData.to_address}`, 50, doc.y);
-      doc.y += 15;
+
+    // Deposit deduction (main-invoice with prior deposit)
+    if (mode === 'main-invoice' && Number(data.deposit_paid) > 0) {
+      const balance = (Number(data.total) || 0) - (Number(data.deposit_paid) || 0);
+      y = drawDepositAdjustment(doc, y, data.deposit_paid, data.total, balance);
     }
-    
-    if (quoteData.move_date) {
-      doc.fillColor(BRAND_COLORS.dark)
-         .font(FONTS.regular)
-         .fontSize(10)
-         .text(`Move Date: ${quoteData.move_date}`, 50, doc.y);
-      doc.y += 15;
-    }
+  } else {
+    // Receipt block replaces items table
+    y = drawReceiptBlock(doc, y, { ...data, mode });
   }
 
-  // ─── QUOTE TYPE BADGE ────────────────────────────────────────────────────
-  doc.y += 10;
-  const quoteType = quoteData.quote_type || 'estimate';
-  const typeColor = quoteType === 'fixed' ? BRAND_COLORS.success : BRAND_COLORS.accent;
-  const typeText = quoteType === 'fixed' ? 'FIXED QUOTE' : 'ESTIMATE QUOTE';
-  
-  doc.fillColor(typeColor)
-     .roundedRect(50, doc.y, 200, 25, 3)
-     .fill();
-  
-  doc.fillColor('#ffffff')
-     .font(FONTS.bold)
-     .fontSize(12)
-     .text(typeText, 60, doc.y + 7);
-
-  doc.y += 40;
-
-  // ─── LINE ITEMS TABLE ────────────────────────────────────────────────────
-  // Table header
-  doc.fillColor(BRAND_COLORS.light)
-     .roundedRect(50, doc.y, 500, 30, 3)
-     .fill();
-  
-  doc.fillColor(BRAND_COLORS.dark)
-     .font(FONTS.bold)
-     .fontSize(11)
-     .text('Description', 60, doc.y + 10);
-  
-  doc.text('Qty', 300, doc.y + 10, { width: 60, align: 'center' });
-  doc.text('Unit Price', 370, doc.y + 10, { width: 80, align: 'right' });
-  doc.text('Total', 460, doc.y + 10, { width: 80, align: 'right' });
-
-  doc.y += 35;
-
-  // Line items
-  const items = quoteData.items || [];
-  items.forEach((item, index) => {
-    const bgColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
-    
-    doc.fillColor(bgColor)
-       .rect(50, doc.y, 500, 25)
-       .fill();
-    
-    doc.fillColor(BRAND_COLORS.dark)
-       .font(FONTS.regular)
-       .fontSize(10)
-       .text(item.description || '', 60, doc.y + 8, { width: 230 });
-    
-    doc.text(String(item.quantity || 1), 300, doc.y + 8, { width: 60, align: 'center' });
-    
-    doc.text(`£${(item.unit_price || 0).toFixed(2)}`, 370, doc.y + 8, { width: 80, align: 'right' });
-    
-    doc.text(`£${(item.total || 0).toFixed(2)}`, 460, doc.y + 8, { width: 80, align: 'right' });
-    
-    doc.y += 25;
-  });
-
-  // ─── TOTALS ──────────────────────────────────────────────────────────────
-  doc.y += 20;
-  
-  const subtotal = quoteData.subtotal || 0;
-  const taxAmount = quoteData.tax_amount || 0;
-  const total = quoteData.total || 0;
-  const deposit = quoteData.deposit || 0;
-  const balance = total - deposit;
-
-  // Subtotal
-  doc.fillColor(BRAND_COLORS.dark)
-     .font(FONTS.regular)
-     .fontSize(11)
-     .text('Subtotal:', 370, doc.y, { width: 80, align: 'right' });
-  
-  doc.text(`£${subtotal.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-  doc.y += 20;
-
-  // VAT
-  if (taxAmount > 0) {
-    doc.fillColor(BRAND_COLORS.dark)
-       .font(FONTS.regular)
-       .fontSize(11)
-       .text('VAT (20%):', 370, doc.y, { width: 80, align: 'right' });
-    
-    doc.text(`£${taxAmount.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-    doc.y += 20;
+  // Bank details for invoices
+  if (config.showBank) {
+    y = drawBankBox(doc, y, data.doc_number);
   }
 
-  // Deposit
-  if (deposit > 0) {
-    doc.fillColor(BRAND_COLORS.accent)
-       .font(FONTS.bold)
-       .fontSize(11)
-       .text('Deposit:', 370, doc.y, { width: 80, align: 'right' });
-    
-    doc.text(`£${deposit.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-    doc.y += 20;
+  // Closing + signature
+  y = drawClosing(doc, y, config.docType);
 
-    // Balance
-    doc.fillColor(BRAND_COLORS.dark)
-       .font(FONTS.regular)
-       .fontSize(11)
-       .text('Balance Due:', 370, doc.y, { width: 80, align: 'right' });
-    
-    doc.text(`£${balance.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-    doc.y += 20;
+  // Stamp overlay (drawn on first page only after content to float above)
+  if (config.stamp) {
+    drawStamp(doc, config.stamp, config.stampColor);
   }
 
-  // Total
-  doc.fillColor(BRAND_COLORS.primary)
-     .font(FONTS.bold)
-     .fontSize(14)
-     .text('TOTAL:', 370, doc.y, { width: 80, align: 'right' });
-  
-  doc.text(`£${total.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-  doc.y += 30;
-
-  // ─── NOTES & TERMS ───────────────────────────────────────────────────────
-  if (quoteData.notes) {
-    doc.fillColor(BRAND_COLORS.light)
-       .roundedRect(50, doc.y, 500, 60, 5)
-       .fill();
-    
-    doc.fillColor(BRAND_COLORS.dark)
-       .font(FONTS.bold)
-       .fontSize(10)
-       .text('Notes:', 60, doc.y + 10);
-    
-    doc.fillColor(BRAND_COLORS.gray)
-       .font(FONTS.regular)
-       .fontSize(9)
-       .text(quoteData.notes, 60, doc.y + 25, { width: 480 });
-    
-    doc.y += 70;
-  }
-
-  // Standard terms
-  doc.fillColor(BRAND_COLORS.gray)
-     .font(FONTS.regular)
-     .fontSize(8)
-     .text('Terms & Conditions:', 50, doc.y);
-  
-  doc.y += 10;
-  
-  const terms = [
-    'This quote is valid for 30 days from the date of issue.',
-    'A deposit of 25% is required to secure your booking.',
-    'Balance is due 7 days prior to the move date.',
-    'Prices include VAT at the standard rate (20%).',
-    'Additional charges may apply for parking permits, congestion charges, or access restrictions.',
-    'Cancellations within 14 days of the move date may incur a cancellation fee.',
-  ];
-  
-  terms.forEach(term => {
-    doc.fillColor(BRAND_COLORS.gray)
-       .font(FONTS.regular)
-       .fontSize(7)
-       .text(`• ${term}`, 60, doc.y, { width: 480 });
-    doc.y += 10;
-  });
-
-  // ─── FOOTER ──────────────────────────────────────────────────────────────
-  doc.y = 750;
-  
-  doc.fillColor(BRAND_COLORS.gray)
-     .font(FONTS.regular)
-     .fontSize(8)
-     .text('iMove Partners Ltd', 50, doc.y, { align: 'left' });
-  
-  doc.text('Registered in England & Wales: 12345678', 300, doc.y, { align: 'center' });
-  
-  doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 550, doc.y, { align: 'right' });
-  
-  doc.y += 10;
-  
-  doc.fillColor(BRAND_COLORS.primary)
-     .font(FONTS.regular)
-     .fontSize(8)
-     .text('hello@myimove.co.uk | 0800 123 4567 | www.myimove.co.uk', 300, doc.y, { align: 'center' });
-
-  // Watermark for estimates
-  if (quoteType === 'estimate') {
-    doc.fillColor('rgba(245, 158, 11, 0.1)')
-       .font(FONTS.bold)
-       .fontSize(80)
-       .text('ESTIMATE', 150, 300, { align: 'center', opacity: 0.1 });
+  // ── Footer on every page ──────────────────────────────────────────────
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    drawFooter(doc);
   }
 
   doc.end();
@@ -337,263 +562,101 @@ async function generateQuotePDF(quoteData) {
   return new Promise((resolve, reject) => {
     doc.on('end', () => {
       const buffer = Buffer.concat(buffers);
+      const prefix = config.docType;
       resolve({
         buffer,
-        filename: `quote-${quoteData.quote_number}.pdf`,
+        filename: `${prefix}-${data.doc_number || Date.now()}.pdf`,
         mimeType: 'application/pdf',
       });
     });
-    
     doc.on('error', reject);
+  });
+}
+
+// ── Backward-compatible shims ──────────────────────────────────────────────
+/**
+ * Legacy: generateQuotePDF(quoteData)
+ * Expected fields: quote_type, quote_number, customer_name/email/phone,
+ * from_address, to_address, move_date, items[], subtotal, tax_rate?, tax_amount, total, deposit, notes, valid_until
+ */
+async function generateQuotePDF(quoteData) {
+  const mode = (quoteData.quote_type === 'fixed') ? 'fixed-quote' : 'estimate-quote';
+  return renderDocument({
+    mode,
+    doc_number: quoteData.quote_number,
+    date: quoteData.created_at || new Date(),
+    customer_name: quoteData.customer_name,
+    customer_email: quoteData.customer_email,
+    customer_phone: quoteData.customer_phone,
+    from_address: quoteData.from_address,
+    from_property_details: quoteData.from_property_details || buildPropertyDetails([
+      quoteData.property_type_from,
+      quoteData.bedrooms ? `${quoteData.bedrooms} bed` : null,
+      quoteData.floor_from ? `Floor ${quoteData.floor_from}` : null,
+      quoteData.has_lift_from === true ? 'Lift' : (quoteData.has_lift_from === false ? 'No lift' : null),
+    ]),
+    to_address: quoteData.to_address,
+    to_property_details: quoteData.to_property_details || buildPropertyDetails([
+      quoteData.property_type_to,
+      quoteData.bedrooms_to ? `${quoteData.bedrooms_to} bed` : null,
+      quoteData.floor_to ? `Floor ${quoteData.floor_to}` : null,
+      quoteData.has_lift_to === true ? 'Lift' : (quoteData.has_lift_to === false ? 'No lift' : null),
+    ]),
+    move_date: quoteData.move_date,
+    items: quoteData.items || [],
+    optional_items: quoteData.optional_items || [],
+    subtotal: quoteData.subtotal,
+    tax_rate: quoteData.tax_rate || 20,
+    tax_amount: quoteData.tax_amount,
+    total: quoteData.total,
+    deposit: quoteData.deposit,
+    notes: quoteData.notes,
   });
 }
 
 /**
- * Generate a PDF for invoices (deposit or main) and receipts (deposit-paid or move-receipt).
- * Single function with `mode` switching between styles.
- *
- * @param {Object} data
- * @param {'deposit-invoice'|'main-invoice'|'deposit-receipt'|'move-receipt'} data.mode
- * @param {string} data.invoice_number
- * @param {string} data.customer_name
- * @param {string} [data.customer_email]
- * @param {string} [data.customer_phone]
- * @param {string} [data.from_address]
- * @param {string} [data.to_address]
- * @param {string} [data.move_date]
- * @param {string} [data.due_date]
- * @param {Array}  [data.items]
- * @param {number} [data.subtotal]
- * @param {number} [data.tax_amount]
- * @param {number} [data.total]
- * @param {number} [data.deposit_paid]   amount already received (for main-invoice)
- * @param {number} [data.amount_paid]    amount of this receipt (for receipts)
- * @param {number} [data.balance]
- * @param {string} [data.payment_method]
- * @param {string} [data.payment_date]
- * @param {string} [data.notes]
+ * Legacy: generateInvoicePDF(data)
+ * data.mode is already one of: deposit-invoice | main-invoice | deposit-receipt | move-receipt
  */
 async function generateInvoicePDF(data) {
-  const mode = data.mode || 'main-invoice';
-  const isReceipt = mode.endsWith('receipt');
-  const isDepositInv = mode === 'deposit-invoice';
-  const isMoveReceipt = mode === 'move-receipt';
-
-  // Title and badge colours per mode
-  const cfg = {
-    'deposit-invoice':  { title: 'DEPOSIT INVOICE',  badge: 'DEPOSIT REQUIRED', color: BRAND_COLORS.accent,  watermark: 'DEPOSIT' },
-    'main-invoice':     { title: 'INVOICE',          badge: 'PAYMENT DUE',      color: BRAND_COLORS.primary, watermark: null },
-    'deposit-receipt':  { title: 'RECEIPT',          badge: 'DEPOSIT PAID ✓',   color: BRAND_COLORS.success, watermark: 'PAID' },
-    'move-receipt':     { title: 'RECEIPT',          badge: 'PAID IN FULL ✓',   color: BRAND_COLORS.success, watermark: 'PAID IN FULL' },
-  }[mode];
-
-  const doc = new PDFDocument({
-    size: 'A4',
-    margin: 50,
-    info: {
-      Title: `${cfg.title} ${data.invoice_number || ''}`,
-      Author: 'iMove Partners',
-      Subject: `${cfg.title} for ${data.customer_name}`,
-      Creator: 'iMove Partners CRM',
-    },
-  });
-
-  const buffers = [];
-  doc.on('data', buffers.push.bind(buffers));
-  doc.on('end', () => {});
-
-  // ── HEADER ──────────────────────────────────────────────────────────
-  doc.fillColor(BRAND_COLORS.primary).font(FONTS.bold).fontSize(24).text('iMove', 50, 50);
-  doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(14).text('Partners', 50, 75);
-  doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text('Professional Removals & Relocations', 50, 95);
-
-  doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(28).text(cfg.title, 350, 50, { align: 'right' });
-  doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(12).text(`Ref: ${data.invoice_number || 'N/A'}`, 350, 85, { align: 'right' });
-
-  if (data.due_date && !isReceipt) {
-    doc.fillColor(BRAND_COLORS.accent).font(FONTS.bold).fontSize(10).text(`Due: ${data.due_date}`, 350, 100, { align: 'right' });
-  } else if (data.payment_date && isReceipt) {
-    doc.fillColor(BRAND_COLORS.success).font(FONTS.bold).fontSize(10).text(`Paid: ${data.payment_date}`, 350, 100, { align: 'right' });
-  }
-
-  doc.strokeColor(cfg.color).lineWidth(2).moveTo(50, 120).lineTo(550, 120).stroke();
-
-  // ── CUSTOMER INFO ───────────────────────────────────────────────────
-  doc.y = 140;
-  doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(14).text('Bill To:', 50, doc.y);
-  doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(12).text(data.customer_name || 'Customer', 50, doc.y + 18);
-
-  if (data.customer_email) {
-    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(data.customer_email, 50, doc.y + 36);
-  }
-  if (data.customer_phone) {
-    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(data.customer_phone, 50, doc.y + 50);
-  }
-
-  // Move details
-  if (data.from_address || data.to_address || data.move_date) {
-    doc.y += 80;
-    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(12).text('Move Details:', 50, doc.y);
-    doc.y += 18;
-    if (data.from_address) {
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(`From: ${data.from_address}`, 50, doc.y); doc.y += 14;
-    }
-    if (data.to_address) {
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(`To: ${data.to_address}`, 50, doc.y); doc.y += 14;
-    }
-    if (data.move_date) {
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10).text(`Move date: ${data.move_date}`, 50, doc.y); doc.y += 14;
-    }
-  } else {
-    doc.y += 60;
-  }
-
-  // ── STATUS BADGE ────────────────────────────────────────────────────
-  doc.y += 10;
-  doc.fillColor(cfg.color).roundedRect(50, doc.y, 220, 28, 3).fill();
-  doc.fillColor('#ffffff').font(FONTS.bold).fontSize(13).text(cfg.badge, 60, doc.y + 8);
-  doc.y += 45;
-
-  // ── LINE ITEMS (only for invoices, not receipts) ────────────────────
-  if (!isReceipt && data.items && data.items.length > 0) {
-    doc.fillColor(BRAND_COLORS.light).roundedRect(50, doc.y, 500, 30, 3).fill();
-    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(11).text('Description', 60, doc.y + 10);
-    doc.text('Qty', 300, doc.y + 10, { width: 60, align: 'center' });
-    doc.text('Unit Price', 370, doc.y + 10, { width: 80, align: 'right' });
-    doc.text('Total', 460, doc.y + 10, { width: 80, align: 'right' });
-    doc.y += 35;
-
-    data.items.forEach((item, index) => {
-      const bgColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
-      doc.fillColor(bgColor).rect(50, doc.y, 500, 25).fill();
-      doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(10)
-         .text(item.description || '', 60, doc.y + 8, { width: 230 });
-      doc.text(String(item.quantity || 1), 300, doc.y + 8, { width: 60, align: 'center' });
-      doc.text(`£${(item.unit_price || 0).toFixed(2)}`, 370, doc.y + 8, { width: 80, align: 'right' });
-      doc.text(`£${(item.total || 0).toFixed(2)}`, 460, doc.y + 8, { width: 80, align: 'right' });
-      doc.y += 25;
-    });
-  }
-
-  // ── TOTALS / RECEIPT BLOCK ──────────────────────────────────────────
-  doc.y += 20;
-  const subtotal = data.subtotal || 0;
-  const taxAmount = data.tax_amount || 0;
-  const total = data.total || 0;
-  const depositPaid = data.deposit_paid || 0;
-  const amountPaid = data.amount_paid || 0;
-  const balance = data.balance != null ? data.balance : (total - depositPaid);
-
-  if (isReceipt) {
-    // Big "amount paid" block
-    doc.fillColor(BRAND_COLORS.success).roundedRect(300, doc.y, 250, 60, 5).fill();
-    doc.fillColor('#ffffff').font(FONTS.regular).fontSize(11).text('Amount Received', 310, doc.y + 10);
-    doc.fillColor('#ffffff').font(FONTS.bold).fontSize(24).text(`£${amountPaid.toFixed(2)}`, 310, doc.y + 28);
-    doc.y += 80;
-
-    if (data.payment_method) {
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10)
-         .text(`Payment method: ${data.payment_method}`, 50, doc.y); doc.y += 14;
-    }
-    if (data.payment_date) {
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(10)
-         .text(`Received on: ${data.payment_date}`, 50, doc.y); doc.y += 14;
-    }
-
-    // For deposit receipt, show remaining balance
-    if (mode === 'deposit-receipt' && balance > 0) {
-      doc.y += 10;
-      doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(12)
-         .text(`Remaining balance: £${balance.toFixed(2)}`, 50, doc.y);
-      doc.y += 16;
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(9)
-         .text('A separate invoice for the balance will be sent closer to the move date.', 50, doc.y);
-    }
-  } else {
-    // Subtotal / VAT / Total stack
-    doc.fillColor(BRAND_COLORS.dark).font(FONTS.regular).fontSize(11)
-       .text('Subtotal:', 370, doc.y, { width: 80, align: 'right' });
-    doc.text(`£${subtotal.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-    doc.y += 18;
-
-    if (taxAmount > 0) {
-      doc.text('VAT (20%):', 370, doc.y, { width: 80, align: 'right' });
-      doc.text(`£${taxAmount.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-      doc.y += 18;
-    }
-
-    if (mode === 'main-invoice' && depositPaid > 0) {
-      doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(11)
-         .text('Total:', 370, doc.y, { width: 80, align: 'right' });
-      doc.text(`£${total.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-      doc.y += 18;
-      doc.fillColor(BRAND_COLORS.success).font(FONTS.regular).fontSize(11)
-         .text('Less deposit paid:', 350, doc.y, { width: 100, align: 'right' });
-      doc.text(`−£${depositPaid.toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-      doc.y += 18;
-    }
-
-    // Balance due (big)
-    doc.fillColor(BRAND_COLORS.primary).font(FONTS.bold).fontSize(14)
-       .text(mode === 'main-invoice' && depositPaid > 0 ? 'BALANCE DUE:' : 'TOTAL:', 350, doc.y, { width: 100, align: 'right' });
-    doc.text(`£${(mode === 'main-invoice' && depositPaid > 0 ? balance : total).toFixed(2)}`, 460, doc.y, { width: 80, align: 'right' });
-    doc.y += 30;
-
-    // Bank transfer details box
-    doc.fillColor(BRAND_COLORS.light).roundedRect(50, doc.y, 500, 80, 5).fill();
-    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(11).text('Payment Details:', 60, doc.y + 10);
-    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(9)
-       .text('Bank transfer:', 60, doc.y + 28);
-    doc.font(FONTS.regular).fontSize(9)
-       .text('Account name: iMove Partners Ltd', 60, doc.y + 40)
-       .text('Sort code: XX-XX-XX    Account: XXXXXXXX', 60, doc.y + 52)
-       .text(`Reference: ${data.invoice_number || ''}`, 60, doc.y + 64);
-    doc.y += 100;
-  }
-
-  // ── NOTES ───────────────────────────────────────────────────────────
-  if (data.notes) {
-    doc.fillColor(BRAND_COLORS.light).roundedRect(50, doc.y, 500, 50, 5).fill();
-    doc.fillColor(BRAND_COLORS.dark).font(FONTS.bold).fontSize(10).text('Notes:', 60, doc.y + 10);
-    doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(9).text(data.notes, 60, doc.y + 25, { width: 480 });
-    doc.y += 60;
-  }
-
-  // ── FOOTER ──────────────────────────────────────────────────────────
-  doc.y = 750;
-  doc.fillColor(BRAND_COLORS.gray).font(FONTS.regular).fontSize(8)
-     .text('iMove Partners Ltd', 50, doc.y, { align: 'left' })
-     .text('Registered in England & Wales: 12345678', 300, doc.y, { align: 'center' })
-     .text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 550, doc.y, { align: 'right' });
-
-  doc.fillColor(BRAND_COLORS.primary).font(FONTS.regular).fontSize(8)
-     .text('hello@myimove.co.uk | 0208 058 0958 | www.myimove.co.uk', 300, doc.y + 12, { align: 'center' });
-
-  // Watermark
-  if (cfg.watermark) {
-    doc.fillColor('rgba(16, 185, 129, 0.08)').font(FONTS.bold).fontSize(80)
-       .text(cfg.watermark, 60, 350, { align: 'center', opacity: 0.08 });
-  }
-
-  doc.end();
-
-  return new Promise((resolve, reject) => {
-    doc.on('end', () => {
-      const buffer = Buffer.concat(buffers);
-      const prefix = isReceipt ? 'receipt' : 'invoice';
-      resolve({
-        buffer,
-        filename: `${prefix}-${data.invoice_number || Date.now()}.pdf`,
-        mimeType: 'application/pdf',
-      });
-    });
-    doc.on('error', reject);
+  return renderDocument({
+    mode: data.mode || 'main-invoice',
+    doc_number: data.invoice_number,
+    date: data.date || data.payment_date || new Date(),
+    customer_name: data.customer_name,
+    customer_email: data.customer_email,
+    customer_phone: data.customer_phone,
+    from_address: data.from_address,
+    from_property_details: data.from_property_details || buildPropertyDetails([
+      data.property_type_from,
+      data.bedrooms ? `${data.bedrooms} bed` : null,
+      data.floor_from ? `Floor ${data.floor_from}` : null,
+      data.has_lift_from === true ? 'Lift' : (data.has_lift_from === false ? 'No lift' : null),
+    ]),
+    to_address: data.to_address,
+    to_property_details: data.to_property_details || buildPropertyDetails([
+      data.property_type_to,
+      data.bedrooms_to ? `${data.bedrooms_to} bed` : null,
+      data.floor_to ? `Floor ${data.floor_to}` : null,
+      data.has_lift_to === true ? 'Lift' : (data.has_lift_to === false ? 'No lift' : null),
+    ]),
+    move_date: data.move_date,
+    items: data.items || [],
+    subtotal: data.subtotal,
+    tax_rate: data.tax_rate || 20,
+    tax_amount: data.tax_amount,
+    total: data.total,
+    deposit_paid: data.deposit_paid,
+    amount_paid: data.amount_paid,
+    balance: data.balance,
+    payment_method: data.payment_method,
+    payment_date: data.payment_date,
+    notes: data.notes,
   });
 }
 
 async function renderHTMLToPDF(html, filename) {
-  // Fallback for HTML rendering if needed
-  console.log(`[pdf] HTML rendering not implemented, using placeholder for: ${filename}`);
+  console.log(`[pdf] HTML->PDF fallback invoked for: ${filename}`);
   return {
     buffer: Buffer.from(`<html><body><h1>PDF Placeholder: ${filename}</h1></body></html>`),
     filename,
@@ -601,4 +664,9 @@ async function renderHTMLToPDF(html, filename) {
   };
 }
 
-module.exports = { generateQuotePDF, generateInvoicePDF, renderHTMLToPDF };
+module.exports = {
+  generateQuotePDF,
+  generateInvoicePDF,
+  renderDocument,
+  renderHTMLToPDF,
+};

@@ -207,88 +207,99 @@ async function main() {
   }
 
   // ─── Email templates (6 transactional) ───────────────────────────────────
+  // Formal "Dear [Name]" voice, signed by Daniel · iMove Relocations Ltd.
+  // Email footer stays consistent across all 6: company contact + company number + review links.
+  const EMAIL_FOOTER = `<p style="margin-top:28px;padding-top:16px;border-top:1px solid #dfe4ea;color:#666;font-size:13px;line-height:1.5">
+Kind regards,<br/>
+<strong style="color:#1a1a1a">Daniel</strong><br/>
+iMove Relocations Ltd<br/>
+📞 01638 255 255 &nbsp;|&nbsp; ✉️ info@myimove.co.uk &nbsp;|&nbsp; 🌐 www.myimove.co.uk<br/>
+94C Hampstead Avenue, Mildenhall, Suffolk, IP28 7AS<br/>
+<span style="color:#999;font-size:11px">Company number: 16291851</span>
+</p>`;
+
+  const BANK_BLOCK = `<p style="background:#f7f9fb;border-left:3px solid #a5d535;padding:12px 16px;margin:16px 0">
+<strong>Payment — Bank Transfer</strong><br/>
+Account name: <strong>iMove Relocations Ltd</strong><br/>
+Sort code: <strong>04-00-03</strong><br/>
+Account number: <strong>66057796</strong><br/>
+Reference: <strong>{{invoice_number}}</strong>
+</p>`;
+
   const emailTemplates = [
     {
       slug: 'estimate-quote',
       name: 'Estimate Quote',
-      subject: 'Your moving estimate from iMove Partners — Quote {{quote_number}}',
-      body_html: `<p>Hi {{customer_name}},</p>
-<p>Thank you for getting in touch with <strong>iMove Partners</strong>. Please find attached your <strong>estimate</strong> for the move from {{from_address}} to {{to_address}}.</p>
-<p>This estimate is based on the information provided so far and is subject to a final survey. The indicative total is <strong>£{{amount}}</strong> (including VAT).</p>
-<p>If you'd like to proceed, simply reply to this email and we'll arrange a survey to lock in a fixed price. The estimate is valid until <strong>{{valid_until}}</strong>.</p>
-<p>Any questions? Just hit reply.</p>
-<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      subject: 'Your moving estimate from iMove Relocations — Quote {{quote_number}}',
+      body_html: `<p>Dear {{customer_name}},</p>
+<p>Thank you for getting in touch with <strong>iMove Relocations</strong>. Please find attached your <strong>estimate quote</strong> for the proposed move from {{from_address}} to {{to_address}}.</p>
+<p>This estimate is based on the information provided to date and is subject to a final survey. The indicative total for the services outlined is <strong>£{{amount}}</strong>.</p>
+<p>If you would like to proceed, please simply reply to this email and we will arrange a survey to confirm a fixed price. This estimate is valid until <strong>{{valid_until}}</strong>.</p>
+<p>Should you have any questions or require further clarification, please don't hesitate to reach out — your satisfaction is our priority.</p>
+${EMAIL_FOOTER}`,
       variables: '["customer_name","quote_number","from_address","to_address","amount","valid_until"]',
     },
     {
       slug: 'fixed-quote',
       name: 'Fixed Quote',
-      subject: 'Your fixed quote from iMove Partners — Quote {{quote_number}}',
-      body_html: `<p>Hi {{customer_name}},</p>
-<p>Following our conversation, please find attached your <strong>fixed quote</strong> for your upcoming move on <strong>{{move_date}}</strong>.</p>
-<p>The total cost is <strong>£{{amount}}</strong> (including VAT). This price is guaranteed and will not change provided the inventory and access details remain as discussed.</p>
-<p>To confirm your booking, please reply to this email or pay the deposit of <strong>£{{deposit}}</strong>. The quote is valid until <strong>{{valid_until}}</strong>.</p>
-<p>We look forward to making your move smooth and stress-free.</p>
-<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      subject: 'Your fixed quote from iMove Relocations — Quote {{quote_number}}',
+      body_html: `<p>Dear {{customer_name}},</p>
+<p>Further to our recent conversation, please find attached your <strong>fixed quote</strong> for your upcoming move on <strong>{{move_date}}</strong>.</p>
+<p>The total for the services outlined is <strong>£{{amount}}</strong>. This price is guaranteed and will not change, provided the inventory and access details remain as discussed.</p>
+<p>To confirm your booking, kindly reply to this email or settle the deposit of <strong>£{{deposit}}</strong>. This quote is valid until <strong>{{valid_until}}</strong>.</p>
+<p>We look forward to the opportunity to deliver a smooth and professional move for you.</p>
+${EMAIL_FOOTER}`,
       variables: '["customer_name","quote_number","move_date","amount","deposit","valid_until"]',
     },
     {
       slug: 'deposit-invoice',
       name: 'Deposit Invoice',
       subject: 'Deposit invoice for your move — Invoice {{invoice_number}}',
-      body_html: `<p>Hi {{customer_name}},</p>
-<p>Thank you for booking with <strong>iMove Partners</strong>! Please find attached your <strong>deposit invoice</strong> to secure your moving date of <strong>{{move_date}}</strong>.</p>
-<p>Amount due: <strong>£{{amount}}</strong><br/>Payment due by: <strong>{{due_date}}</strong></p>
-<p><strong>Bank transfer details:</strong><br/>
-Account name: iMove Partners Ltd<br/>
-Sort code: XX-XX-XX<br/>
-Account number: XXXXXXXX<br/>
-Reference: {{invoice_number}}</p>
-<p>Once we receive your deposit, your booking is confirmed and we'll send a receipt by email.</p>
-<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      body_html: `<p>Dear {{customer_name}},</p>
+<p>Thank you for choosing <strong>iMove Relocations</strong>. Please find attached your <strong>deposit invoice</strong> to secure your confirmed moving date of <strong>{{move_date}}</strong>.</p>
+<p><strong>Amount due:</strong> £{{amount}}<br/>
+<strong>Payment due by:</strong> {{due_date}}</p>
+${BANK_BLOCK}
+<p>Once your deposit has been received, your booking will be confirmed and a receipt will follow by email for your records. If you have any questions regarding this invoice, please feel free to contact us.</p>
+${EMAIL_FOOTER}`,
       variables: '["customer_name","invoice_number","amount","due_date","move_date"]',
     },
     {
       slug: 'deposit-receipt',
       name: 'Deposit Receipt',
-      subject: 'Deposit received — your move is confirmed!',
-      body_html: `<p>Hi {{customer_name}},</p>
-<p>Great news — we've received your deposit of <strong>£{{amount}}</strong>. Your move on <strong>{{move_date}}</strong> is now <strong>confirmed</strong>. 🎉</p>
+      subject: 'Deposit received — your move is confirmed',
+      body_html: `<p>Dear {{customer_name}},</p>
+<p>Thank you — we can confirm that your deposit of <strong>£{{amount}}</strong> has been received. Your move on <strong>{{move_date}}</strong> is now <strong>confirmed</strong>.</p>
 <p>Please find attached your official deposit receipt for your records.</p>
-<p>The remaining balance of <strong>£{{balance}}</strong> will be due closer to the move date — we'll send the final invoice nearer the time.</p>
-<p>If anything changes between now and your move date, just let us know.</p>
-<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+<p>The remaining balance of <strong>£{{balance}}</strong> will be due closer to the move date — a final invoice will be issued nearer the time.</p>
+<p>Should anything change between now and your move date, please do let us know at your earliest convenience.</p>
+${EMAIL_FOOTER}`,
       variables: '["customer_name","amount","balance","move_date"]',
     },
     {
       slug: 'main-invoice',
       name: 'Final Invoice',
       subject: 'Final invoice for your move — Invoice {{invoice_number}}',
-      body_html: `<p>Hi {{customer_name}},</p>
+      body_html: `<p>Dear {{customer_name}},</p>
 <p>Please find attached the <strong>final invoice</strong> for your move on <strong>{{move_date}}</strong>.</p>
-<p>Total: <strong>£{{total}}</strong><br/>
-Less deposit paid: <strong>−£{{deposit_paid}}</strong><br/>
-<strong>Balance due: £{{balance}}</strong><br/>
-Payment due by: <strong>{{due_date}}</strong></p>
-<p><strong>Bank transfer details:</strong><br/>
-Account name: iMove Partners Ltd<br/>
-Sort code: XX-XX-XX<br/>
-Account number: XXXXXXXX<br/>
-Reference: {{invoice_number}}</p>
-<p>Thank you again for choosing iMove Partners.</p>
-<p>Warm regards,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+<p><strong>Total:</strong> £{{total}}<br/>
+<strong>Less deposit paid:</strong> −£{{deposit_paid}}<br/>
+<strong>Balance due:</strong> £{{balance}}<br/>
+<strong>Payment due by:</strong> {{due_date}}</p>
+${BANK_BLOCK}
+<p>Thank you once again for choosing iMove Relocations. Please ensure the reference number is included with your payment. If you have any questions regarding this invoice, please don't hesitate to contact us.</p>
+${EMAIL_FOOTER}`,
       variables: '["customer_name","invoice_number","total","deposit_paid","balance","due_date","move_date"]',
     },
     {
       slug: 'move-receipt',
       name: 'Move Receipt (Paid in Full)',
-      subject: 'Payment received — thank you from iMove Partners!',
-      body_html: `<p>Hi {{customer_name}},</p>
-<p>Your final balance of <strong>£{{amount}}</strong> has been received in full. Thank you for choosing <strong>iMove Partners</strong> for your move! 🚚✨</p>
-<p>Please find attached your official receipt — your move is now <strong>paid in full</strong>.</p>
-<p>We hope you're settling in nicely. If you've got a moment, we'd love a quick review on Google or Trustpilot — it really helps a small business like ours.</p>
-<p>And if you ever know someone who's moving, our referral programme rewards both of you. Just hit reply and we'll send the details.</p>
-<p>All the best in your new home,<br/>The iMove Partners Team<br/>📞 0208 058 0958<br/>✉️ hello@myimove.co.uk</p>`,
+      subject: 'Payment received in full — thank you from iMove Relocations',
+      body_html: `<p>Dear {{customer_name}},</p>
+<p>Thank you — we can confirm that your final balance of <strong>£{{amount}}</strong> has been received. Your move is now <strong>paid in full</strong>.</p>
+<p>Please find attached your official receipt for your records. We truly appreciate your business and trust you are settling comfortably into your new home.</p>
+<p>If you have a moment to spare, we would be grateful for a short review on Google — it makes a meaningful difference for a small, family-run business such as ours. And should you ever know someone planning a move, we offer a referral reward for both parties — please simply reply and we'll share the details.</p>
+${EMAIL_FOOTER}`,
       variables: '["customer_name","amount","total"]',
     },
   ];
