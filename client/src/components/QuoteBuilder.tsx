@@ -439,13 +439,47 @@ export default function QuoteBuilder({ jobId }: Props) {
     return newId;
   }
 
-  /** Open the modal for a given document type */
-  function openSendModal(t: DocumentType) {
+  /**
+   * Open the modal for a given document type.
+   *
+   * IMPORTANT: To avoid the placeholder "?????" leaking into the email
+   * subject/body that the user composes, we eagerly create the underlying
+   * Quote/Invoice on the server BEFORE rendering the modal. That way the
+   * modal opens with the real reference number (EST-00100, iMQ-00101 …)
+   * already in `existingDocs`, the subject template substitutes the real
+   * value, and Send fires off an email containing the canonical number.
+   *
+   * Receipts (`deposit-receipt` / `move-receipt`) are different — they
+   * require an existing paid invoice, so we don't create anything here;
+   * the modal just shows the existing invoice number.
+   */
+  async function openSendModal(t: DocumentType) {
     if (!jobInfo?.email) {
       setSendingToast({ kind: 'error', msg: 'Customer has no email address on file. Add one in the Job Details panel.' });
       return;
     }
-    setActiveModal(t);
+
+    setBusyAction(t);
+    try {
+      if (t === 'estimate-quote' && !existingDocs.estimateQuoteId) {
+        await ensureQuote('estimate');
+      } else if (t === 'fixed-quote' && !existingDocs.fixedQuoteId) {
+        await ensureQuote('fixed');
+      } else if (t === 'deposit-invoice' && !existingDocs.depositInvoiceId) {
+        await ensureInvoice('deposit');
+      } else if (t === 'main-invoice' && !existingDocs.mainInvoiceId) {
+        await ensureInvoice('main');
+      }
+      setActiveModal(t);
+    } catch (err: any) {
+      console.error('[QuoteBuilder] failed to reserve reference number:', err);
+      setSendingToast({
+        kind: 'error',
+        msg: err?.response?.data?.error || err?.message || 'Failed to prepare document. Please try again.',
+      });
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   /** Modal onSend dispatcher — knows which endpoint to hit per document type */

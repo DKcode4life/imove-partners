@@ -20,13 +20,25 @@ const REFERENCE_TYPES = {
 };
 
 /**
+ * The first issued number for any new prefix is 100 — i.e. the very first
+ * estimate ever sent is EST-00100, the first fixed quote is iMQ-00100, etc.
+ * From there each new document increments by 1 (00101, 00102, …).
+ *
+ * Note: legacy rows with parseable digits >= 100 will still be respected —
+ * we always pick `max(existing-found, START_AT - 1) + 1`. So if you import
+ * a batch of historical EST-12345 numbers, the next one will be EST-12346.
+ */
+const START_AT = 100;
+
+/**
  * Compute the next reference number for the given type.
  *
  * Implementation:
  *   1. Pull every existing row whose number starts with `{PREFIX}-`.
  *   2. Parse the trailing digits (ignoring any rows we can't parse — e.g.
- *      legacy 6/8-digit timestamp-style numbers).
- *   3. Return `{PREFIX}-{max+1}` zero-padded to 5 digits.
+ *      legacy junk).
+ *   3. Return `{PREFIX}-{max+1}` zero-padded to 5 digits, where `max` is
+ *      seeded at `START_AT - 1` so the first issued number is always 100.
  *
  * Note: a true race between two simultaneous requests is still possible —
  * the unique constraint on the column will reject the loser, which is why
@@ -50,11 +62,12 @@ async function nextReferenceNumber(prisma, type) {
     select: { [field]: true },
   });
 
-  let max = 0;
+  // Seed at (START_AT - 1) so the very first issued number is START_AT (100).
+  let max = START_AT - 1;
   for (const r of rows) {
     const value = r[field];
     if (!value) continue;
-    // Match trailing digits (handles both EST-00001 and legacy EST-882341)
+    // Match trailing digits (handles both EST-00100 and legacy EST-882341)
     const m = value.match(/-(\d+)$/);
     if (!m) continue;
     const n = parseInt(m[1], 10);
