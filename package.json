@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"nodemon server/index.js\" \"cd client && npm run dev\"",
     "start": "prisma db push && prisma db seed && node server/index.js",
-    "build": "cd client && npm install && npm run build",
+    "build": "cd client && npm install --include=dev && npm run build",
     "postinstall": "prisma generate",
     "install:all": "npm install && cd client && npm install",
     "db:generate": "npx prisma generate",
