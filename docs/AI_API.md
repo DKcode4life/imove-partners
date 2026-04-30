@@ -10,9 +10,23 @@ All API requests require an API key in the `Authorization` header:
 Authorization: Bearer imv_fbd9d8943a7987281cb9b0d7666bb1672dc7cde049991a72
 ```
 
+### Two Authentication Methods
+
+#### 1. Environment Variable (Recommended for Railway/Production)
+- Set `API_KEY` environment variable to your API key
+- The middleware checks this first, no database required
+- Works immediately after deployment
+- **Railway setup:** Add `API_KEY=imv_fbd9d8943a7987281cb9b0d7666bb1672dc7cde049991a72` to your Railway environment variables
+
+#### 2. Database Lookup (Advanced Features)
+- Keys stored in `api_keys` table with bcrypt hashing
+- Supports multiple keys, scopes, expiration, and audit trails
+- Requires running the key generation script locally and migrating to production
+
 ### API Key Format
-- Starts with `imv_` followed by 48 hexadecimal characters
-- Total length: 52 characters
+- **Must start with `imv_`** (e.g., `imv_...`)
+- **Environment variable keys:** Any length after `imv_`
+- **Database keys:** `imv_` + 48 hexadecimal characters (total 52 chars)
 - Example: `imv_fbd9d8943a7987281cb9b0d7666bb1672dc7cde049991a72`
 
 ### Scopes
@@ -20,14 +34,15 @@ Each API key has scopes that determine what it can access:
 - `crm:read` - Read access to CRM data
 - `crm:write` - Write access to update CRM data
 
-The default key generated has both scopes: `crm:read,crm:write`
+**Environment variable keys** have both scopes by default: `crm:read,crm:write`
 
 ### Security Notes
-- API keys are hashed in the database using bcrypt
+- **Environment variable:** Simple exact match with constant-time comparison
+- **Database keys:** Hashed with bcrypt (never stored in plain text)
 - The full key is only shown once during generation
 - Store keys securely (environment variables, password manager)
-- To revoke a key: `UPDATE api_keys SET is_active = false WHERE id = <key_id>`
-- To delete a key: `DELETE FROM api_keys WHERE id = <key_id>`
+- To revoke a database key: `UPDATE api_keys SET is_active = false WHERE id = <key_id>`
+- To delete a database key: `DELETE FROM api_keys WHERE id = <key_id>`
 
 ## Endpoints
 

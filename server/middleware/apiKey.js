@@ -1,16 +1,21 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = require('../db/prisma');
 const config = require('../config');
 
 /**
  * Authenticate using an API key (Bearer token)
  * 
- * Expects: Authorization: Bearer imv_<48-char-hex>
+ * Supports two authentication methods:
+ * 1. Environment variable (API_KEY) - simple exact match, no DB required
+ * 2. Database lookup - full bcrypt verification with scopes, expiry, audit trail
+ * 
+ * Expects: Authorization: Bearer <key>
  * 
  * On success:
  * - Sets req.apiKey = { id, name, scopes, ... }
  * - Sets req.user = { role: 'api', apiKeyId, name: apiKey.name } for compatibility with existing auth
- * - Updates last_used_at and last_used_ip (fire-and-forget)
+ * - Updates last_used_at and last_used_ip (fire-and-forget, database keys only)
  * 
  * On failure: Returns 401/403 with error message
  */
@@ -19,13 +24,58 @@ async function authenticateApiKey(req, res, next) {
   
   // Check for Bearer token
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.warn('[apiKey] No Bearer token in Authorization header');
     return res.status(401).json({ error: 'No API key provided. Use Authorization: Bearer <key>' });
   }
 
   const fullKey = authHeader.slice(7).trim();
   
-  // Validate key format
-  if (!fullKey.startsWith('imv_') || fullKey.length !== 52) { // "imv_" + 48 hex chars
+  // Validate key format - must start with imv_ but length can vary for env keys
+  if (!fullKey.startsWith('imv_')) {
+    console.warn('[apiKey] Key does not start with imv_:', fullKey.substring(0, 10) + '...');
+    return res.status(401).json({ error: 'Invalid API key format. Expected: imv_<key>' });
+  }
+
+  // ─── TIER 1: Environment variable authentication ─────────────────────────────
+  // Check if API_KEY environment variable is set and matches
+  if (process.env.API_KEY) {
+    // Use constant-time comparison to prevent timing attacks
+    const envKey = process.env.API_KEY.trim();
+    const isEnvMatch = crypto.timingSafeEqual(
+      Buffer.from(fullKey, 'utf8'),
+      Buffer.from(envKey, 'utf8')
+    );
+    
+    if (isEnvMatch) {
+      console.log('[apiKey] Authenticated via environment variable');
+      
+      // Attach API key info to request
+      req.apiKey = {
+        id: 0, // Special ID for env keys
+        name: 'Environment Key',
+        scopes: ['crm:read', 'crm:write'],
+        keyPrefix: fullKey.substring(0, Math.min(11, fullKey.length)),
+        source: 'env',
+      };
+
+      // For compatibility with existing auth middleware and audit logging
+      req.user = {
+        role: 'api',
+        apiKeyId: 0,
+        name: 'Environment Key',
+        id: 0, // Zero ID for env keys
+      };
+
+      return next();
+    } else {
+      console.warn('[apiKey] Environment variable mismatch');
+    }
+  }
+
+  // ─── TIER 2: Database authentication ───────────────────────────────────────
+  // For database keys, we expect the standard format: imv_ + 48 hex chars
+  if (fullKey.length !== 52) { // "imv_" + 48 hex chars
+    console.warn('[apiKey] Database key length mismatch:', fullKey.length, 'expected 52');
     return res.status(401).json({ error: 'Invalid API key format. Expected: imv_<48-hex-chars>' });
   }
 
@@ -38,22 +88,26 @@ async function authenticateApiKey(req, res, next) {
     });
 
     if (!apiKey) {
+      console.warn('[apiKey] No database entry for prefix:', keyPrefix);
       return res.status(401).json({ error: 'Invalid API key' });
     }
 
     // Check if key is active
     if (!apiKey.is_active) {
+      console.warn('[apiKey] Key inactive:', apiKey.name);
       return res.status(403).json({ error: 'API key is inactive' });
     }
 
     // Check expiration
     if (apiKey.expires_at && new Date() > apiKey.expires_at) {
+      console.warn('[apiKey] Key expired:', apiKey.name, 'expired at', apiKey.expires_at);
       return res.status(403).json({ error: 'API key has expired' });
     }
 
     // Verify the key hash
     const isValid = await bcrypt.compare(fullKey, apiKey.key_hash);
     if (!isValid) {
+      console.warn('[apiKey] bcrypt verification failed for:', apiKey.name);
       return res.status(401).json({ error: 'Invalid API key' });
     }
 
@@ -66,6 +120,7 @@ async function authenticateApiKey(req, res, next) {
       name: apiKey.name,
       scopes: apiKey.scopes.split(','),
       keyPrefix: apiKey.key_prefix,
+      source: 'db',
     };
 
     // For compatibility with existing auth middleware and audit logging
@@ -76,6 +131,7 @@ async function authenticateApiKey(req, res, next) {
       id: -apiKey.id, // Negative ID to distinguish from real users
     };
 
+    console.log('[apiKey] Authenticated via database:', apiKey.name);
     next();
   } catch (error) {
     console.error('[apiKey] Authentication error:', error);
