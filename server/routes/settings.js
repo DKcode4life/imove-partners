@@ -12,9 +12,9 @@ const DEFAULT_STATUSES = [
   { name: 'New Lead',               color: '#3b82f6', sort_order: 0 },
   { name: 'Called V/M',             color: '#8b5cf6', sort_order: 1 },
   { name: 'Contacted',              color: '#7c3aed', sort_order: 2 },
-  { name: 'Survey Physical',        color: '#06b6d4', sort_order: 3 },
-  { name: 'Survey Video',           color: '#0d9488', sort_order: 4 },
-  { name: 'Estimate Sent',          color: '#fbbf24', sort_order: 5 },
+  { name: 'Estimate Sent',          color: '#fbbf24', sort_order: 3 },
+  { name: 'Survey Physical',        color: '#06b6d4', sort_order: 4 },
+  { name: 'Survey Video',           color: '#0d9488', sort_order: 5 },
   { name: 'Quote Sent',             color: '#f59e0b', sort_order: 6 },
   { name: 'Quote Chased',           color: '#f97316', sort_order: 7 },
   { name: 'Most Likely',            color: '#eab308', sort_order: 8 },
@@ -72,25 +72,71 @@ async function migrateStatuses() {
     await prisma.crmJob.updateMany({ where: { status: oldName }, data: { status: newName } });
   }
 
-  // ── 2. Sync JobStatus settings table to the new canonical set ────────────
+  // ── 2. Seed any newly-introduced default statuses, but DO NOT touch
+  //     existing rows — users edit colours and drag to reorder, and we
+  //     must preserve those changes. New rows slot in at their default
+  //     sort_order; if a user-edited row already sits there, the new row
+  //     simply gets appended (orderBy `sort_order asc, id asc` keeps it
+  //     stable and the user can drag it where they want). ──────────────
   for (const s of DEFAULT_STATUSES) {
     const exists = await prisma.jobStatus.findUnique({ where: { name: s.name } });
-    if (exists) {
-      await prisma.jobStatus.update({ where: { name: s.name }, data: { color: s.color, sort_order: s.sort_order } });
-    } else {
-      await prisma.jobStatus.create({ data: s });
-    }
+    if (!exists) await prisma.jobStatus.create({ data: s });
   }
 
-  // Remove ONLY the known-old names from the rename list (and only if no job
-  // still uses them). Custom statuses the user has added themselves must be
-  // preserved — anything not in CRM_JOB_RENAMES.old is left alone.
+  // ── 3. Remove ONLY the known-old names from the rename list (and only
+  //     if no job still uses them). Custom statuses the user has added
+  //     themselves must be preserved. ────────────────────────────────────
   const renamedAwayNames = CRM_JOB_RENAMES.map(r => r.old);
   const stale = await prisma.jobStatus.findMany({ where: { name: { in: renamedAwayNames } } });
   for (const row of stale) {
     const inUse = await prisma.crmJob.count({ where: { status: row.name } });
     if (inUse === 0) await prisma.jobStatus.delete({ where: { id: row.id } });
   }
+}
+
+// One-time relocation of 'Estimate Sent' to its new canonical slot
+// (between Contacted and Survey Physical). Earlier builds inserted it at
+// sort_order 5; this migration moves it to 3 and shifts Survey Physical /
+// Survey Video down by one. Guarded by a CompanySetting flag so it only
+// runs once per database.
+async function relocateEstimateSentOnce() {
+  const flag = await prisma.companySetting.findUnique({
+    where: { key: 'crm_estimate_sent_slot_v1' },
+  });
+  if (flag) return;
+
+  const est = await prisma.jobStatus.findUnique({ where: { name: 'Estimate Sent' } });
+  if (est) {
+    const surveyPhysical = await prisma.jobStatus.findUnique({ where: { name: 'Survey Physical' } });
+    const surveyVideo    = await prisma.jobStatus.findUnique({ where: { name: 'Survey Video' } });
+    // Only relocate if the layout still matches the previous default —
+    // i.e. Estimate Sent sits AFTER both Survey rows. If the user has
+    // already dragged things around, leave their order alone.
+    if (
+      surveyPhysical && surveyVideo &&
+      est.sort_order > surveyPhysical.sort_order &&
+      est.sort_order > surveyVideo.sort_order
+    ) {
+      await prisma.jobStatus.update({
+        where: { id: surveyPhysical.id },
+        data:  { sort_order: est.sort_order },
+      });
+      await prisma.jobStatus.update({
+        where: { id: surveyVideo.id },
+        data:  { sort_order: est.sort_order + 1 },
+      });
+      await prisma.jobStatus.update({
+        where: { id: est.id },
+        data:  { sort_order: surveyPhysical.sort_order },
+      });
+    }
+  }
+
+  await prisma.companySetting.upsert({
+    where:  { key: 'crm_estimate_sent_slot_v1' },
+    update: {},
+    create: { key: 'crm_estimate_sent_slot_v1', value: 'done' },
+  });
 }
 
 // One-time backfill: sync every linked partner lead's status from its CRM job.
@@ -125,6 +171,7 @@ async function ensureStatusDefaults() {
     await prisma.jobStatus.createMany({ data: DEFAULT_STATUSES });
   } else {
     await migrateStatuses();
+    await relocateEstimateSentOnce();
   }
   await backfillPortalStatusesOnce();
 }

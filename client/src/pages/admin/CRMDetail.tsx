@@ -65,7 +65,7 @@ const LOST = 'Lost / Cancelled' as const;
 // Fallback used until the dynamic /settings/statuses fetch returns
 const FALLBACK_PIPELINE: { name: string; color: string }[] = CRM_STATUSES
   .filter(s => s !== LOST)
-  .map((name, i) => ({ name, color: ['#3b82f6','#8b5cf6','#7c3aed','#06b6d4','#0d9488','#fbbf24','#f59e0b','#f97316','#eab308','#10b981','#059669','#65a30d','#15803d','#94a3b8','#6b7280'][i] || '#94a3b8' }));
+  .map((name, i) => ({ name, color: ['#3b82f6','#8b5cf6','#7c3aed','#fbbf24','#06b6d4','#0d9488','#f59e0b','#f97316','#eab308','#10b981','#059669','#65a30d','#15803d','#94a3b8','#6b7280'][i] || '#94a3b8' }));
 
 function PipelineBar({ status, pipeline, saving, onChange }: {
   status: string;
