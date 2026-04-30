@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera } from 'lucide-react';
+import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as ImageIcon } from 'lucide-react';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
 
@@ -51,6 +51,7 @@ type CustomRoom = { id: string; name: string; categoryId: string };
 const storageKey     = (jobId: string | undefined) => `crm-survey-${jobId}`;
 const searchDataKey  = (jobId: string | undefined) => `crm-survey-search-${jobId}`;
 const customRoomsKey = (jobId: string | undefined) => `crm-survey-rooms-${jobId}`;
+const roomPhotosKey  = (jobId: string | undefined) => `crm-survey-photos-${jobId}`;
 
 function loadCustomRooms(jobId: string | undefined): CustomRoom[] {
   if (!jobId) return [];
@@ -94,6 +95,13 @@ function loadSearchData(jobId: string | undefined): SurveyData {
       }
     }
     return out;
+  } catch { return {}; }
+}
+
+function loadRoomPhotos(jobId: string | undefined): Record<string, string[]> {
+  if (!jobId) return {};
+  try {
+    return JSON.parse(localStorage.getItem(roomPhotosKey(jobId)) || '{}') as Record<string, string[]>;
   } catch { return {}; }
 }
 
@@ -374,6 +382,33 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   useEffect(() => { setCustomRooms(loadCustomRooms(jobId)); }, [jobId]);
   useEffect(() => { setSearch(''); }, [selectedRoomId]);
 
+  // ── Room photos (reference photos of the entire room) ──────────────────────
+  const [roomPhotos, setRoomPhotos] = useState<Record<string, string[]>>(() => loadRoomPhotos(jobId));
+  const roomPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setRoomPhotos(loadRoomPhotos(jobId)); }, [jobId]);
+
+  const persistRoomPhotos = useCallback((next: Record<string, string[]>) => {
+    setRoomPhotos(next);
+    if (jobId) localStorage.setItem(roomPhotosKey(jobId), JSON.stringify(next));
+  }, [jobId]);
+
+  const addRoomPhoto = async (roomName: string, file: File) => {
+    try {
+      const dataUrl = await compressImage(file);
+      const next = { ...roomPhotos };
+      next[roomName] = [...(next[roomName] || []), dataUrl];
+      persistRoomPhotos(next);
+    } catch { /* skip on error */ }
+  };
+
+  const removeRoomPhoto = (roomName: string, index: number) => {
+    const next = { ...roomPhotos };
+    next[roomName] = next[roomName].filter((_, i) => i !== index);
+    if (next[roomName].length === 0) delete next[roomName];
+    persistRoomPhotos(next);
+  };
+
   const allRooms = [
     ...SURVEY_ROOMS,
     ...customRooms.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId })),
@@ -508,8 +543,9 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
 
   const totalVolFt = allRooms.reduce((s, r) => s + getRoomVol(r), 0);
 
-  const currentRoom    = allRooms.find(r => r.id === selectedRoomId) ?? allRooms[0];
-  const roomData       = data[currentRoom.name] ?? {};
+  const currentRoom        = allRooms.find(r => r.id === selectedRoomId) ?? allRooms[0];
+  const currentRoomPhotos  = roomPhotos[currentRoom.name] ?? [];
+  const roomData           = data[currentRoom.name] ?? {};
   const searchRoomData = searchData[currentRoom.name] ?? {};
   const catItems    = currentRoom.categoryId === '__all__'
     ? catalog.flatMap(c => c.items)
@@ -628,6 +664,38 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                   </button>
                 );
               })}
+
+              {/* Room photos indicator per room */}
+              {Object.keys(roomPhotos).length > 0 && (
+                <div className="border-t border-slate-100 pt-2 mt-1">
+                  <p className="px-3 pb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                    Room Photos
+                  </p>
+                  {allRooms.filter(r => (roomPhotos[r.name]?.length ?? 0) > 0).map(r => {
+                    const count = roomPhotos[r.name]?.length ?? 0;
+                    const isActive = r.id === selectedRoomId;
+                    return (
+                      <button
+                        key={`photos-${r.id}`}
+                        onClick={() => setSelectedRoomId(r.id)}
+                        className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-all mb-0.5 ${
+                          isActive
+                            ? 'bg-teal-50 text-teal-800'
+                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 truncate">
+                          <ImageIcon className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{r.name}</span>
+                        </span>
+                        <span className={`text-[10px] font-bold px-1 rounded-full tabular-nums ${isActive ? 'text-teal-700' : 'text-slate-400'}`}>
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Add Bedroom / Add Room */}
               <div className="mt-1 border-t border-slate-100 pt-2 space-y-1">
@@ -767,10 +835,68 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                         </p>
                       )}
                     </div>
-                    {curRoomCount > 0 && (
-                      <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-700 text-xs font-bold tabular-nums flex-shrink-0">
-                        {curRoomCount} item{curRoomCount !== 1 ? 's' : ''}
-                      </span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {curRoomCount > 0 && (
+                        <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-700 text-xs font-bold tabular-nums">
+                          {curRoomCount} item{curRoomCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Room Photos */}
+                  <div className="mb-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Room Photos <span className="text-slate-300 font-normal normal-case tracking-normal">({currentRoomPhotos.length})</span>
+                      </p>
+                      <button
+                        onClick={() => roomPhotoInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-medium text-slate-500 hover:border-teal-300 hover:text-teal-600 transition-colors"
+                      >
+                        <Camera className="w-3 h-3" /> Add Photo
+                      </button>
+                      <input
+                        ref={roomPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          if (f) addRoomPhoto(currentRoom.name, f);
+                          e.target.value = '';
+                        }}
+                      />
+                    </div>
+                    {currentRoomPhotos.length > 0 ? (
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {currentRoomPhotos.map((dataUrl, i) => (
+                          <div key={i} className="relative flex-shrink-0">
+                            <img
+                              src={dataUrl}
+                              alt={`${currentRoom.name} photo ${i + 1}`}
+                              className="w-24 h-20 rounded-xl object-cover border border-slate-200 hover:border-teal-300 cursor-pointer transition-colors"
+                              onClick={() => window.open(dataUrl, '_blank')}
+                            />
+                            <button
+                              onClick={() => removeRoomPhoto(currentRoom.name, i)}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
+                              title="Remove photo"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => roomPhotoInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 hover:border-teal-300 hover:text-teal-600 transition-colors"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span className="text-xs font-medium">Add reference photos of {currentRoom.name}</span>
+                      </button>
                     )}
                   </div>
 
