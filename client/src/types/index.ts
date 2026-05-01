@@ -267,6 +267,9 @@ export interface CrmJob {
   // Move type / key worker
   move_type: string | null;
   is_key_worker: boolean;
+  // Lost / Cancelled reason
+  lost_reason: string | null;
+  lost_notes: string | null;
   // Partner portal sync
   partner_commission_rate: number | null;
   // Timestamps

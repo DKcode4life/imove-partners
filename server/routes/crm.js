@@ -307,6 +307,8 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     { field: 'floor_to', old: existing.floor_to, new: b.floor_to },
     { field: 'has_lift_to', old: existing.has_lift_to, new: b.has_lift_to },
     { field: 'prop_type_to_other', old: existing.prop_type_to_other, new: b.prop_type_to_other },
+    { field: 'lost_reason', old: existing.lost_reason, new: b.lost_reason },
+    { field: 'lost_notes', old: existing.lost_notes, new: b.lost_notes },
   ];
 
   // Check for changes
@@ -369,6 +371,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
       move_type: b.move_type ?? null, is_key_worker: !!b.is_key_worker,
       floor_from: b.floor_from ?? null, has_lift_from: !!b.has_lift_from, prop_type_from_other: b.prop_type_from_other ?? null,
       floor_to: b.floor_to ?? null, has_lift_to: !!b.has_lift_to, prop_type_to_other: b.prop_type_to_other ?? null,
+      lost_reason: b.lost_reason ?? null, lost_notes: b.lost_notes ?? null,
     },
   });
 

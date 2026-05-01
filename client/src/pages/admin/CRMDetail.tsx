@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
-  Navigation, MapPin, FileText,
+  Navigation, MapPin, FileText, ChevronDown,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -58,6 +58,85 @@ function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: bool
   );
 }
 
+// ── Lost / Cancelled reason modal ────────────────────────────────────────────
+
+const LOST_REASONS = [
+  'Too expensive',
+  'Lost no response',
+  'Lost to competitor',
+  "Can't do move",
+  "Just didn't move",
+];
+
+function LostReasonModal({
+  open, initial, onSave, onClose,
+}: {
+  open: boolean;
+  initial: { reason: string; notes: string };
+  onSave: (reason: string, notes: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState(initial.reason || '');
+  const [notes, setNotes] = useState(initial.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) { setReason(initial.reason || ''); setNotes(initial.notes || ''); setError(''); }
+  }, [open, initial.reason, initial.notes]);
+
+  const handleSave = async () => {
+    if (!reason) { setError('Please select a reason'); return; }
+    setSaving(true);
+    try { await onSave(reason, notes); }
+    catch { setError('Failed to save'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Mark as Lost / Cancelled" size="sm">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            Reason <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={reason}
+            onChange={e => { setReason(e.target.value); setError(''); }}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option value="">Select a reason…</option>
+            {LOST_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            Notes <span className="text-slate-400 normal-case font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            rows={3}
+            placeholder="Any additional context…"
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+          />
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onClick={handleSave} disabled={saving || !reason}
+            className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg">
+            {saving ? 'Saving…' : 'Mark as Lost / Cancelled'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Pipeline bar ─────────────────────────────────────────────────────────────
 
 const LOST = 'Lost / Cancelled' as const;
@@ -67,13 +146,17 @@ const FALLBACK_PIPELINE: { name: string; color: string }[] = CRM_STATUSES
   .filter(s => s !== LOST)
   .map((name, i) => ({ name, color: ['#3b82f6','#8b5cf6','#7c3aed','#fbbf24','#06b6d4','#0d9488','#f59e0b','#f97316','#eab308','#10b981','#059669','#65a30d','#15803d','#94a3b8','#6b7280'][i] || '#94a3b8' }));
 
-function PipelineBar({ status, pipeline, saving, onChange }: {
+function PipelineBar({ status, pipeline, saving, onChange, lostReason, lostNotes, onEditReason }: {
   status: string;
   pipeline: { name: string; color: string }[];
   saving: number | null;
   onChange: (s: CrmStatus) => void;
+  lostReason?: string;
+  lostNotes?: string;
+  onEditReason?: () => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
   const isLost  = status === LOST;
   const mainIdx = pipeline.findIndex(s => s.name === status);
   const pct     = mainIdx >= 0 ? (mainIdx / Math.max(1, pipeline.length - 1)) * 100 : 0;
@@ -154,11 +237,30 @@ function PipelineBar({ status, pipeline, saving, onChange }: {
         </div>
       </div>
       {/* Lost button row */}
-      <div className="flex justify-end mt-3 pt-3 border-t border-slate-100">
+      <div className="flex flex-col items-end gap-2 mt-3 pt-3 border-t border-slate-100">
         <button type="button" onClick={() => onChange(LOST)}
           className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${isLost ? 'bg-red-600 border-red-600 text-white' : 'border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-500'}`}>
           {saving === -1 ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin inline-block" /> : isLost ? '✕ Lost / Cancelled' : 'Mark as Lost / Cancelled'}
         </button>
+        {isLost && lostReason && (
+          <button type="button" onClick={() => setShowDetail(d => !d)}
+            className="flex items-center gap-1.5">
+            <span className="px-2.5 py-1 bg-red-50 border border-red-200 rounded-full text-red-600 text-xs font-medium">
+              {lostReason}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${showDetail ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+        {isLost && lostReason && showDetail && (
+          <div className="w-full text-left bg-red-50 border border-red-100 rounded-lg p-3 text-xs">
+            <p className="font-semibold text-red-700">{lostReason}</p>
+            {lostNotes && <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed">{lostNotes}</p>}
+            <button type="button" onClick={onEditReason}
+              className="mt-2 text-red-600 hover:text-red-700 underline">
+              Edit reason
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -336,6 +438,9 @@ export default function CRMDetailPage() {
   const [deletingAdminNoteId,  setDeletingAdminNoteId]  = useState<number | null>(null);
   const [toast,           setToast]          = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pipelineSaving,  setPipelineSaving]  = useState<number | null>(null);
+  const [lostReason,      setLostReason]      = useState('');
+  const [lostNotes,       setLostNotes]       = useState('');
+  const [showLostModal,   setShowLostModal]   = useState(false);
   const [editingSection,  setEditingSection]  = useState<string | null>(null);
   const [sectionSaving,   setSectionSaving]   = useState(false);
   const [pipelineStatuses, setPipelineStatuses] = useState<JobStatusSetting[]>([]);
@@ -444,6 +549,7 @@ export default function CRMDetailPage() {
     setStorageReq(j.storage_required);
     setSurveyor(j.assigned_surveyor || ''); setMover(j.assigned_mover || '');
     setDriver(j.assigned_driver || '');    setVehicle(j.assigned_vehicle || '');
+    setLostReason(j.lost_reason || '');    setLostNotes(j.lost_notes || '');
   }, []);
 
   useEffect(() => {
@@ -521,6 +627,7 @@ export default function CRMDetailPage() {
     packing_required: packingReq, dismantling_required: dismantlingReq, storage_required: storageReq,
     assigned_surveyor: surveyor || null, assigned_mover: mover || null,
     assigned_driver: driver || null, assigned_vehicle: vehicle || null,
+    lost_reason: lostReason || null, lost_notes: lostNotes || null,
   });
 
   const handleSaveSection = async () => {
@@ -554,8 +661,9 @@ export default function CRMDetailPage() {
   // ── Pipeline status change ─────────────────────────────────────────────────
 
   const handlePipelineChange = async (s: CrmStatus) => {
+    if (s === LOST) { setShowLostModal(true); return; }
     if (s === status) return;
-    const idx = s === LOST ? -1 : pipeline.findIndex(p => p.name === s);
+    const idx = pipeline.findIndex(p => p.name === s);
     setPipelineSaving(idx);
     try {
       const res = await api.put(`/crm/jobs/${id}`, { ...buildSavePayload(), status: s });
@@ -564,6 +672,28 @@ export default function CRMDetailPage() {
       setStatus(s);
     } catch { showToast('Failed to update status', 'error'); }
     finally { setPipelineSaving(null); }
+  };
+
+  const handleSaveLost = async (reason: string, notes: string) => {
+    setPipelineSaving(-1);
+    try {
+      const res = await api.put(`/crm/jobs/${id}`, {
+        ...buildSavePayload(),
+        status: LOST,
+        lost_reason: reason,
+        lost_notes: notes || null,
+      });
+      setJob(res.data);
+      setActivities(res.data.activities || []);
+      setStatus(LOST as CrmStatus);
+      setLostReason(reason);
+      setLostNotes(notes);
+      setShowLostModal(false);
+    } catch {
+      throw new Error('Failed to update status');
+    } finally {
+      setPipelineSaving(null);
+    }
   };
 
   // ── Add note ────────────────────────────────────────────────────────────────
@@ -690,7 +820,15 @@ export default function CRMDetailPage() {
         </button>
       </div>
 
-      <PipelineBar status={status} pipeline={pipeline} saving={pipelineSaving} onChange={handlePipelineChange} />
+      <PipelineBar
+        status={status}
+        pipeline={pipeline}
+        saving={pipelineSaving}
+        onChange={handlePipelineChange}
+        lostReason={lostReason}
+        lostNotes={lostNotes}
+        onEditReason={() => setShowLostModal(true)}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
@@ -1396,6 +1534,12 @@ export default function CRMDetailPage() {
            )}
          </div>
        </div>
+      <LostReasonModal
+        open={showLostModal}
+        initial={{ reason: lostReason, notes: lostNotes }}
+        onSave={handleSaveLost}
+        onClose={() => setShowLostModal(false)}
+      />
      </CRMLayout>
    );
  }

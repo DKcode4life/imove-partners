@@ -93,6 +93,8 @@ model CrmJob {
   estate_agent_name       String?
   internal_ref            String?
   status                  String   @default("New Lead")
+  lost_reason             String?
+  lost_notes              String?
   // Move Details — From
   from_line1              String?
   from_line2              String?
