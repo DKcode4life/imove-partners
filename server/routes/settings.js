@@ -354,6 +354,27 @@ router.delete('/move-types/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Email Templates ───────────────────────────────────────────────────────────
+
+router.get('/email-templates', wrap(async (_req, res) => {
+  const templates = await prisma.emailTemplate.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, slug: true, subject: true, body_html: true, variables: true },
+  });
+  res.json(templates);
+}));
+
+router.put('/email-templates/:id', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { subject, body_html } = req.body;
+  const data = {};
+  if (subject !== undefined) data.subject = String(subject);
+  if (body_html !== undefined) data.body_html = String(body_html);
+  if (!Object.keys(data).length) return res.status(400).json({ error: 'Nothing to update' });
+  const updated = await prisma.emailTemplate.update({ where: { id }, data });
+  res.json(updated);
+}));
+
 // ── Inventory Catalog ─────────────────────────────────────────────────────────
 // Stored as a single JSON blob in CompanySetting so every device reads the same order.
 
