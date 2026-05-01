@@ -539,47 +539,6 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
     }
   }
 
-  /** Mark deposit invoice as paid (records a payment for the full deposit amount) */
-  async function markDepositPaid() {
-    if (!jobId || !existingDocs.depositInvoiceId) {
-      setSendingToast({ kind: 'error', msg: 'Send the deposit invoice first.' });
-      return;
-    }
-    if (!confirm(`Mark deposit of ${fmt(depositAmount)} as received?`)) return;
-    try {
-      await api.post(`/crm/jobs/${jobId}/invoices/${existingDocs.depositInvoiceId}/payments`, {
-        amount: depositAmount,
-        method: 'bank_transfer',
-      });
-      setExistingDocs(prev => ({ ...prev, depositInvoicePaid: true }));
-      setSendingToast({ kind: 'success', msg: 'Deposit marked as paid. You can now send the receipt.' });
-      onJobUpdated?.();
-    } catch (err: any) {
-      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to mark deposit paid' });
-    }
-  }
-
-  /** Mark main invoice as paid */
-  async function markMainPaid() {
-    if (!jobId || !existingDocs.mainInvoiceId) {
-      setSendingToast({ kind: 'error', msg: 'Send the final invoice first.' });
-      return;
-    }
-    const balance = fixQuotationTotal - (existingDocs.depositInvoicePaid ? depositAmount : 0);
-    if (!confirm(`Mark final balance of ${fmt(balance)} as received?`)) return;
-    try {
-      await api.post(`/crm/jobs/${jobId}/invoices/${existingDocs.mainInvoiceId}/payments`, {
-        amount: balance,
-        method: 'bank_transfer',
-      });
-      setExistingDocs(prev => ({ ...prev, mainInvoicePaid: true }));
-      setSendingToast({ kind: 'success', msg: 'Final payment recorded. You can now send the move receipt.' });
-      onJobUpdated?.();
-    } catch (err: any) {
-      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to record payment' });
-    }
-  }
-
   // Modal config for the currently-open modal.
   //
   // The displayed `docNumber` is the *real* saved reference number from the
@@ -691,15 +650,12 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
           />
           <SendButton
             label="Deposit Receipt"
-            sub={existingDocs.depositInvoicePaid ? 'Send confirmation' : 'Mark deposit paid first'}
+            sub={committed.depositPaid ? 'Send confirmation' : 'Mark deposit paid first'}
             icon={<Send className="w-4 h-4" />}
-            disabled={!existingDocs.depositInvoicePaid || !jobInfo?.email}
+            disabled={!committed.depositPaid || !jobInfo?.email}
             busy={busyAction === 'deposit-receipt'}
             onClick={() => openSendModal('deposit-receipt')}
             color="emerald"
-            secondaryAction={existingDocs.depositInvoiceId && !existingDocs.depositInvoicePaid
-              ? { label: 'Mark paid', onClick: markDepositPaid }
-              : undefined}
           />
           <SendButton
             label="Final Invoice"
@@ -713,15 +669,12 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
           />
           <SendButton
             label="Move Receipt"
-            sub={existingDocs.mainInvoicePaid ? 'Thank you & paid in full' : 'Mark final paid first'}
+            sub={committed.balancePaid ? 'Thank you & paid in full' : 'Mark balance paid first'}
             icon={<Send className="w-4 h-4" />}
-            disabled={!existingDocs.mainInvoicePaid || !jobInfo?.email}
+            disabled={!committed.balancePaid || !jobInfo?.email}
             busy={busyAction === 'move-receipt'}
             onClick={() => openSendModal('move-receipt')}
             color="emerald"
-            secondaryAction={existingDocs.mainInvoiceId && !existingDocs.mainInvoicePaid
-              ? { label: 'Mark paid', onClick: markMainPaid }
-              : undefined}
           />
         </div>
       </div>
