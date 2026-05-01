@@ -197,6 +197,7 @@ async function ensureMoveTypeDefaults() {
 const COMPANY_KEYS = [
   'company_name', 'company_email', 'company_phone',
   'company_website', 'company_address', 'company_registration',
+  'zoom_meeting_link',
 ];
 
 router.get('/company', wrap(async (_req, res) => {

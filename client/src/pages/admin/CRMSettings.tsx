@@ -556,6 +556,7 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
   const EMPTY: CompanySettings = {
     company_name: '', company_email: '', company_phone: '',
     company_website: '', company_address: '', company_registration: '',
+    zoom_meeting_link: '',
   };
   const [form, setForm] = useState<CompanySettings>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -617,6 +618,23 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
             />
           </div>
         </div>
+
+        <div className="border-t border-slate-100 pt-5 space-y-3">
+          <h2 className="text-sm font-semibold text-slate-700">Integrations</h2>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Zoom Meeting Link</label>
+            <input
+              value={form.zoom_meeting_link}
+              onChange={setF('zoom_meeting_link')}
+              placeholder="https://zoom.us/j/your-meeting-id"
+              className="input-field w-full"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Paste your Zoom Personal Meeting Room link. It will be included automatically in all Zoom survey confirmation emails.
+            </p>
+          </div>
+        </div>
+
         <div className="pt-1 flex justify-end">
           <button type="submit" disabled={saving} className="btn-primary">
             {saving ? 'Saving…' : 'Save Changes'}

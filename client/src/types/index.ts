@@ -453,6 +453,7 @@ export interface CompanySettings {
   company_website: string;
   company_address: string;
   company_registration: string;
+  zoom_meeting_link: string;
 }
 
 export interface JobStatusSetting {

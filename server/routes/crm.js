@@ -661,8 +661,27 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
     isPhysical && fromAddress ? `at ${fromAddress}` : null,
   ].filter(Boolean).join(' ');
 
-  const zoomNote = isZoom
-    ? `<p style="margin:16px 0 0;font-size:13px;color:#0369a1;">📹 Your survey will take place via <strong>Zoom</strong>. Please keep an eye on your inbox for the video call link.</p>`
+  // Fetch stored Zoom link and company email (for admin copy)
+  const settingRows = await prisma.companySetting.findMany({
+    where: { key: { in: ['zoom_meeting_link', 'company_email'] } },
+  });
+  const settingsMap = Object.fromEntries(settingRows.map(r => [r.key, r.value ?? '']));
+  const zoomLink = settingsMap['zoom_meeting_link'] || '';
+  const adminEmail = settingsMap['company_email'] || '';
+
+  const zoomBlock = isZoom
+    ? zoomLink
+      ? `
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin:20px 0 0;">
+          <tr>
+            <td style="padding:20px 24px;">
+              <p style="margin:0 0 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#1d4ed8;">📹 Join your Zoom Survey</p>
+              <a href="${zoomLink}" style="display:inline-block;background:#2563eb;color:#ffffff;font-weight:700;font-size:14px;padding:10px 24px;border-radius:8px;text-decoration:none;">Join Zoom Meeting →</a>
+              <p style="margin:12px 0 0;font-size:11px;color:#3b82f6;word-break:break-all;">Or copy this link: <a href="${zoomLink}" style="color:#1d4ed8;">${zoomLink}</a></p>
+            </td>
+          </tr>
+        </table>`
+      : `<p style="margin:20px 0 0;font-size:13px;color:#0369a1;">📹 Your survey will take place via <strong>Zoom</strong>. We will send you the video call link closer to your appointment.</p>`
     : '';
 
   const html = `
@@ -694,7 +713,7 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
                 <td style="padding:24px 28px;">
                   <p style="margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#0369a1;">Survey Appointment</p>
                   <p style="margin:0;font-size:18px;font-weight:700;color:#0c4a6e;line-height:1.5;">${appointmentDetail}</p>
-                  ${zoomNote}
+                  ${zoomBlock}
                 </td>
               </tr>
             </table>
@@ -730,6 +749,24 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
     subject: `Your survey is booked – ${formattedDate}${timeStr ? ` at ${timeStr}` : ''}`,
     html,
   });
+
+  // Send admin notification copy
+  if (adminEmail) {
+    const adminHtml = `
+<p style="font-family:Arial,sans-serif;font-size:14px;color:#1e293b;">
+  <strong>Survey confirmation sent to ${job.full_name} (${job.email})</strong>
+</p>
+<p style="font-family:Arial,sans-serif;font-size:14px;color:#475569;">
+  <strong>Appointment:</strong> ${appointmentDetail}<br>
+  <strong>Type:</strong> ${job.survey_type}
+  ${isZoom && zoomLink ? `<br><strong>Zoom link:</strong> <a href="${zoomLink}">${zoomLink}</a>` : ''}
+</p>`.trim();
+    await sendEmail({
+      to: adminEmail,
+      subject: `[Survey Booked] ${job.full_name} – ${formattedDate}${timeStr ? ` at ${timeStr}` : ''}`,
+      html: adminHtml,
+    }).catch(() => {}); // don't fail the whole request if admin notify fails
+  }
 
   res.json({ ok: true });
 }));
