@@ -638,7 +638,6 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
   const isPhysical = job.survey_type.toLowerCase().includes('physical');
   const isZoom = job.survey_type.toLowerCase().includes('zoom') || job.survey_type.toLowerCase().includes('video');
 
-  // Format the date nicely
   const dateObj = new Date(job.survey_date + 'T00:00:00');
   const formattedDate = dateObj.toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -655,11 +654,16 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
   const fromAddressParts = [job.from_line1, job.from_line2, job.from_city, job.from_postcode].filter(Boolean);
   const fromAddress = fromAddressParts.join(', ');
 
-  const locationLine = isPhysical && fromAddress
-    ? `<p style="margin:0 0 12px;">We will see you at <strong>${fromAddress}</strong>.</p>`
-    : isZoom
-      ? `<p style="margin:0 0 12px;">Your survey will take place via <strong>Zoom</strong>. Please keep an eye on your inbox for the video call link.</p>`
-      : `<p style="margin:0 0 12px;">Survey type: <strong>${job.survey_type}</strong>.</p>`;
+  // Appointment detail line: "Monday 4 May 2026 at 10:00am at 12 High Street, London"
+  const appointmentDetail = [
+    formattedDate,
+    timeStr ? `at ${timeStr}` : null,
+    isPhysical && fromAddress ? `at ${fromAddress}` : null,
+  ].filter(Boolean).join(' ');
+
+  const zoomNote = isZoom
+    ? `<p style="margin:16px 0 0;font-size:13px;color:#0369a1;">📹 Your survey will take place via <strong>Zoom</strong>. Please keep an eye on your inbox for the video call link.</p>`
+    : '';
 
   const html = `
 <!DOCTYPE html>
@@ -674,7 +678,7 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
         <tr>
           <td style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);padding:32px 40px;text-align:center;">
             <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">Survey Confirmation</h1>
-            <p style="margin:8px 0 0;color:#cffafe;font-size:14px;">iMove Removals &amp; Storage</p>
+            <p style="margin:8px 0 0;color:#cffafe;font-size:14px;">iMove Relocations Ltd</p>
           </td>
         </tr>
 
@@ -682,30 +686,36 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
         <tr>
           <td style="padding:36px 40px;">
             <p style="margin:0 0 20px;font-size:16px;">Dear <strong>${job.full_name}</strong>,</p>
-            <p style="margin:0 0 16px;">Thank you for choosing iMove. Your survey has been booked and we look forward to helping you with your move.</p>
+            <p style="margin:0 0 20px;">Thank you for choosing iMove. Your survey has been booked and we look forward to helping you with your move.</p>
 
-            <!-- Date/time card -->
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;margin:0 0 20px;">
+            <!-- Appointment card -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;margin:0 0 24px;">
               <tr>
-                <td style="padding:20px 24px;">
-                  <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#0369a1;">Survey Appointment</p>
-                  <p style="margin:0 0 2px;font-size:20px;font-weight:700;color:#0c4a6e;">${formattedDate}</p>
-                  ${timeStr ? `<p style="margin:0;font-size:16px;color:#0369a1;font-weight:600;">${timeStr}</p>` : ''}
+                <td style="padding:24px 28px;">
+                  <p style="margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#0369a1;">Survey Appointment</p>
+                  <p style="margin:0;font-size:18px;font-weight:700;color:#0c4a6e;line-height:1.5;">${appointmentDetail}</p>
+                  ${zoomNote}
                 </td>
               </tr>
             </table>
 
-            ${locationLine}
+            <p style="margin:0 0 12px;">If you have any questions or need to rearrange, please don't hesitate to get in touch — we're always happy to help.</p>
+            <p style="margin:0 0 24px;">We look forward to seeing you soon!</p>
 
-            <p style="margin:0 0 12px;">If you have any questions or need to rearrange, please don't hesitate to get in touch.</p>
-            <p style="margin:0;">We look forward to seeing you soon!</p>
+            <p style="margin:0;font-size:14px;color:#475569;">Kind regards,<br><strong>The iMove Team</strong></p>
           </td>
         </tr>
 
         <!-- Footer -->
         <tr>
-          <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center;">
-            <p style="margin:0;font-size:12px;color:#94a3b8;">iMove Removals &amp; Storage · <a href="mailto:info@myimove.co.uk" style="color:#0891b2;text-decoration:none;">info@myimove.co.uk</a></p>
+          <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;text-align:center;">
+            <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#475569;">iMove Relocations Ltd</p>
+            <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;">94C Hampstead Avenue, Mildenhall, Suffolk, IP28 7AS</p>
+            <p style="margin:0;font-size:12px;color:#94a3b8;">
+              <a href="tel:01638255255" style="color:#0891b2;text-decoration:none;">01638 255 255</a>
+              &nbsp;·&nbsp;
+              <a href="mailto:info@myimove.co.uk" style="color:#0891b2;text-decoration:none;">info@myimove.co.uk</a>
+            </p>
           </td>
         </tr>
 
