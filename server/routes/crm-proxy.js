@@ -1,9 +1,7 @@
 const express = require('express');
-const { authenticate } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 
 const router = express.Router();
-router.use(authenticate);
 
 const RAILWAY_API_BASE = 'https://imove-partners.up.railway.app/api';
 const API_KEY = process.env.RAILWAY_API_KEY || '';
