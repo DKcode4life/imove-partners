@@ -40,7 +40,7 @@ module.exports = {
 
   email: {
     provider: process.env.EMAIL_PROVIDER || '',
-    from: process.env.EMAIL_FROM || 'noreply@imovepartners.co.uk',
+    from: process.env.EMAIL_FROM || 'iMove <noreply@imovepartners.co.uk>',
     smtp: {
       host: process.env.SMTP_HOST || '',
       port: parseInt(process.env.SMTP_PORT || '587', 10),
