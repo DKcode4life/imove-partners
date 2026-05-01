@@ -281,6 +281,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     { field: 'survey_required', old: existing.survey_required, new: b.survey_required },
     { field: 'survey_type', old: existing.survey_type, new: b.survey_type },
     { field: 'survey_date', old: existing.survey_date, new: b.survey_date },
+    { field: 'survey_time', old: existing.survey_time, new: b.survey_time },
     { field: 'quote_amount', old: existing.quote_amount, new: b.quote_amount },
     { field: 'quote_sent_date', old: existing.quote_sent_date, new: b.quote_sent_date },
     { field: 'quote_accepted', old: existing.quote_accepted, new: b.quote_accepted },
@@ -354,7 +355,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
       bedrooms_to: b.bedrooms_to ?? null, parking_notes_to: b.parking_notes_to ?? null,
       preferred_move_date: b.preferred_move_date ?? null, confirmed_move_date: b.confirmed_move_date ?? null,
       flexibility_notes: b.flexibility_notes ?? null,
-      survey_required: !!b.survey_required, survey_type: b.survey_type ?? null, survey_date: b.survey_date ?? null,
+      survey_required: !!b.survey_required, survey_type: b.survey_type ?? null, survey_date: b.survey_date ?? null, survey_time: b.survey_time ?? null,
       quote_amount: b.quote_amount != null ? parseFloat(b.quote_amount) : null,
       quote_sent_date: b.quote_sent_date ?? null, quote_accepted: !!b.quote_accepted,
       deposit_required: !!b.deposit_required, deposit_paid: !!b.deposit_paid,
@@ -635,8 +636,9 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
     return res.status(422).json({ error: 'Survey type and date must be set before sending.' });
   }
 
-  const isPhysical = job.survey_type.toLowerCase().includes('physical');
-  const isZoom = job.survey_type.toLowerCase().includes('zoom') || job.survey_type.toLowerCase().includes('video');
+  const surveyTypeLower = job.survey_type.toLowerCase();
+  const isPhysical = surveyTypeLower.includes('person') || surveyTypeLower.includes('physical');
+  const isZoom = surveyTypeLower.includes('zoom') || surveyTypeLower.includes('video');
 
   const dateObj = new Date(job.survey_date + 'T00:00:00');
   const formattedDate = dateObj.toLocaleDateString('en-GB', {
