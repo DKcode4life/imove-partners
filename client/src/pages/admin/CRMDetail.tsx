@@ -387,6 +387,8 @@ export default function CRMDetailPage() {
   const [surveyRequired,  setSurveyRequired]  = useState(false);
   const [surveyType,       setSurveyType]       = useState('');
   const [surveyDate,       setSurveyDate]       = useState('');
+  const [surveyTime,       setSurveyTime]       = useState('');
+  const [sendingSurveyEmail, setSendingSurveyEmail] = useState(false);
   const [quoteAmount,      setQuoteAmount]      = useState('');
   const [quoteSentDate,    setQuoteSentDate]    = useState('');
   const [quoteAccepted,    setQuoteAccepted]    = useState(false);
@@ -432,7 +434,7 @@ export default function CRMDetailPage() {
     setFloorTo(j.floor_to || '');           setHasLiftTo(j.has_lift_to);
     setPropTypeToOther(j.prop_type_to_other || '');
     setSurveyRequired(j.survey_required); setSurveyType(j.survey_type || '');
-    setSurveyDate(j.survey_date || '');
+    setSurveyDate(j.survey_date || '');   setSurveyTime((j as any).survey_time || '');
     setQuoteAmount(j.quote_amount != null ? String(j.quote_amount) : '');
     setQuoteSentDate(j.quote_sent_date || '');  setQuoteAccepted(j.quote_accepted);
     setDepositRequired(j.deposit_required);     setDepositPaid(j.deposit_paid);
@@ -510,7 +512,7 @@ export default function CRMDetailPage() {
     floor_to: floorTo || null, has_lift_to: hasLiftTo,
     prop_type_to_other: propTypeToOther || null,
     survey_required: surveyRequired, survey_type: surveyType || null,
-    survey_date: surveyDate || null,
+    survey_date: surveyDate || null, survey_time: surveyTime || null,
     quote_amount: quoteAmount ? parseFloat(quoteAmount) : null,
     quote_sent_date: quoteSentDate || null, quote_accepted: quoteAccepted,
     deposit_required: depositRequired, deposit_paid: depositPaid,
@@ -610,6 +612,21 @@ export default function CRMDetailPage() {
       setActivities(res.data);
     } catch { showToast('Failed to delete note', 'error'); }
     finally { setDeletingAdminNoteId(null); }
+  };
+
+  // ── Send survey confirmation email ────────────────────────────────────────────
+
+  const handleSendSurveyEmail = async () => {
+    if (!email) { showToast('Customer has no email address', 'error'); return; }
+    setSendingSurveyEmail(true);
+    try {
+      await api.post(`/crm/jobs/${id}/send-survey-email`);
+      showToast('Survey confirmation email sent');
+    } catch (err: any) {
+      showToast(err?.response?.data?.error || 'Failed to send email', 'error');
+    } finally {
+      setSendingSurveyEmail(false);
+    }
   };
 
   // ── Loading ──────────────────────────────────────────────────────────────────
@@ -990,9 +1007,14 @@ export default function CRMDetailPage() {
                         {CRM_SURVEY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </F>
-                    <F label="Survey Date">
-                      <input type="date" className="input" value={surveyDate} onChange={e => setSurveyDate(e.target.value)} />
-                    </F>
+                    <div className="grid grid-cols-2 gap-3">
+                      <F label="Survey Date">
+                        <input type="date" className="input" value={surveyDate} onChange={e => setSurveyDate(e.target.value)} />
+                      </F>
+                      <F label="Survey Time">
+                        <input type="time" className="input" value={surveyTime} onChange={e => setSurveyTime(e.target.value)} />
+                      </F>
+                    </div>
                   </>
                 )}
               </div>
@@ -1002,7 +1024,25 @@ export default function CRMDetailPage() {
                 {surveyRequired && (
                   <>
                     <ReadF label="Survey Type" value={surveyType} />
-                    <ReadF label="Survey Date" value={fmtDate(surveyDate)} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <ReadF label="Survey Date" value={fmtDate(surveyDate)} />
+                      <ReadF label="Survey Time" value={surveyTime ? surveyTime : undefined} />
+                    </div>
+                    {surveyType && surveyDate && (
+                      <button
+                        type="button"
+                        onClick={handleSendSurveyEmail}
+                        disabled={sendingSurveyEmail || !email}
+                        className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 text-xs font-semibold hover:bg-cyan-100 hover:border-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      >
+                        {sendingSurveyEmail
+                          ? <><span className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" /> Sending…</>
+                          : <><Send className="w-3.5 h-3.5" /> Send Survey Confirmation</>}
+                      </button>
+                    )}
+                    {!email && surveyType && surveyDate && (
+                      <p className="text-[11px] text-amber-600">Add a client email address to enable sending.</p>
+                    )}
                   </>
                 )}
               </div>

@@ -117,6 +117,7 @@ model CrmJob {
   survey_required         Boolean  @default(false)
   survey_type             String?
   survey_date             String?
+  survey_time             String?
   quote_amount            Float?
   quote_sent_date         String?
   quote_accepted          Boolean  @default(false)

@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
+const { send: sendEmail } = require('../services/email');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -620,6 +621,107 @@ router.post('/route-info', wrap(async (req, res) => {
   ]);
 
   res.json({ direct, total });
+}));
+
+// POST /api/crm/jobs/:id/send-survey-email
+router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id);
+  if (isNaN(jobId)) return res.status(400).json({ error: 'Invalid job ID' });
+
+  const job = await prisma.crmJob.findUnique({ where: { id: jobId } });
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (!job.email) return res.status(422).json({ error: 'Customer has no email address on file.' });
+  if (!job.survey_required || !job.survey_type || !job.survey_date) {
+    return res.status(422).json({ error: 'Survey type and date must be set before sending.' });
+  }
+
+  const isPhysical = job.survey_type.toLowerCase().includes('physical');
+  const isZoom = job.survey_type.toLowerCase().includes('zoom') || job.survey_type.toLowerCase().includes('video');
+
+  // Format the date nicely
+  const dateObj = new Date(job.survey_date + 'T00:00:00');
+  const formattedDate = dateObj.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  const timeStr = job.survey_time
+    ? (() => {
+        const [h, m] = job.survey_time.split(':');
+        const d = new Date(); d.setHours(parseInt(h), parseInt(m));
+        return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+      })()
+    : null;
+
+  const fromAddressParts = [job.from_line1, job.from_line2, job.from_city, job.from_postcode].filter(Boolean);
+  const fromAddress = fromAddressParts.join(', ');
+
+  const locationLine = isPhysical && fromAddress
+    ? `<p style="margin:0 0 12px;">We will see you at <strong>${fromAddress}</strong>.</p>`
+    : isZoom
+      ? `<p style="margin:0 0 12px;">Your survey will take place via <strong>Zoom</strong>. Please keep an eye on your inbox for the video call link.</p>`
+      : `<p style="margin:0 0 12px;">Survey type: <strong>${job.survey_type}</strong>.</p>`;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;max-width:600px;width:100%;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">Survey Confirmation</h1>
+            <p style="margin:8px 0 0;color:#cffafe;font-size:14px;">iMove Removals &amp; Storage</p>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:36px 40px;">
+            <p style="margin:0 0 20px;font-size:16px;">Dear <strong>${job.full_name}</strong>,</p>
+            <p style="margin:0 0 16px;">Thank you for choosing iMove. Your survey has been booked and we look forward to helping you with your move.</p>
+
+            <!-- Date/time card -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;margin:0 0 20px;">
+              <tr>
+                <td style="padding:20px 24px;">
+                  <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#0369a1;">Survey Appointment</p>
+                  <p style="margin:0 0 2px;font-size:20px;font-weight:700;color:#0c4a6e;">${formattedDate}</p>
+                  ${timeStr ? `<p style="margin:0;font-size:16px;color:#0369a1;font-weight:600;">${timeStr}</p>` : ''}
+                </td>
+              </tr>
+            </table>
+
+            ${locationLine}
+
+            <p style="margin:0 0 12px;">If you have any questions or need to rearrange, please don't hesitate to get in touch.</p>
+            <p style="margin:0;">We look forward to seeing you soon!</p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#94a3b8;">iMove Removals &amp; Storage · <a href="mailto:info@myimove.co.uk" style="color:#0891b2;text-decoration:none;">info@myimove.co.uk</a></p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`.trim();
+
+  await sendEmail({
+    to: job.email,
+    subject: `Your survey is booked – ${formattedDate}${timeStr ? ` at ${timeStr}` : ''}`,
+    html,
+  });
+
+  res.json({ ok: true });
 }));
 
 module.exports = router;

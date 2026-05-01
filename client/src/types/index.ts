@@ -238,6 +238,7 @@ export interface CrmJob {
   survey_required: boolean;
   survey_type: string | null;
   survey_date: string | null;
+  survey_time: string | null;
   quote_amount: number | null;
   quote_sent_date: string | null;
   quote_accepted: boolean;
