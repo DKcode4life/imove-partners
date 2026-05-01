@@ -23,7 +23,6 @@ export interface SendDocumentData {
   cc: string[];
   bcc: string[];
   subject: string;
-  body_html: string;
   attach_pdf: boolean;
 }
 
@@ -62,36 +61,13 @@ function defaultSubject(t: DocumentType, ref: string): string {
   }
 }
 
-function defaultBody(t: DocumentType, customerName: string, ref: string, amount: number, balance?: number): string {
-  const amt = `£${amount.toFixed(2)}`;
-  const bal = balance != null ? `£${balance.toFixed(2)}` : '';
-  const sign = `Warm regards,\nThe iMove Partners Team\n📞 0208 058 0958\n✉️ hello@myimove.co.uk`;
-
-  switch (t) {
-    case 'estimate-quote':
-      return `Hi ${customerName},\n\nThank you for getting in touch with iMove Partners. Please find attached your estimate (${ref}) — an indicative figure of ${amt} (incl. VAT) based on the information you've shared so far.\n\nIf you'd like to lock in a fixed price, simply reply and we'll arrange a quick survey.\n\n${sign}`;
-    case 'fixed-quote':
-      return `Hi ${customerName},\n\nFollowing our conversation, please find attached your fixed quote (${ref}). The total cost is ${amt} (incl. VAT) and is guaranteed for the inventory & access discussed.\n\nTo confirm your booking, just reply or pay the deposit and we'll secure your moving date.\n\n${sign}`;
-    case 'deposit-invoice':
-      return `Hi ${customerName},\n\nThank you for booking with iMove Partners! Please find attached your deposit invoice (${ref}) for ${amt}.\n\nOnce we receive your deposit, your booking is confirmed and we'll send a receipt by email.\n\nBank transfer details are on the invoice — reference: ${ref}.\n\n${sign}`;
-    case 'deposit-receipt':
-      return `Hi ${customerName},\n\nGreat news — we've received your deposit of ${amt}. Your move is now confirmed! 🎉\n\nPlease find attached your official receipt for your records.${balance ? `\n\nThe remaining balance of ${bal} will be due closer to your move date.` : ''}\n\n${sign}`;
-    case 'main-invoice':
-      return `Hi ${customerName},\n\nPlease find attached the final invoice (${ref}) for your move.\n\nTotal: ${amt}${balance != null ? `\nBalance due: ${bal}` : ''}\n\nBank transfer details are on the invoice — reference: ${ref}.\n\n${sign}`;
-    case 'move-receipt':
-      return `Hi ${customerName},\n\nYour final balance of ${amt} has been received in full. Thank you for choosing iMove Partners! 🚚✨\n\nPlease find attached your official receipt — your move is now paid in full.\n\nIf you've got a moment, we'd love a quick review. And if you know someone moving, our referral programme rewards both of you.\n\nAll the best in your new home,\nThe iMove Partners Team`;
-  }
-}
 
 export default function SendDocumentModal({
   open,
   onClose,
   documentType,
-  customerName,
   customerEmail,
   documentNumber,
-  amount,
-  jobTotal,
   previewPdfUrl,
   onSend,
 }: Props) {
@@ -99,20 +75,17 @@ export default function SendDocumentModal({
   const [cc, setCc] = useState('');
   const [bcc, setBcc] = useState('');
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
   const [attachPdf, setAttachPdf] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (open) {
-      const balance = jobTotal != null ? jobTotal - amount : undefined;
       setTo(customerEmail || '');
       setSubject(defaultSubject(documentType, documentNumber));
-      setBody(defaultBody(documentType, customerName, documentNumber, amount, balance));
       setError('');
     }
-  }, [open, documentType, customerName, customerEmail, documentNumber, amount, jobTotal]);
+  }, [open, documentType, customerEmail, documentNumber]);
 
   const handleSend = async () => {
     if (!to.trim()) return setError('Recipient email is required');
@@ -126,8 +99,6 @@ export default function SendDocumentModal({
         cc: cc.split(',').map(s => s.trim()).filter(Boolean),
         bcc: bcc.split(',').map(s => s.trim()).filter(Boolean),
         subject: subject.trim(),
-        // Convert plain newlines to <br> for HTML rendering
-        body_html: body.trim().split('\n').map(l => `<p>${l || '&nbsp;'}</p>`).join(''),
         attach_pdf: attachPdf,
       });
       onClose();
@@ -193,17 +164,9 @@ export default function SendDocumentModal({
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Message</label>
-          <textarea
-            value={body}
-            onChange={e => setBody(e.target.value)}
-            rows={11}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-          />
-          <p className="text-xs text-slate-500 mt-1">
-            Edit freely — line breaks are preserved. The PDF will be attached automatically.
-          </p>
+        <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+          <div className="text-blue-500 text-lg">✉️</div>
+          <p className="text-sm text-blue-700">Branded email template will be used — customer details and amounts are filled in automatically.</p>
         </div>
 
         <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
