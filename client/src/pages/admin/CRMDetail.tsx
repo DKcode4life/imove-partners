@@ -12,7 +12,7 @@ import SurveyTool from '../../components/SurveyTool';
 import SurveyReport from '../../components/SurveyReport';
 import api from '../../lib/api';
 import type { CrmJob, CrmActivity, CrmStatus, JobStatusSetting, PlannerAssignment } from '../../types';
-import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
+import { CRM_STATUSES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -438,6 +438,7 @@ export default function CRMDetailPage() {
   const [deletingAdminNoteId,  setDeletingAdminNoteId]  = useState<number | null>(null);
   const [toast,           setToast]          = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pipelineSaving,  setPipelineSaving]  = useState<number | null>(null);
+  const [leadSources,     setLeadSources]     = useState<string[]>([]);
   const [lostReason,      setLostReason]      = useState('');
   const [lostNotes,       setLostNotes]       = useState('');
   const [showLostModal,   setShowLostModal]   = useState(false);
@@ -566,6 +567,12 @@ export default function CRMDetailPage() {
   useEffect(() => {
     api.get('/settings/statuses')
       .then(r => { if (Array.isArray(r.data) && r.data.length) setPipelineStatuses(r.data); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get('/settings/lead-sources')
+      .then(r => setLeadSources(r.data.map((s: { name: string }) => s.name)))
       .catch(() => {});
   }, []);
 
@@ -1077,7 +1084,7 @@ export default function CRMDetailPage() {
                   ) : (
                     <select className="input" value={leadSource} onChange={e => setLeadSource(e.target.value)}>
                       <option value="">Select…</option>
-                      {CRM_LEAD_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                      {leadSources.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   )}
                 </F>

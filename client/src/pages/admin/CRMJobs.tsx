@@ -9,7 +9,7 @@ import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
 import api from '../../lib/api';
 import type { CrmJob, CrmStatus, PendingLead } from '../../types';
-import { CRM_STATUSES, CRM_LEAD_SOURCES, CRM_BEDROOM_OPTIONS } from '../../types';
+import { CRM_STATUSES, CRM_BEDROOM_OPTIONS } from '../../types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -206,6 +206,7 @@ export default function CRMJobsPage() {
   const [form,         setForm]         = useState<NewJobForm>(EMPTY_FORM);
   const [submitting,   setSubmitting]   = useState(false);
   const [formError,    setFormError]    = useState('');
+  const [leadSources,  setLeadSources]  = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<CrmJob | null>(null);
   const [deleting,     setDeleting]     = useState(false);
   const [pendingOpen,  setPendingOpen]  = useState(false);
@@ -224,6 +225,12 @@ export default function CRMJobsPage() {
   }, []);
 
   useEffect(() => { fetchAll().finally(() => setLoading(false)); }, [fetchAll]);
+
+  useEffect(() => {
+    api.get('/settings/lead-sources')
+      .then(r => setLeadSources(r.data.map((s: { name: string }) => s.name)))
+      .catch(() => {});
+  }, []);
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
@@ -335,7 +342,7 @@ export default function CRMJobsPage() {
               </span>
             </button>
           )}
-          <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setFormError(''); setNewOpen(true); }}>
+          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, lead_source: leadSources[0] || '' }); setFormError(''); setNewOpen(true); }}>
             <Plus className="w-4 h-4" /> New Job
           </button>
         </div>
@@ -659,7 +666,8 @@ export default function CRMJobsPage() {
                 <div>
                   <label className="label">Lead Source</label>
                   <select className="input" value={form.lead_source} onChange={set('lead_source')}>
-                    {CRM_LEAD_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                    <option value="">Select…</option>
+                    {leadSources.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
