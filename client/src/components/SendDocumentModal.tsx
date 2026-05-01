@@ -23,6 +23,7 @@ export interface SendDocumentData {
   cc: string[];
   bcc: string[];
   subject: string;
+  body_html?: string;
   attach_pdf: boolean;
 }
 
