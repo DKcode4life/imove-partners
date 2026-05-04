@@ -3,6 +3,7 @@ import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as 
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
 import ImageModal from './ImageModal';
+import api from '../lib/api';
 
 // ── Survey room definitions ────────────────────────────────────────────────────
 // Each room has a fixed display name (used as the key in SurveyData) and a
@@ -388,6 +389,50 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   useEffect(() => { setCustomRooms(loadCustomRooms(jobId)); }, [jobId]);
   useEffect(() => { setSearch(''); }, [selectedRoomId]);
 
+  // ── API sync ───────────────────────────────────────────────────────────────
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced write: bundles all 4 stores and PUTs to the server 1.5 s after last change.
+  const scheduleSyncToApi = useCallback(() => {
+    if (!jobId) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      const payload = {
+        data:        JSON.parse(localStorage.getItem(storageKey(jobId))     || '{}'),
+        searchData:  JSON.parse(localStorage.getItem(searchDataKey(jobId))  || '{}'),
+        customRooms: JSON.parse(localStorage.getItem(customRoomsKey(jobId)) || '[]'),
+        roomPhotos:  JSON.parse(localStorage.getItem(roomPhotosKey(jobId))  || '{}'),
+      };
+      api.put(`/crm/jobs/${jobId}/survey`, payload).catch(() => {});
+    }, 1500);
+  }, [jobId]);
+
+  // On load: fetch from server and overwrite localStorage + state so all devices stay in sync.
+  useEffect(() => {
+    if (!jobId) return;
+    api.get(`/crm/jobs/${jobId}/survey`)
+      .then(res => {
+        const d = res.data as { data?: object; searchData?: object; customRooms?: unknown[]; roomPhotos?: object };
+        if (d.data && Object.keys(d.data).length > 0) {
+          localStorage.setItem(storageKey(jobId), JSON.stringify(d.data));
+          setData(loadData(jobId));
+        }
+        if (d.searchData && Object.keys(d.searchData).length > 0) {
+          localStorage.setItem(searchDataKey(jobId), JSON.stringify(d.searchData));
+          setSearchData(loadSearchData(jobId));
+        }
+        if (d.customRooms && d.customRooms.length > 0) {
+          localStorage.setItem(customRoomsKey(jobId), JSON.stringify(d.customRooms));
+          setCustomRooms(loadCustomRooms(jobId));
+        }
+        if (d.roomPhotos && Object.keys(d.roomPhotos).length > 0) {
+          localStorage.setItem(roomPhotosKey(jobId), JSON.stringify(d.roomPhotos));
+          setRoomPhotos(loadRoomPhotos(jobId));
+        }
+      })
+      .catch(() => {});
+  }, [jobId]);
+
   // ── Room photos (reference photos of the entire room) ──────────────────────
   const [roomPhotos, setRoomPhotos] = useState<Record<string, string[]>>(() => loadRoomPhotos(jobId));
   const roomPhotoInputRef = useRef<HTMLInputElement>(null);
@@ -397,7 +442,8 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const persistRoomPhotos = useCallback((next: Record<string, string[]>) => {
     setRoomPhotos(next);
     if (jobId) localStorage.setItem(roomPhotosKey(jobId), JSON.stringify(next));
-  }, [jobId]);
+    scheduleSyncToApi();
+  }, [jobId, scheduleSyncToApi]);
 
   const addRoomPhoto = async (roomName: string, file: File) => {
     try {
@@ -430,6 +476,7 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     setNewRoomName('');
     setAddingRoomType(null);
     setSelectedRoomId(id);
+    scheduleSyncToApi();
   };
 
   useEffect(() => {
@@ -447,7 +494,8 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const persist = useCallback((next: SurveyData) => {
     setData(next);
     if (jobId) localStorage.setItem(storageKey(jobId), JSON.stringify(next));
-  }, [jobId]);
+    scheduleSyncToApi();
+  }, [jobId, scheduleSyncToApi]);
 
   const clone = () => JSON.parse(JSON.stringify(data)) as SurveyData;
 
@@ -494,7 +542,8 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const persistSearch = useCallback((next: SurveyData) => {
     setSearchData(next);
     if (jobId) localStorage.setItem(searchDataKey(jobId), JSON.stringify(next));
-  }, [jobId]);
+    scheduleSyncToApi();
+  }, [jobId, scheduleSyncToApi]);
 
   const cloneSearch    = () => JSON.parse(JSON.stringify(searchData)) as SurveyData;
   const getSearchEntry = (room: string, item: string): ItemEntry =>

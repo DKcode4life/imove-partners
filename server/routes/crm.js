@@ -776,4 +776,21 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// GET /api/crm/jobs/:id/survey
+router.get('/jobs/:id/survey', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await prisma.crmJob.findUnique({ where: { id }, select: { survey_data: true } });
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job.survey_data || {});
+}));
+
+// PUT /api/crm/jobs/:id/survey
+router.put('/jobs/:id/survey', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const existing = await prisma.crmJob.findUnique({ where: { id }, select: { id: true } });
+  if (!existing) return res.status(404).json({ error: 'Job not found' });
+  await prisma.crmJob.update({ where: { id }, data: { survey_data: req.body } });
+  res.json({ ok: true });
+}));
+
 module.exports = router;

@@ -150,6 +150,8 @@ model CrmJob {
   assigned_vehicle        String?
   // Partner
   partner_commission_rate Float?
+  // Survey inventory (stored as JSON: { data, searchData, customRooms, roomPhotos })
+  survey_data             Json?
   // Timestamps
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt
