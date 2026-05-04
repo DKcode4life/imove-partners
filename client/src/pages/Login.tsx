@@ -142,11 +142,19 @@ export default function Login() {
             <div className="mt-6 pt-6 border-t border-slate-100">
               <p className="text-xs font-medium text-slate-500 mb-2">Demo credentials:</p>
               <div className="text-xs text-slate-500">
-                <div className="bg-slate-50 rounded-lg px-3 py-2">
-                  <p className="font-semibold text-slate-700 mb-0.5">Partner</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('john@premierproperties.co.uk');
+                    setPassword('partner123');
+                  }}
+                  className="w-full text-left bg-slate-50 hover:bg-brand-50 hover:border-brand-200 border border-transparent rounded-lg px-3 py-2 transition-colors cursor-pointer group"
+                >
+                  <p className="font-semibold text-slate-700 mb-0.5 group-hover:text-brand-700">Partner</p>
                   <p>john@premierproperties.co.uk</p>
                   <p>partner123</p>
-                </div>
+                  <p className="text-brand-500 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">Click to fill in →</p>
+                </button>
               </div>
             </div>
           )}

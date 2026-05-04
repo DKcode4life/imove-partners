@@ -395,9 +395,27 @@ router.put('/jobs/:id', wrap(async (req, res) => {
       if (portalStatus) {
         try {
           await prisma.lead.update({ where: { id: existing.lead_id }, data: { status: portalStatus } });
-        } catch (_) { /* non-fatal */ }
+        } catch (err) { console.error('[crm] lead status sync failed for job', id, err); }
       }
     }
+  }
+
+  // Sync key fields back to the linked partner lead regardless of status change
+  if (existing.lead_id) {
+    try {
+      await prisma.lead.update({
+        where: { id: existing.lead_id },
+        data: {
+          client_name: updated.full_name,
+          email: updated.email || undefined,
+          contact_number: updated.phone || undefined,
+          destination_postcode: updated.to_postcode || null,
+          property_size: updated.bedrooms || null,
+          estimated_moving_date: updated.preferred_move_date || null,
+          ...(updated.quote_amount != null ? { quote_value: updated.quote_amount } : {}),
+        },
+      });
+    } catch (err) { console.error('[crm] lead field sync failed for job', id, err); }
   }
 
   const activities = await prisma.crmActivity.findMany({

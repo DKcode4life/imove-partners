@@ -38,6 +38,8 @@ module.exports = {
     env === 'production' ? PROD_DEFAULT_ORIGINS : DEV_DEFAULT_ORIGINS,
   ),
 
+  crmUrl: process.env.CRM_URL || 'https://crm.myimove.co.uk',
+
   email: {
     provider: process.env.EMAIL_PROVIDER || '',
     from: process.env.EMAIL_FROM || 'iMove <noreply@imovepartners.co.uk>',

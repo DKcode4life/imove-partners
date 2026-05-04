@@ -2,6 +2,8 @@ const express = require('express');
 const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
+const { send: sendEmail } = require('../services/email');
+const config = require('../config');
 
 const router = express.Router();
 router.use(authenticate);
@@ -154,7 +156,82 @@ router.post('/', wrap(async (req, res) => {
         note: `Imported from Partner Portal — referred by ${partner?.agency_name || 'estate agent'}`,
       },
     });
-  } catch (_) { /* Non-fatal */ }
+  } catch (err) { console.error('[leads] CrmJob auto-create failed for lead', lead.id, err); }
+
+  // Email admin: new lead notification
+  try {
+    const setting = await prisma.companySetting.findUnique({ where: { key: 'company_email' } });
+    const adminEmail = setting?.value?.trim();
+    if (adminEmail) {
+      const crmLink = `${config.crmUrl}/admin/crm`;
+      const agencyName = partner?.agency_name || 'an estate agent';
+      const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;max-width:600px;width:100%;">
+
+        <tr>
+          <td style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);padding:28px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">New Lead Submitted</h1>
+            <p style="margin:8px 0 0;color:#cffafe;font-size:14px;">Partner Portal Notification</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px 40px;">
+            <p style="margin:0 0 20px;font-size:15px;">A new lead has been submitted by <strong>${agencyName}</strong>.</p>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;margin:0 0 24px;">
+              <tr>
+                <td style="padding:20px 24px;">
+                  <p style="margin:0 0 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#0369a1;">Lead Details</p>
+                  <table cellpadding="0" cellspacing="0" style="font-size:14px;color:#1e293b;width:100%;">
+                    <tr><td style="padding:4px 0;color:#64748b;width:140px;">Client</td><td style="padding:4px 0;"><strong>${lead.client_name}</strong></td></tr>
+                    <tr><td style="padding:4px 0;color:#64748b;">Email</td><td style="padding:4px 0;">${lead.email || '—'}</td></tr>
+                    <tr><td style="padding:4px 0;color:#64748b;">Phone</td><td style="padding:4px 0;">${lead.contact_number || '—'}</td></tr>
+                    <tr><td style="padding:4px 0;color:#64748b;">Moving from</td><td style="padding:4px 0;">${lead.current_address || '—'}</td></tr>
+                    ${lead.destination_postcode ? `<tr><td style="padding:4px 0;color:#64748b;">Moving to</td><td style="padding:4px 0;">${lead.destination_postcode}</td></tr>` : ''}
+                    ${lead.estimated_moving_date ? `<tr><td style="padding:4px 0;color:#64748b;">Preferred date</td><td style="padding:4px 0;">${lead.estimated_moving_date}</td></tr>` : ''}
+                    <tr><td style="padding:4px 0;color:#64748b;">Estate agent</td><td style="padding:4px 0;">${agencyName}</td></tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
+              <tr>
+                <td style="background:#0891b2;border-radius:8px;">
+                  <a href="${crmLink}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-weight:700;font-size:14px;text-decoration:none;">Open CRM &amp; Import Lead →</a>
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#94a3b8;">iMove Relocations Ltd · <a href="mailto:info@myimove.co.uk" style="color:#0891b2;text-decoration:none;">info@myimove.co.uk</a></p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`.trim();
+
+      await sendEmail({
+        to: adminEmail,
+        subject: `New lead from ${agencyName} — ${lead.client_name}`,
+        html,
+      });
+    }
+  } catch (err) { console.error('[leads] Admin notification email failed for lead', lead.id, err); }
 
   res.status(201).json(enrichLead(lead));
 }));
@@ -249,6 +326,31 @@ router.put('/:id', wrap(async (req, res) => {
   }
 
   const updated = await prisma.lead.findUnique({ where: { id } });
+
+  // Sync changes to the linked CrmJob (if one exists)
+  try {
+    const linkedJob = await prisma.crmJob.findFirst({ where: { lead_id: id } });
+    if (linkedJob) {
+      const parts = (updated.current_address || '').split(',').map(s => s.trim());
+      const addrLine = parts[0] || null;
+      const cityPart = parts.length > 2 ? parts[parts.length - 2] : (parts[1] || null);
+      await prisma.crmJob.update({
+        where: { id: linkedJob.id },
+        data: {
+          full_name: updated.client_name,
+          email: updated.email || null,
+          phone: updated.contact_number || null,
+          from_line1: addrLine,
+          from_city: cityPart,
+          to_postcode: updated.destination_postcode || null,
+          bedrooms: updated.property_size || null,
+          preferred_move_date: updated.estimated_moving_date || null,
+          client_notes: updated.notes || null,
+        },
+      });
+    }
+  } catch (err) { console.error('[leads] CrmJob sync on update failed for lead', id, err); }
+
   res.json(enrichLead(updated));
 }));
 
