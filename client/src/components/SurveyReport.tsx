@@ -437,6 +437,7 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
         </div>
 
         {/* Rooms */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {roomsWithItems.map(room => {
           const roomData = getCombinedRoomData(room.name);
           const items = Object.entries(roomData).filter(([_, entry]) => entry.count > 0);
@@ -445,7 +446,7 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
           const roomPhotoList = roomPhotos[room.name] || [];
 
           return (
-            <div key={room.id} className="card p-5 mb-4">
+            <div key={room.id} className="card p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <button
@@ -554,6 +555,7 @@ export default function SurveyReport({ jobId, jobData, onClose }: SurveyReportPr
             </div>
           );
         })}
+        </div>
 
         {/* Empty state */}
         {roomsWithItems.length === 0 && (
