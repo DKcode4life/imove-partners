@@ -35,6 +35,7 @@ router.get('/', wrap(async (req, res) => {
         { email: { contains: search, mode: 'insensitive' } },
       ];
     }
+    where.partner = { leads_visible: true };
 
     const leads = await prisma.lead.findMany({
       where,

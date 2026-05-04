@@ -37,6 +37,7 @@ model Partner {
   bank_sort_code  String?
   gift_card_email String?
   active          Boolean  @default(true)
+  leads_visible   Boolean  @default(true)
   created_at      DateTime @default(now())
 
   user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)

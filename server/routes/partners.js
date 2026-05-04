@@ -132,7 +132,7 @@ router.put('/:id', wrap(async (req, res) => {
   const partner = await prisma.partner.findUnique({ where: { id } });
   if (!partner) return res.status(404).json({ error: 'Partner not found' });
 
-  const { agency_name, phone, commission_rate, active, name, email, payment_method, bank_account, bank_sort_code, gift_card_email } = req.body;
+  const { agency_name, phone, commission_rate, active, leads_visible, name, email, payment_method, bank_account, bank_sort_code, gift_card_email } = req.body;
 
   await prisma.partner.update({
     where: { id },
@@ -145,6 +145,7 @@ router.put('/:id', wrap(async (req, res) => {
       bank_sort_code: bank_sort_code ?? null,
       gift_card_email: gift_card_email ?? null,
       active: active !== undefined ? !!active : undefined,
+      leads_visible: leads_visible !== undefined ? !!leads_visible : undefined,
     },
   });
 

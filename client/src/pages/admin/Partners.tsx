@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Plus, Users, Pencil, Trash2, ToggleLeft, ToggleRight,
   CheckCircle, PoundSterling, Clock, TrendingUp, ChevronRight,
+  Eye, EyeOff,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
@@ -310,6 +311,11 @@ export default function AdminPartnersPage() {
     fetchPartners();
   };
 
+  const handleToggleLeadsVisible = async (p: Partner) => {
+    await api.put(`/partners/${p.id}`, { leads_visible: !p.leads_visible });
+    fetchPartners();
+  };
+
   const handleDelete = async () => {
     if (!deletePartner) return;
     try {
@@ -422,7 +428,7 @@ export default function AdminPartnersPage() {
                   <button
                     onClick={() => handleToggleActive(p)}
                     className="btn-secondary text-xs flex-1 justify-center"
-                    title={p.active ? 'Deactivate' : 'Activate'}
+                    title={p.active ? 'Deactivate partner login' : 'Activate partner login'}
                   >
                     {p.active ? <ToggleRight className="w-3.5 h-3.5 text-emerald-600" /> : <ToggleLeft className="w-3.5 h-3.5" />}
                     {p.active ? 'Active' : 'Inactive'}
@@ -434,6 +440,21 @@ export default function AdminPartnersPage() {
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                <button
+                  onClick={() => handleToggleLeadsVisible(p)}
+                  className={`btn-secondary text-xs w-full justify-center gap-1.5 ${
+                    p.leads_visible
+                      ? 'text-brand-700 border-brand-200 bg-brand-50 hover:bg-brand-100'
+                      : 'text-slate-400 hover:bg-slate-50'
+                  }`}
+                  title={p.leads_visible ? 'Hide this partner\'s leads from CRM' : 'Show this partner\'s leads in CRM'}
+                >
+                  {p.leads_visible
+                    ? <Eye className="w-3.5 h-3.5" />
+                    : <EyeOff className="w-3.5 h-3.5" />
+                  }
+                  {p.leads_visible ? 'Leads visible in CRM' : 'Leads hidden from CRM'}
+                </button>
                 <button
                   onClick={() => openCommissions(p)}
                   className="btn-secondary text-xs w-full justify-between"

@@ -125,6 +125,7 @@ export interface Partner {
   bank_sort_code: string | null;
   gift_card_email: string | null;
   active: number;
+  leads_visible: boolean;
   created_at: string;
   user_name: string;
   user_email: string;

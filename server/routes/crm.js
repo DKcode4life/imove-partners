@@ -61,9 +61,10 @@ router.get('/pending-leads', wrap(async (_req, res) => {
   })).map(j => j.lead_id);
 
   const leads = await prisma.lead.findMany({
-    where: importedLeadIds.length > 0
-      ? { id: { notIn: importedLeadIds } }
-      : undefined,
+    where: {
+      partner: { leads_visible: true },
+      ...(importedLeadIds.length > 0 ? { id: { notIn: importedLeadIds } } : {}),
+    },
     include: {
       partner: {
         select: { agency_name: true, user: { select: { name: true } } },
@@ -88,9 +89,17 @@ router.get('/pending-leads', wrap(async (_req, res) => {
   })));
 }));
 
+// Exclude CRM jobs whose partner lead has leads_visible = false
+const VISIBLE_PARTNER_FILTER = {
+  OR: [
+    { lead_id: null },
+    { lead: { partner: { leads_visible: true } } },
+  ],
+};
+
 // GET /api/crm/jobs/summary
 router.get('/jobs/summary', wrap(async (_req, res) => {
-  const rows = await prisma.crmJob.groupBy({ by: ['status'], _count: true });
+  const rows = await prisma.crmJob.groupBy({ by: ['status'], _count: true, where: VISIBLE_PARTNER_FILTER });
   const map = Object.fromEntries(rows.map(r => [r.status, r._count]));
   const total = rows.reduce((s, r) => s + r._count, 0);
   res.json({
@@ -138,7 +147,8 @@ router.get('/jobs', wrap(async (req, res) => {
     });
   }
 
-  if (AND.length > 0) where.AND = AND;
+  AND.push(VISIBLE_PARTNER_FILTER);
+  where.AND = AND;
 
   const jobs = await prisma.crmJob.findMany({ where, orderBy: { updated_at: 'desc' } });
   res.json(jobs);
