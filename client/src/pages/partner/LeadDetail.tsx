@@ -114,8 +114,8 @@ export default function PartnerLeadDetailPage() {
               <InfoRow icon={<Phone className="w-4 h-4" />} label="Contact number" value={lead.contact_number} />
               <InfoRow icon={<Mail className="w-4 h-4" />} label="Email address" value={lead.email} />
               <InfoRow icon={<MapPin className="w-4 h-4" />} label="Current address" value={lead.current_address} />
-              {lead.destination_postcode && (
-                <InfoRow icon={<ChevronRight className="w-4 h-4" />} label="Destination postcode" value={lead.destination_postcode} />
+              {lead.destination_address && (
+                <InfoRow icon={<ChevronRight className="w-4 h-4" />} label="Destination address" value={lead.destination_address} />
               )}
               {lead.property_type && (
                 <InfoRow icon={<Home className="w-4 h-4" />} label="Property type" value={

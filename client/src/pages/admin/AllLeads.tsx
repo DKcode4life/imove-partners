@@ -23,7 +23,7 @@ interface LeadForm {
   partner_id: string;
   client_name: string;
   current_address: string;
-  destination_postcode: string;
+  destination_address: string;
   contact_number: string;
   email: string;
   moving_date_type: MovingDateType | '';
@@ -37,7 +37,7 @@ interface LeadForm {
 }
 
 const EMPTY_FORM: LeadForm = {
-  partner_id: '', client_name: '', current_address: '', destination_postcode: '',
+  partner_id: '', client_name: '', current_address: '', destination_address: '',
   contact_number: '', email: '',
   moving_date_type: 'Provisional', estimated_moving_date: '',
   property_type: 'House', floor_number: '',
@@ -349,9 +349,9 @@ export default function AdminAllLeadsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Destination postcode <span className="text-slate-400 font-normal">(optional)</span></label>
-                  <input type="text" className="input" placeholder="e.g. KT2 6QH"
-                    value={form.destination_postcode} onChange={set('destination_postcode')} />
+                  <label className="label">Destination address <span className="text-slate-400 font-normal">(optional)</span></label>
+                  <input type="text" className="input" placeholder="Full address including postcode"
+                    value={form.destination_address} onChange={set('destination_address')} />
                 </div>
                 <div>
                   <label className="label">Move type <span className="text-red-500">*</span></label>

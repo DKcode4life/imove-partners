@@ -122,8 +122,8 @@ export default function PartnerLeadsPage() {
                   </td>
                   <td className="px-4 py-4 hidden md:table-cell">
                     <p className="text-sm text-slate-600 truncate max-w-[200px]">{lead.current_address}</p>
-                    {lead.destination_postcode && (
-                      <p className="text-xs text-slate-400 mt-0.5">→ {lead.destination_postcode}</p>
+                    {lead.destination_address && (
+                      <p className="text-xs text-slate-400 mt-0.5">→ {lead.destination_address}</p>
                     )}
                   </td>
                   <td className="px-4 py-4">

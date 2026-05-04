@@ -80,7 +80,7 @@ router.get('/pending-leads', wrap(async (_req, res) => {
     contact_number: l.contact_number,
     email: l.email,
     current_address: l.current_address,
-    destination_postcode: l.destination_postcode,
+    destination_address: l.destination_address,
     estimated_moving_date: l.estimated_moving_date,
     lead_status: l.status,
     created_at: l.created_at,
@@ -409,7 +409,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
           client_name: updated.full_name,
           email: updated.email || undefined,
           contact_number: updated.phone || undefined,
-          destination_postcode: updated.to_postcode || null,
+          destination_address: updated.to_postcode || null,
           property_size: updated.bedrooms || null,
           estimated_moving_date: updated.preferred_move_date || null,
           ...(updated.quote_amount != null ? { quote_value: updated.quote_amount } : {}),
@@ -547,13 +547,17 @@ router.post('/import/:leadId', wrap(async (req, res) => {
   const parts = (lead.current_address || '').split(',').map(s => s.trim());
   const addrLine = parts[0] || null;
   const cityPart = parts.length > 2 ? parts[parts.length - 2] : (parts[1] || null);
+  const destParts = (lead.destination_address || '').split(',').map(s => s.trim());
 
   const job = await prisma.crmJob.create({
     data: {
       lead_id: lead.id,
       full_name: lead.client_name, email: lead.email, phone: lead.contact_number,
       lead_source: 'Estate Agent Referral', estate_agent_name: lead.partner.agency_name,
-      from_line1: addrLine, from_city: cityPart, from_postcode: lead.destination_postcode || null,
+      from_line1: addrLine, from_city: cityPart,
+      to_line1: destParts[0] || null,
+      to_city: destParts.length > 2 ? destParts[destParts.length - 2] : (destParts[1] || null),
+      to_postcode: destParts.length > 1 ? destParts[destParts.length - 1] : null,
       bedrooms: lead.property_size || null, client_notes: lead.notes || null,
       status: 'New Lead',
     },

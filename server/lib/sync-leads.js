@@ -15,6 +15,7 @@ module.exports = async function syncLeadsToCrm() {
   for (const lead of pending) {
     try {
       const parts = (lead.current_address || '').split(',').map(s => s.trim());
+      const destParts = (lead.destination_address || '').split(',').map(s => s.trim());
       const job = await prisma.crmJob.create({
         data: {
           lead_id: lead.id,
@@ -24,7 +25,9 @@ module.exports = async function syncLeadsToCrm() {
           lead_source: 'Estate Agent Referral',
           estate_agent_name: lead.partner?.agency_name || null,
           from_line1: parts[0] || null,
-          to_postcode: lead.destination_postcode || null,
+          to_line1: destParts[0] || null,
+          to_city: destParts.length > 2 ? destParts[destParts.length - 2] : (destParts[1] || null),
+          to_postcode: destParts.length > 1 ? destParts[destParts.length - 1] : null,
           bedrooms: lead.property_size || null,
           preferred_move_date: lead.estimated_moving_date || null,
           status: 'New Lead',

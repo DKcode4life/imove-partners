@@ -9,7 +9,7 @@ import type { MovingDateType } from '../../types';
 interface FormData {
   client_name: string;
   current_address: string;
-  destination_postcode: string;
+  destination_address: string;
   contact_number: string;
   email: string;
   moving_date_type: MovingDateType | '';
@@ -23,7 +23,7 @@ interface FormData {
 }
 
 const EMPTY: FormData = {
-  client_name: '', current_address: '', destination_postcode: '',
+  client_name: '', current_address: '', destination_address: '',
   contact_number: '', email: '',
   moving_date_type: '', estimated_moving_date: '',
   property_type: 'House', floor_number: '',
@@ -133,8 +133,8 @@ export default function SubmitLeadPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="label">Destination postcode <Opt /></label>
-                <input type="text" className="input" placeholder="e.g. KT2 6QH" value={form.destination_postcode} onChange={set('destination_postcode')} />
+                <label className="label">Destination address <Opt /></label>
+                <input type="text" className="input" placeholder="Full address including postcode" value={form.destination_address} onChange={set('destination_address')} />
               </div>
               <div>
                 <label className="label">Move type <Opt /></label>

@@ -71,7 +71,7 @@ router.get('/', wrap(async (req, res) => {
 // POST /api/leads
 router.post('/', wrap(async (req, res) => {
   const {
-    client_name, current_address, destination_postcode, contact_number,
+    client_name, current_address, destination_address, contact_number,
     email, estimated_moving_date, moving_date_type, move_type,
     property_type, floor_number, has_lift,
     property_size, notes, move_stage,
@@ -100,7 +100,7 @@ router.post('/', wrap(async (req, res) => {
   const lead = await prisma.lead.create({
     data: {
       partner_id: partnerId,
-      client_name, current_address: current_address || '', destination_postcode: destination_postcode || null,
+      client_name, current_address: current_address || '', destination_address: destination_address || null,
       contact_number, email, estimated_moving_date: estimated_moving_date || null,
       moving_date_type: moving_date_type || null, move_type: move_type || null,
       property_type: property_type || null, floor_number: floor_number || null,
@@ -115,6 +115,10 @@ router.post('/', wrap(async (req, res) => {
     const parts = (lead.current_address || '').split(',').map(s => s.trim());
     const addrLine = parts[0] || null;
     const cityPart = parts.length > 2 ? parts[parts.length - 2] : (parts[1] || null);
+    const destParts = (lead.destination_address || '').split(',').map(s => s.trim());
+    const toLine1 = destParts[0] || null;
+    const toCity = destParts.length > 2 ? destParts[destParts.length - 2] : (destParts[1] || null);
+    const toPostcode = destParts.length > 1 ? destParts[destParts.length - 1] : null;
 
     let customerId = null;
     if (lead.email) {
@@ -144,7 +148,7 @@ router.post('/', wrap(async (req, res) => {
         lead_id: lead.id, customer_id: customerId,
         full_name: lead.client_name, email: lead.email || null, phone: lead.contact_number || null,
         lead_source: 'Estate Agent Referral', estate_agent_name: partner?.agency_name || null,
-        from_line1: addrLine, from_city: cityPart, to_postcode: lead.destination_postcode || null,
+        from_line1: addrLine, from_city: cityPart, to_line1: toLine1, to_city: toCity, to_postcode: toPostcode,
         bedrooms: lead.property_size || null, preferred_move_date: lead.estimated_moving_date || null,
         status: 'New Lead', partner_commission_rate: partner?.commission_rate || null,
       },
@@ -194,7 +198,7 @@ router.post('/', wrap(async (req, res) => {
                     <tr><td style="padding:4px 0;color:#64748b;">Email</td><td style="padding:4px 0;">${lead.email || '—'}</td></tr>
                     <tr><td style="padding:4px 0;color:#64748b;">Phone</td><td style="padding:4px 0;">${lead.contact_number || '—'}</td></tr>
                     <tr><td style="padding:4px 0;color:#64748b;">Moving from</td><td style="padding:4px 0;">${lead.current_address || '—'}</td></tr>
-                    ${lead.destination_postcode ? `<tr><td style="padding:4px 0;color:#64748b;">Moving to</td><td style="padding:4px 0;">${lead.destination_postcode}</td></tr>` : ''}
+                    ${lead.destination_address ? `<tr><td style="padding:4px 0;color:#64748b;">Moving to</td><td style="padding:4px 0;">${lead.destination_address}</td></tr>` : ''}
                     ${lead.estimated_moving_date ? `<tr><td style="padding:4px 0;color:#64748b;">Preferred date</td><td style="padding:4px 0;">${lead.estimated_moving_date}</td></tr>` : ''}
                     <tr><td style="padding:4px 0;color:#64748b;">Estate agent</td><td style="padding:4px 0;">${agencyName}</td></tr>
                   </table>
@@ -281,7 +285,7 @@ router.put('/:id', wrap(async (req, res) => {
   if (req.user.role === 'admin') {
     const {
       status, quote_value, commission_rate, commission_paid,
-      client_name, current_address, destination_postcode,
+      client_name, current_address, destination_address,
       contact_number, email, estimated_moving_date, moving_date_type,
       move_type, property_type, floor_number, has_lift,
       property_size, notes, move_stage,
@@ -300,7 +304,7 @@ router.put('/:id', wrap(async (req, res) => {
         commission_paid: commission_paid !== undefined ? !!commission_paid : undefined,
         client_name: client_name ?? undefined,
         current_address: current_address ?? undefined,
-        destination_postcode: destination_postcode ?? undefined,
+        destination_address: destination_address ?? undefined,
         contact_number: contact_number ?? undefined,
         email: email ?? undefined,
         estimated_moving_date: estimated_moving_date ?? undefined,
@@ -334,6 +338,7 @@ router.put('/:id', wrap(async (req, res) => {
       const parts = (updated.current_address || '').split(',').map(s => s.trim());
       const addrLine = parts[0] || null;
       const cityPart = parts.length > 2 ? parts[parts.length - 2] : (parts[1] || null);
+      const destParts = (updated.destination_address || '').split(',').map(s => s.trim());
       await prisma.crmJob.update({
         where: { id: linkedJob.id },
         data: {
@@ -342,7 +347,9 @@ router.put('/:id', wrap(async (req, res) => {
           phone: updated.contact_number || null,
           from_line1: addrLine,
           from_city: cityPart,
-          to_postcode: updated.destination_postcode || null,
+          to_line1: destParts[0] || null,
+          to_city: destParts.length > 2 ? destParts[destParts.length - 2] : (destParts[1] || null),
+          to_postcode: destParts.length > 1 ? destParts[destParts.length - 1] : null,
           bedrooms: updated.property_size || null,
           preferred_move_date: updated.estimated_moving_date || null,
           client_notes: updated.notes || null,

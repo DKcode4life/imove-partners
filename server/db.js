@@ -246,7 +246,7 @@ const SCHEMA = `
     partner_id            INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
     client_name           TEXT NOT NULL,
     current_address       TEXT NOT NULL,
-    destination_postcode  TEXT,
+    destination_address   TEXT,
     contact_number        TEXT NOT NULL,
     email                 TEXT NOT NULL,
     estimated_moving_date TEXT,
@@ -326,7 +326,7 @@ function seed() {
 
   const ins = _db.prepare(`
     INSERT INTO leads
-      (partner_id, client_name, current_address, destination_postcode,
+      (partner_id, client_name, current_address, destination_address,
        contact_number, email, estimated_moving_date, property_size,
        notes, move_stage, status, quote_value, commission_rate, commission_paid)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -457,7 +457,7 @@ function migrateCustomers() {
     `).run(
       lead.id, lead.client_name, lead.email || null, lead.contact_number || null,
       'Estate Agent Referral', lead.agency_name || null,
-      addrLine, cityPart, lead.destination_postcode || null,
+      addrLine, cityPart, lead.destination_address || null,
       lead.property_size || null, lead.estimated_moving_date || null,
       crmStatus, lead.commission_rate || null,
     );

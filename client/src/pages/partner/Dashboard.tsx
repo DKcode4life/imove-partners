@@ -600,8 +600,8 @@ export default function PartnerDashboardPage() {
                           </td>
                           {/* Move from → to */}
                           <td className="px-4 py-3.5 hidden md:table-cell">
-                            {lead.destination_postcode ? (
-                              <p className="text-xs text-slate-500">→ {lead.destination_postcode}</p>
+                            {lead.destination_address ? (
+                              <p className="text-xs text-slate-500">→ {lead.destination_address}</p>
                             ) : (
                               <span className="text-xs text-slate-300">—</span>
                             )}

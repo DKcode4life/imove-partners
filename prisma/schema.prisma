@@ -51,7 +51,7 @@ model Lead {
   partner_id            Int
   client_name           String
   current_address       String
-  destination_postcode  String?
+  destination_address   String?
   contact_number        String
   email                 String
   estimated_moving_date String?

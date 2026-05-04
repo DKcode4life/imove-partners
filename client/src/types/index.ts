@@ -87,7 +87,7 @@ export interface Lead {
   partner_id: number;
   client_name: string;
   current_address: string;
-  destination_postcode: string | null;
+  destination_address: string | null;
   contact_number: string;
   email: string;
   estimated_moving_date: string | null;
@@ -328,7 +328,7 @@ export interface PendingLead {
   contact_number: string;
   email: string;
   current_address: string;
-  destination_postcode: string | null;
+  destination_address: string | null;
   estimated_moving_date: string | null;
   lead_status: string;
   created_at: string;

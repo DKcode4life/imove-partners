@@ -53,7 +53,7 @@ export default function AdminLeadDetailPage() {
   const [contactNumber, setContactNumber] = useState('');
   const [email, setEmail] = useState('');
   const [currentAddress, setCurrentAddress] = useState('');
-  const [destinationPostcode, setDestinationPostcode] = useState('');
+  const [destinationAddress, setDestinationAddress] = useState('');
   const [propertySize, setPropertySize] = useState('');
   const [movingDate, setMovingDate] = useState('');
   const [movingDateType, setMovingDateType] = useState<MovingDateType | ''>('');
@@ -79,7 +79,7 @@ export default function AdminLeadDetailPage() {
         setContactNumber(l.contact_number);
         setEmail(l.email);
         setCurrentAddress(l.current_address);
-        setDestinationPostcode(l.destination_postcode || '');
+        setDestinationAddress(l.destination_address || '');
         setPropertySize(l.property_size);
         setMovingDate(l.estimated_moving_date || '');
         setMovingDateType((l.moving_date_type as MovingDateType | null) || '');
@@ -109,7 +109,7 @@ export default function AdminLeadDetailPage() {
         contact_number: contactNumber,
         email,
         current_address: currentAddress,
-        destination_postcode: destinationPostcode || null,
+        destination_address: destinationAddress || null,
         property_size: propertySize,
         estimated_moving_date: movingDate || null,
         moving_date_type: movingDateType || null,
@@ -269,13 +269,13 @@ export default function AdminLeadDetailPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="label">Destination postcode <span className="text-slate-400 font-normal">(optional)</span></label>
+                <label className="label">Destination address <span className="text-slate-400 font-normal">(optional)</span></label>
                 <input
                   type="text"
                   className="input"
-                  value={destinationPostcode}
-                  onChange={e => setDestinationPostcode(e.target.value)}
-                  placeholder="e.g. KT2 6QH"
+                  value={destinationAddress}
+                  onChange={e => setDestinationAddress(e.target.value)}
+                  placeholder="Full address including postcode"
                 />
               </div>
               <div>
