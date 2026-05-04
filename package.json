@@ -5,7 +5,7 @@
   "main": "server/index.js",
   "scripts": {
     "dev": "concurrently \"nodemon server/index.js\" \"cd client && npm run dev\"",
-    "start": "prisma db push --skip-generate && node prisma/seed-templates.js && node server/index.js",
+    "start": "prisma db push --skip-generate --accept-data-loss && node prisma/seed-templates.js && node server/index.js",
     "build": "cd client && npm install --include=dev && npm run build",
     "postinstall": "prisma generate",
     "install:all": "npm install && cd client && npm install",
