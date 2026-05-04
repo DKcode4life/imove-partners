@@ -645,6 +645,171 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
   );
 }
 
+// ── Distance Price Bands section ──────────────────────────────────────────────
+
+type PriceBand = { upToMiles: number; ratePerCuFt: number };
+
+function DistancePriceBandsSection({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [bands, setBands] = useState<PriceBand[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<PriceBand[]>([]);
+
+  useEffect(() => {
+    api.get('/settings/distance-price-bands')
+      .then(r => setBands(r.data))
+      .catch(() => showToast('Failed to load price bands', 'error'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function startEdit() {
+    setDraft(bands.map(b => ({ ...b })));
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setDraft([]);
+    setEditing(false);
+  }
+
+  async function saveEdit() {
+    setSaving(true);
+    try {
+      await api.put('/settings/distance-price-bands', draft);
+      setBands(draft);
+      setEditing(false);
+      showToast('Price bands saved');
+    } catch {
+      showToast('Failed to save price bands', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateDraft(idx: number, field: keyof PriceBand, value: string) {
+    setDraft(prev => prev.map((b, i) => i === idx ? { ...b, [field]: parseFloat(value) || 0 } : b));
+  }
+
+  function addBand() {
+    setDraft(prev => [...prev, { upToMiles: 0, ratePerCuFt: 0 }]);
+  }
+
+  function removeBand(idx: number) {
+    setDraft(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  const displayBands = editing ? draft : bands;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">Distance Price Bands (£ per cu ft)</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Used to calculate the guide quote on each job based on cubic feet and distance.
+          </p>
+        </div>
+        {editing ? (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={cancelEdit}
+              className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveEdit}
+              disabled={saving}
+              className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={startEdit}
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors flex-shrink-0"
+          >
+            Edit
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="p-6 text-sm text-slate-400 text-center">Loading…</div>
+      ) : (
+        <div className="p-4 space-y-2">
+          <div className="grid grid-cols-2 gap-3 mb-1 px-1">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Up to (miles)</p>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">£ per cu ft</p>
+          </div>
+
+          {displayBands.map((band, idx) => (
+            <div key={idx} className="grid grid-cols-2 gap-3 items-center">
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={editing ? (draft[idx]?.upToMiles === 0 ? '' : draft[idx]?.upToMiles) : band.upToMiles}
+                  onChange={e => updateDraft(idx, 'upToMiles', e.target.value)}
+                  disabled={!editing}
+                  className="input-field w-full disabled:bg-slate-50 disabled:text-slate-600"
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">£</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editing ? (draft[idx]?.ratePerCuFt === 0 ? '' : draft[idx]?.ratePerCuFt) : band.ratePerCuFt}
+                    onChange={e => updateDraft(idx, 'ratePerCuFt', e.target.value)}
+                    disabled={!editing}
+                    className="input-field w-full pl-7 disabled:bg-slate-50 disabled:text-slate-600"
+                    placeholder="0.00"
+                  />
+                </div>
+                {editing && (
+                  <button
+                    type="button"
+                    onClick={() => removeBand(idx)}
+                    className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
+                    title="Remove band"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {editing && (
+            <button
+              type="button"
+              onClick={addBand}
+              className="mt-1 text-xs font-semibold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1.5 active:scale-95 transition-transform"
+            >
+              <Plus className="w-4 h-4" /> Add band
+            </button>
+          )}
+
+          {!editing && (
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <p className="text-[11px] text-slate-400">
+                Moves over 200 miles are calculated at <span className="font-semibold">£2.50/cu ft</span> (flat rate).
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Job Settings tab ──────────────────────────────────────────────────────────
 
 function JobSettingsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
@@ -665,6 +830,7 @@ function JobSettingsTab({ showToast }: { showToast: (m: string, t?: 'success' | 
         addPlaceholder="e.g. Office Move, Partial Move…"
         showToast={showToast}
       />
+      <DistancePriceBandsSection showToast={showToast} />
     </div>
   );
 }

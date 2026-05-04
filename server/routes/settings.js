@@ -395,4 +395,31 @@ router.put('/catalog', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Distance Price Bands ──────────────────────────────────────────────────────
+// Stored as a JSON array in CompanySetting. Each band: { upToMiles, ratePerCuFt }.
+
+const DEFAULT_DISTANCE_BANDS = [
+  { upToMiles: 10,  ratePerCuFt: 0.85 },
+  { upToMiles: 30,  ratePerCuFt: 0.95 },
+  { upToMiles: 60,  ratePerCuFt: 1.05 },
+  { upToMiles: 100, ratePerCuFt: 1.25 },
+  { upToMiles: 200, ratePerCuFt: 1.50 },
+];
+
+router.get('/distance-price-bands', wrap(async (_req, res) => {
+  const row = await prisma.companySetting.findUnique({ where: { key: 'distance_price_bands' } });
+  res.json(row?.value ? JSON.parse(row.value) : DEFAULT_DISTANCE_BANDS);
+}));
+
+router.put('/distance-price-bands', wrap(async (req, res) => {
+  if (!Array.isArray(req.body)) return res.status(400).json({ error: 'Expected array' });
+  const value = JSON.stringify(req.body);
+  await prisma.companySetting.upsert({
+    where:  { key: 'distance_price_bands' },
+    update: { value },
+    create: { key: 'distance_price_bands', value },
+  });
+  res.json({ ok: true });
+}));
+
 module.exports = router;

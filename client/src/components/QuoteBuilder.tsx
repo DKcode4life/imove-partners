@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send } from 'lucide-react';
+import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator } from 'lucide-react';
 import api from '../lib/api';
+import { loadCatalog } from '../lib/catalogStorage';
 import SendDocumentModal, { type DocumentType, type SendDocumentData } from './SendDocumentModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -133,7 +134,24 @@ type JobInfo = {
   full_name: string;
   email: string | null;
   phone: string | null;
+  from_postcode: string | null;
+  to_postcode: string | null;
 };
+
+type GuideQuoteState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'incomplete'; reason: string }
+  | { status: 'done'; price: number; cuFt: number; miles: number; rate: number; flatRate: boolean };
+
+const DEFAULT_PRICE_BANDS = [
+  { upToMiles: 10,  ratePerCuFt: 0.85 },
+  { upToMiles: 30,  ratePerCuFt: 0.95 },
+  { upToMiles: 60,  ratePerCuFt: 1.05 },
+  { upToMiles: 100, ratePerCuFt: 1.25 },
+  { upToMiles: 200, ratePerCuFt: 1.50 },
+];
+const OVER_200_RATE = 2.50;
 
 type ExistingDocs = {
   estimateQuoteId?: number;
@@ -180,6 +198,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
   const [sendingToast, setSendingToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
   const [busyAction, setBusyAction] = useState<DocumentType | null>(null);
 
+  // Guide quote state
+  const [guideQuote, setGuideQuote] = useState<GuideQuoteState>({ status: 'idle' });
+
   // Reload + reset drafts when the job switches
   useEffect(() => {
     setCommitted(loadFromStorage(jobId));
@@ -188,6 +209,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
     setDepositDraft(null);
     setExistingDocs({});
     setJobInfo(null);
+    setGuideQuote({ status: 'idle' });
 
     if (jobId) {
       // Load job + existing quotes + invoices for the send panel
@@ -199,7 +221,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
             api.get(`/crm/jobs/${jobId}/invoices`).catch(() => ({ data: [] })),
           ]);
           const j = jobRes.data;
-          setJobInfo({ id: j.id, full_name: j.full_name, email: j.email, phone: j.phone });
+          const fromPostcode: string | null = j.from_postcode ?? null;
+          const toPostcode: string | null   = j.to_postcode   ?? null;
+          setJobInfo({ id: j.id, full_name: j.full_name, email: j.email, phone: j.phone, from_postcode: fromPostcode, to_postcode: toPostcode });
 
           const quotes: any[] = quotesRes.data || [];
           const invoices: any[] = invRes.data || [];
@@ -219,6 +243,61 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
             mainInvoiceNumber: mainInv?.invoice_number,
             mainInvoicePaid: mainInv?.status === 'paid',
           });
+
+          // ── Guide Quote calculation ───────────────────────────────────────
+          if (!fromPostcode || !toPostcode) {
+            setGuideQuote({ status: 'incomplete', reason: 'Add property addresses to calculate' });
+          } else {
+            setGuideQuote({ status: 'loading' });
+            try {
+              const [surveyRes, catalogData, bandsRes, routeRes] = await Promise.all([
+                api.get(`/crm/jobs/${jobId}/survey`).catch(() => ({ data: null })),
+                loadCatalog(),
+                api.get('/settings/distance-price-bands').catch(() => ({ data: DEFAULT_PRICE_BANDS })),
+                api.post('/crm/route-info', { from: fromPostcode, to: toPostcode }).catch(() => ({ data: null })),
+              ]);
+
+              const miles: number | null = routeRes.data?.direct?.miles ?? null;
+              if (!miles) {
+                setGuideQuote({ status: 'incomplete', reason: 'Could not calculate distance' });
+              } else {
+                // Calculate total cubic feet from survey data
+                const allItems = (catalogData ?? []).flatMap((c: any) => c.items as Array<{ name: string; volumeCuFt: number }>);
+                const volumeMap = new Map(allItems.map(i => [i.name, i.volumeCuFt]));
+
+                let totalCuFt = 0;
+                const surveyPayload = surveyRes.data;
+                if (surveyPayload) {
+                  const roomData: Record<string, Record<string, { count: number }>> = surveyPayload.data ?? {};
+                  for (const room of Object.values(roomData)) {
+                    for (const [itemName, entry] of Object.entries(room)) {
+                      totalCuFt += (volumeMap.get(itemName) ?? 0) * entry.count;
+                    }
+                  }
+                  const searchData: Record<string, { count: number }> = surveyPayload.searchData ?? {};
+                  for (const [itemName, entry] of Object.entries(searchData)) {
+                    totalCuFt += (volumeMap.get(itemName) ?? 0) * entry.count;
+                  }
+                }
+
+                if (totalCuFt === 0) {
+                  setGuideQuote({ status: 'incomplete', reason: 'Complete survey to calculate' });
+                } else {
+                  const bands: Array<{ upToMiles: number; ratePerCuFt: number }> =
+                    Array.isArray(bandsRes.data) ? bandsRes.data : DEFAULT_PRICE_BANDS;
+                  const sorted = [...bands].sort((a, b) => a.upToMiles - b.upToMiles);
+                  const band = sorted.find(b => miles <= b.upToMiles);
+                  const flatRate = !band;
+                  const rate = band ? band.ratePerCuFt : OVER_200_RATE;
+                  const rawPrice = totalCuFt * rate;
+                  const price = Math.round(rawPrice / 5) * 5;
+                  setGuideQuote({ status: 'done', price, cuFt: totalCuFt, miles, rate, flatRate });
+                }
+              }
+            } catch {
+              setGuideQuote({ status: 'incomplete', reason: 'Could not calculate guide price' });
+            }
+          }
         } catch (err) {
           console.error('[QuoteBuilder] Failed to load job/docs:', err);
         }
@@ -587,6 +666,40 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
 
   return (
     <div className="space-y-5">
+      {/* ── Guide Quote banner ────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-purple-50/50 overflow-hidden shadow-sm">
+        <div className="px-4 py-3 border-b border-violet-200/70 bg-white/40 flex items-center gap-1.5">
+          <Calculator className="w-4 h-4 text-violet-600" />
+          <h3 className="text-sm font-bold tracking-tight text-violet-700">Guide Quote</h3>
+        </div>
+        <div className="px-4 py-3">
+          {guideQuote.status === 'idle' || guideQuote.status === 'loading' ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs text-slate-400">Calculating…</p>
+            </div>
+          ) : guideQuote.status === 'incomplete' ? (
+            <p className="text-xs text-slate-400 italic">{guideQuote.reason}</p>
+          ) : (
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <p className="text-3xl font-bold text-violet-900 tabular-nums tracking-tight">
+                  {fmt(guideQuote.price)}
+                </p>
+                <p className="text-xs text-slate-500 mt-1 tabular-nums">
+                  {guideQuote.cuFt.toFixed(1)} cu ft
+                  {' · '}
+                  {guideQuote.miles.toFixed(1)} miles
+                  {' · '}
+                  £{guideQuote.rate.toFixed(2)}/cu ft
+                  {guideQuote.flatRate && <span className="ml-1 text-amber-600 font-semibold">(flat rate &gt;200 miles)</span>}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Toast */}
       {sendingToast && (
         <div className={`flex items-start gap-2 rounded-lg px-3 py-2.5 border ${
