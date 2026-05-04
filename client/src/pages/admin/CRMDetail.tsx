@@ -10,6 +10,7 @@ import Modal from '../../components/Modal';
 import QuoteBuilder from '../../components/QuoteBuilder';
 import SurveyTool from '../../components/SurveyTool';
 import SurveyReport from '../../components/SurveyReport';
+import FurnitureCovers from '../../components/FurnitureCovers';
 import api from '../../lib/api';
 import type { CrmJob, CrmActivity, CrmStatus, JobStatusSetting, PlannerAssignment } from '../../types';
 import { CRM_STATUSES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
@@ -1213,6 +1214,9 @@ export default function CRMDetailPage() {
               <SurveyTool jobId={id} />
             </div>
           </Section>
+
+          {/* Furniture Covers */}
+          <FurnitureCovers jobId={id} />
 
           {/* Operational Notes */}
           <Section title="Operational Notes" accent="bg-orange-500" {...sectionProps('ops')}>
