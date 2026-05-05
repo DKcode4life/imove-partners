@@ -200,6 +200,10 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
 
   // Guide quote state
   const [guideQuote, setGuideQuote] = useState<GuideQuoteState>({ status: 'idle' });
+  const [priceBands, setPriceBands] = useState<Array<{ upToMiles: number; ratePerCuFt: number }>>(DEFAULT_PRICE_BANDS);
+  const [isEditingGuideQuote, setIsEditingGuideQuote] = useState(false);
+  const [manualMiles, setManualMiles] = useState('');
+  const [manualCuFt, setManualCuFt] = useState('');
 
   // Reload + reset drafts when the job switches
   useEffect(() => {
@@ -210,6 +214,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
     setExistingDocs({});
     setJobInfo(null);
     setGuideQuote({ status: 'idle' });
+    setIsEditingGuideQuote(false);
+    setManualMiles('');
+    setManualCuFt('');
 
     if (jobId) {
       // Load job + existing quotes + invoices for the send panel
@@ -285,6 +292,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
                 } else {
                   const bands: Array<{ upToMiles: number; ratePerCuFt: number }> =
                     Array.isArray(bandsRes.data) ? bandsRes.data : DEFAULT_PRICE_BANDS;
+                  setPriceBands(bands);
                   const sorted = [...bands].sort((a, b) => a.upToMiles - b.upToMiles);
                   const band = sorted.find(b => miles <= b.upToMiles);
                   const flatRate = !band;
@@ -315,6 +323,32 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
   function persist(next: QuoteBuilderState) {
     if (!storageKey) return;
     try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* ignore */ }
+  }
+
+  // ── Guide Quote manual edit handlers ─────────────────────────────────────
+  function handleEditGuideQuote() {
+    if (guideQuote.status === 'done') {
+      setManualMiles(guideQuote.miles.toFixed(1));
+      setManualCuFt(guideQuote.cuFt.toFixed(1));
+    } else {
+      setManualMiles('');
+      setManualCuFt('');
+    }
+    setIsEditingGuideQuote(true);
+  }
+
+  function handleSaveGuideQuote() {
+    const miles = parseFloat(manualMiles);
+    const cuFt = parseFloat(manualCuFt);
+    if (!isNaN(miles) && miles > 0 && !isNaN(cuFt) && cuFt > 0) {
+      const sorted = [...priceBands].sort((a, b) => a.upToMiles - b.upToMiles);
+      const band = sorted.find(b => miles <= b.upToMiles);
+      const flatRate = !band;
+      const rate = band ? band.ratePerCuFt : OVER_200_RATE;
+      const price = Math.round(cuFt * rate / 5) * 5;
+      setGuideQuote({ status: 'done', price, cuFt, miles, rate, flatRate });
+    }
+    setIsEditingGuideQuote(false);
   }
 
   // ── Estimate handlers ─────────────────────────────────────────────────────
@@ -671,9 +705,62 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
         <div className="px-4 py-3 border-b border-violet-200/70 bg-white/40 flex items-center gap-1.5">
           <Calculator className="w-4 h-4 text-violet-600" />
           <h3 className="text-sm font-bold tracking-tight text-violet-700">Guide Quote</h3>
+          <div className="ml-auto">
+            {isEditingGuideQuote ? (
+              <button
+                onClick={() => setIsEditingGuideQuote(false)}
+                className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={handleEditGuideQuote}
+                className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 transition-colors"
+              >
+                <Pencil className="w-3 h-3" />
+                Edit
+              </button>
+            )}
+          </div>
         </div>
         <div className="px-4 py-3">
-          {guideQuote.status === 'idle' || guideQuote.status === 'loading' ? (
+          {isEditingGuideQuote ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">Miles</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={manualMiles}
+                    onChange={e => setManualMiles(e.target.value)}
+                    placeholder="e.g. 45"
+                    className="w-full text-sm border border-violet-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">Cubic Feet</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={manualCuFt}
+                    onChange={e => setManualCuFt(e.target.value)}
+                    placeholder="e.g. 350"
+                    className="w-full text-sm border border-violet-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleSaveGuideQuote}
+                disabled={!manualMiles || !manualCuFt}
+                className="w-full flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 text-white text-xs font-semibold rounded-lg px-3 py-1.5 transition-colors"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Save &amp; Recalculate
+              </button>
+            </div>
+          ) : guideQuote.status === 'idle' || guideQuote.status === 'loading' ? (
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
               <p className="text-xs text-slate-400">Calculating…</p>
