@@ -244,7 +244,14 @@ router.put('/jobs/:id', wrap(async (req, res) => {
 
   const b = req.body;
   const oldStatus = existing.status;
-  const newStatus = b.status || oldStatus;
+  let newStatus = b.status || oldStatus;
+
+  // Auto-advance status when survey details are saved from an early or survey stage
+  const surveyAutoStatuses = ['New Lead', 'Called V/M', 'Contacted', 'Survey Physical', 'Survey Video'];
+  if (b.survey_required && b.survey_type && b.survey_date && surveyAutoStatuses.includes(newStatus)) {
+    const isVideo = /video|zoom/i.test(String(b.survey_type));
+    newStatus = isVideo ? 'Survey Video' : 'Survey Physical';
+  }
 
   // Helper function to compare values for audit trail
   const getValue = (val) => val === undefined || val === null ? null : String(val);
@@ -270,7 +277,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     { field: 'lead_source', old: existing.lead_source, new: b.lead_source },
     { field: 'estate_agent_name', old: existing.estate_agent_name, new: b.estate_agent_name },
     { field: 'internal_ref', old: existing.internal_ref, new: b.internal_ref },
-    { field: 'status', old: existing.status, new: b.status },
+    { field: 'status', old: existing.status, new: newStatus },
     { field: 'from_line1', old: existing.from_line1, new: b.from_line1 },
     { field: 'from_line2', old: existing.from_line2, new: b.from_line2 },
     { field: 'from_city', old: existing.from_city, new: b.from_city },
@@ -357,7 +364,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
       email: b.email ?? null, alt_email: b.alt_email ?? null,
       phone: b.phone ?? null, alt_phone: b.alt_phone ?? null, client_notes: b.client_notes ?? null,
       lead_source: b.lead_source ?? null, estate_agent_name: b.estate_agent_name ?? null,
-      internal_ref: b.internal_ref ?? null, status: b.status ?? undefined,
+      internal_ref: b.internal_ref ?? null, status: newStatus,
       from_line1: b.from_line1 ?? null, from_line2: b.from_line2 ?? null,
       from_city: b.from_city ?? null, from_postcode: b.from_postcode ?? null,
       to_line1: b.to_line1 ?? null, to_line2: b.to_line2 ?? null,
@@ -488,7 +495,7 @@ router.post('/jobs/:id/activities', wrap(async (req, res) => {
 
   const { note, type } = req.body;
   if (!note?.trim()) return res.status(400).json({ error: 'Note is required' });
-  const actType = ['note', 'admin_note'].includes(type) ? type : 'note';
+  const actType = ['note', 'admin_note', 'call', 'email'].includes(type) ? type : 'note';
 
   await prisma.crmActivity.create({ data: { job_id: jobId, type: actType, note: note.trim() } });
 

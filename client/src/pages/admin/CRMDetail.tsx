@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
-  Navigation, MapPin, FileText, ChevronDown, Calendar,
+  Navigation, MapPin, FileText, ChevronDown, Calendar, Phone, Mail,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -377,6 +377,8 @@ const ACT_CFG = {
   created:       { icon: <PlusCircle    className="w-3.5 h-3.5" />, color: 'text-emerald-600 bg-emerald-50' },
   status_change: { icon: <RefreshCw    className="w-3.5 h-3.5" />, color: 'text-blue-600 bg-blue-50' },
   note:          { icon: <MessageSquare className="w-3.5 h-3.5" />, color: 'text-slate-500 bg-slate-100' },
+  call:          { icon: <Phone         className="w-3.5 h-3.5" />, color: 'text-green-600 bg-green-50' },
+  email:         { icon: <Mail          className="w-3.5 h-3.5" />, color: 'text-blue-600 bg-blue-50' },
 };
 
 function ActivityItem({ act }: { act: CrmActivity }) {
@@ -446,6 +448,9 @@ export default function CRMDetailPage() {
   const [editingSection,  setEditingSection]  = useState<string | null>(null);
   const [sectionSaving,   setSectionSaving]   = useState(false);
   const [pipelineStatuses, setPipelineStatuses] = useState<JobStatusSetting[]>([]);
+  const [callLogMode,   setCallLogMode]   = useState<'call' | 'email' | null>(null);
+  const [callLogText,   setCallLogText]   = useState('');
+  const [savingCallLog, setSavingCallLog] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // Pipeline pulled from settings so user-added/renamed statuses appear here too
@@ -645,6 +650,7 @@ export default function CRMDetailPage() {
       const res = await api.put(`/crm/jobs/${id}`, buildSavePayload());
       setJob(res.data);
       setActivities(res.data.activities || []);
+      setStatus(res.data.status);
       setEditingSection(null);
       showToast('Changes saved');
     } catch { showToast('Failed to save changes', 'error'); }
@@ -702,6 +708,20 @@ export default function CRMDetailPage() {
     } finally {
       setPipelineSaving(null);
     }
+  };
+
+  // ── Call log ────────────────────────────────────────────────────────────────
+
+  const handleSaveCallLog = async () => {
+    if (!callLogText.trim() || !callLogMode) return;
+    setSavingCallLog(true);
+    try {
+      const res = await api.post(`/crm/jobs/${id}/activities`, { note: callLogText.trim(), type: callLogMode });
+      setActivities(res.data);
+      setCallLogText('');
+      setCallLogMode(null);
+    } catch { showToast('Failed to save log entry', 'error'); }
+    finally { setSavingCallLog(false); }
   };
 
   // ── Add note ────────────────────────────────────────────────────────────────
@@ -1091,6 +1111,8 @@ export default function CRMDetailPage() {
                   })
                   .catch(() => {});
               }}
+              onDepositPaid={() => handlePipelineChange('Quote Accepted' as CrmStatus)}
+              onBalancePaid={() => handlePipelineChange('Confirmed Paid' as CrmStatus)}
             />
           </Section>
         </div>
@@ -1170,6 +1192,97 @@ export default function CRMDetailPage() {
               </div>
             )}
           </Section>
+
+          {/* Call Log */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                <span className="w-1.5 h-4 rounded-full flex-shrink-0 bg-green-500" />Call Log
+              </h2>
+            </div>
+
+            {/* Log buttons */}
+            {!callLogMode && (
+              <div className="flex gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setCallLogMode('call')}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-green-200 bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 hover:border-green-300 transition-all"
+                >
+                  <Phone className="w-3.5 h-3.5" /> Call
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCallLogMode('email')}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 hover:border-blue-300 transition-all"
+                >
+                  <Mail className="w-3.5 h-3.5" /> Email
+                </button>
+              </div>
+            )}
+
+            {/* Input form */}
+            {callLogMode && (
+              <div className="mb-4 space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  {callLogMode === 'call'
+                    ? <><Phone className="w-3.5 h-3.5 text-green-600" /><span className="text-xs font-semibold text-green-700">Log a call</span></>
+                    : <><Mail  className="w-3.5 h-3.5 text-blue-600"  /><span className="text-xs font-semibold text-blue-700">Log an email</span></>
+                  }
+                </div>
+                <textarea
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none"
+                  rows={3}
+                  placeholder={callLogMode === 'call' ? 'Describe the call…' : 'Describe the email…'}
+                  value={callLogText}
+                  onChange={e => setCallLogText(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setCallLogMode(null); setCallLogText(''); }}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveCallLog}
+                    disabled={savingCallLog || !callLogText.trim()}
+                    className="btn-primary text-xs py-1.5 px-3"
+                  >
+                    {savingCallLog ? 'Saving…' : <><Save className="w-3 h-3" /> Save</>}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Log entries */}
+            {(() => {
+              const entries = activities.filter(a => a.type === 'call' || a.type === 'email');
+              if (entries.length === 0) {
+                return <p className="text-xs text-slate-400 text-center py-3">No calls or emails logged yet.</p>;
+              }
+              return (
+                <div className="space-y-2">
+                  {entries.map(a => (
+                    <div key={a.id} className="flex gap-2.5 p-2.5 rounded-lg bg-slate-50">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${a.type === 'call' ? 'text-green-600 bg-green-100' : 'text-blue-600 bg-blue-100'}`}>
+                        {a.type === 'call' ? <Phone className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{a.note}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
 
           {/* Survey */}
           <Section title="Survey" accent="bg-cyan-500" {...sectionProps('survey')}>
@@ -1424,26 +1537,6 @@ export default function CRMDetailPage() {
                 </div>
               </div>
             )}
-          </Section>
-
-          {/* Timestamps */}
-          <Section title="Timestamps" accent="bg-slate-300">
-            <div className="space-y-2.5">
-              <div>
-                <p className="text-xs text-slate-400">Lead Submitted</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{fmtDateTime(job.created_at)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-400">Last Updated</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{fmtDateTime(job.updated_at)}</p>
-              </div>
-              {job.quote_amount && (
-                <div>
-                  <p className="text-xs text-slate-400">Quote Value</p>
-                  <p className="text-sm font-semibold text-slate-900 mt-0.5">{fmt(job.quote_amount)}</p>
-                </div>
-              )}
-            </div>
           </Section>
         </div>
       </div>

@@ -127,6 +127,10 @@ interface Props {
    * badge reflect the auto-advanced stage.
    */
   onJobUpdated?: () => void;
+  /** Called when deposit transitions from unpaid → paid so the parent can advance the pipeline status. */
+  onDepositPaid?: () => void;
+  /** Called when balance transitions from unpaid → paid so the parent can advance the pipeline status. */
+  onBalancePaid?: () => void;
 }
 
 type QuotationDraft = { items: LineItem[]; addons: AddonItem[] };
@@ -183,7 +187,7 @@ const REF_PLACEHOLDER: Record<DocumentType, string> = {
   'move-receipt':     'INV-?????',
 };
 
-export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles }: Props) {
+export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDepositPaid, onBalancePaid }: Props) {
   const storageKey = jobId ? `crm-quote-${jobId}` : null;
 
   const [committed, setCommitted] = useState<QuoteBuilderState>(() => loadFromStorage(jobId));
@@ -448,10 +452,14 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles }: Pro
   function startEditDeposit() { setDepositDraft(extractDepositSection(committed)); }
   function saveDeposit() {
     if (!depositDraft) return;
+    const depositJustPaid = depositDraft.depositPaid && !committed.depositPaid;
+    const balanceJustPaid = depositDraft.balancePaid && !committed.balancePaid;
     const next = { ...committed, ...depositDraft };
     setCommitted(next);
     persist(next);
     setDepositDraft(null);
+    if (depositJustPaid) onDepositPaid?.();
+    if (balanceJustPaid) onBalancePaid?.();
   }
   function cancelDeposit() { setDepositDraft(null); }
   function setDepositField<K extends keyof DepositSection>(key: K, value: DepositSection[K]) {
