@@ -9,3 +9,5 @@ client/dist/
 *.db-wal
 uploads/
 .claude/
+catalog-backup.json
+*.xlsx

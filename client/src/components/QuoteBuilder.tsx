@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator } from 'lucide-react';
+import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator, CreditCard, Plus } from 'lucide-react';
 import api from '../lib/api';
 import { loadCatalog } from '../lib/catalogStorage';
 import SendDocumentModal, { type DocumentType, type SendDocumentData } from './SendDocumentModal';
@@ -32,6 +32,17 @@ type QuoteBuilderState = {
   quotationItems: LineItem[];   // Fix Quotation mandatory items
   quotationAddons: AddonItem[]; // Fix Quotation optional add-ons
 } & DepositSection;
+
+type AdditionalInvoice = {
+  id: number;
+  invoice_number: string;
+  notes: string | null;
+  items: Array<{ id: number; description: string; unit_price: number; total: number }>;
+  total: number;
+  status: string;
+  sent_at: string | null;
+  paid_at: string | null;
+};
 
 const DEFAULT_DEPOSIT: DepositSection = {
   depositType: 'percentage',
@@ -179,12 +190,13 @@ type ExistingDocs = {
  * INV-#####) and we swap this placeholder out for it permanently.
  */
 const REF_PLACEHOLDER: Record<DocumentType, string> = {
-  'estimate-quote':   'EST-?????',
-  'fixed-quote':      'iMQ-?????',
-  'deposit-invoice':  'DEP-?????',
-  'deposit-receipt':  'DEP-?????',
-  'main-invoice':     'INV-?????',
-  'move-receipt':     'INV-?????',
+  'estimate-quote':    'EST-?????',
+  'fixed-quote':       'iMQ-?????',
+  'deposit-invoice':   'DEP-?????',
+  'deposit-receipt':   'DEP-?????',
+  'main-invoice':      'INV-?????',
+  'move-receipt':      'INV-?????',
+  'additional-invoice': 'ADC-?????',
 };
 
 export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDepositPaid, onBalancePaid }: Props) {
@@ -203,6 +215,21 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   const [activeModal, setActiveModal] = useState<DocumentType | null>(null);
   const [sendingToast, setSendingToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
   const [busyAction, setBusyAction] = useState<DocumentType | null>(null);
+
+  // Additional charges state
+  const [additionalInvoices, setAdditionalInvoices] = useState<AdditionalInvoice[]>([]);
+  const [showNewChargeForm, setShowNewChargeForm] = useState(false);
+  const [newChargeTitle, setNewChargeTitle] = useState('');
+  const [newChargeItems, setNewChargeItems] = useState<LineItem[]>([]);
+  const [editingChargeId, setEditingChargeId] = useState<number | null>(null);
+  const [editingChargeTitle, setEditingChargeTitle] = useState('');
+  const [editingChargeItems, setEditingChargeItems] = useState<LineItem[]>([]);
+  const [additionalBusy, setAdditionalBusy] = useState<number | 'new' | null>(null);
+  const [activeAdditionalModal, setActiveAdditionalModal] = useState<{
+    invoiceId: number;
+    invoiceNumber: string;
+    amount: number;
+  } | null>(null);
 
   // Guide quote state
   const [guideQuote, setGuideQuote] = useState<GuideQuoteState>({ status: 'idle' });
@@ -223,6 +250,10 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     setIsEditingGuideQuote(false);
     setManualMiles('');
     setManualCuFt('');
+    setAdditionalInvoices([]);
+    setShowNewChargeForm(false);
+    setEditingChargeId(null);
+    setActiveAdditionalModal(null);
 
     if (jobId) {
       // Load job + existing quotes + invoices for the send panel
@@ -256,6 +287,17 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             mainInvoiceNumber: mainInv?.invoice_number,
             mainInvoicePaid: mainInv?.status === 'paid',
           });
+          const addInvs: any[] = invoices.filter(i => i.invoice_type === 'additional');
+          setAdditionalInvoices(addInvs.map(i => ({
+            id: i.id,
+            invoice_number: i.invoice_number,
+            notes: i.notes,
+            items: i.items || [],
+            total: i.total,
+            status: i.status,
+            sent_at: i.sent_at,
+            paid_at: i.paid_at,
+          })));
 
           // ── Guide Quote calculation ───────────────────────────────────────
           // Use parent's pre-calculated mileage if available (supports rough areas without postcodes).
@@ -464,6 +506,128 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   function cancelDeposit() { setDepositDraft(null); }
   function setDepositField<K extends keyof DepositSection>(key: K, value: DepositSection[K]) {
     setDepositDraft(prev => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  // ── Additional charges handlers ───────────────────────────────────────────
+  async function createAdditionalCharge() {
+    if (!jobId) return;
+    const validItems = newChargeItems.filter(i => i.description.trim());
+    if (!validItems.length) return;
+    const total = listTotal(validItems);
+    setAdditionalBusy('new');
+    try {
+      const res = await api.post(`/crm/jobs/${jobId}/invoices`, {
+        invoice_type: 'additional',
+        notes: newChargeTitle.trim() || null,
+        subtotal: total,
+        tax_amount: 0,
+        total,
+        items: validItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
+      });
+      const inv = res.data;
+      setAdditionalInvoices(prev => [{
+        id: inv.id,
+        invoice_number: inv.invoice_number,
+        notes: inv.notes,
+        items: inv.items || [],
+        total: inv.total,
+        status: inv.status,
+        sent_at: inv.sent_at,
+        paid_at: inv.paid_at,
+      }, ...prev]);
+      setShowNewChargeForm(false);
+      setNewChargeTitle('');
+      setNewChargeItems([]);
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to create charge' });
+    } finally {
+      setAdditionalBusy(null);
+    }
+  }
+
+  async function updateAdditionalCharge(invoiceId: number) {
+    if (!jobId) return;
+    const validItems = editingChargeItems.filter(i => i.description.trim());
+    if (!validItems.length) return;
+    const total = listTotal(validItems);
+    setAdditionalBusy(invoiceId);
+    try {
+      const res = await api.put(`/crm/jobs/${jobId}/invoices/${invoiceId}`, {
+        notes: editingChargeTitle.trim() || null,
+        subtotal: total,
+        total,
+        items: validItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
+      });
+      const inv = res.data;
+      setAdditionalInvoices(prev => prev.map(i => i.id === invoiceId ? {
+        id: inv.id,
+        invoice_number: inv.invoice_number,
+        notes: inv.notes,
+        items: inv.items || [],
+        total: inv.total,
+        status: inv.status,
+        sent_at: inv.sent_at,
+        paid_at: inv.paid_at,
+      } : i));
+      setEditingChargeId(null);
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to update charge' });
+    } finally {
+      setAdditionalBusy(null);
+    }
+  }
+
+  async function deleteAdditionalCharge(invoiceId: number) {
+    if (!jobId) return;
+    setAdditionalBusy(invoiceId);
+    try {
+      await api.delete(`/crm/jobs/${jobId}/invoices/${invoiceId}`);
+      setAdditionalInvoices(prev => prev.filter(i => i.id !== invoiceId));
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to delete charge' });
+    } finally {
+      setAdditionalBusy(null);
+    }
+  }
+
+  async function toggleAdditionalChargePaid(inv: AdditionalInvoice) {
+    if (!jobId) return;
+    const markPaid = inv.status !== 'paid';
+    setAdditionalBusy(inv.id);
+    try {
+      const res = await api.patch(`/crm/jobs/${jobId}/invoices/${inv.id}/paid`, { paid: markPaid });
+      setAdditionalInvoices(prev => prev.map(i => i.id === inv.id
+        ? { ...i, status: res.data.status, paid_at: res.data.paid_at }
+        : i,
+      ));
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to update payment status' });
+    } finally {
+      setAdditionalBusy(null);
+    }
+  }
+
+  function openAdditionalChargeEmail(inv: AdditionalInvoice) {
+    if (!jobInfo?.email) {
+      setSendingToast({ kind: 'error', msg: 'Customer has no email address on file. Add one in the Job Details panel.' });
+      return;
+    }
+    setActiveAdditionalModal({ invoiceId: inv.id, invoiceNumber: inv.invoice_number, amount: inv.total });
+  }
+
+  async function handleSendAdditionalCharge(data: SendDocumentData) {
+    if (!jobId || !activeAdditionalModal) throw new Error('No invoice selected');
+    await api.post(`/crm/jobs/${jobId}/invoices/${activeAdditionalModal.invoiceId}/send-email`, {
+      to: data.to,
+      subject: data.subject,
+      body_html: data.body_html,
+      attach_pdf: data.attach_pdf,
+    });
+    setAdditionalInvoices(prev => prev.map(inv =>
+      inv.id === activeAdditionalModal.invoiceId
+        ? { ...inv, status: 'sent', sent_at: new Date().toISOString() }
+        : inv,
+    ));
   }
 
   // ── Derived totals ────────────────────────────────────────────────────────
@@ -710,6 +874,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             docNumber: existingDocs.mainInvoiceNumber ?? placeholder,
             amount: fixQuotationTotal,
           };
+          case 'additional-invoice': return null;
         }
       })()
     : null;
@@ -941,6 +1106,62 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         remainingBalance={remainingBalance}
         fullyPaid={fullyPaid}
       />
+
+      <AdditionalChargesBlock
+        invoices={additionalInvoices}
+        showNewForm={showNewChargeForm}
+        newTitle={newChargeTitle}
+        newItems={newChargeItems}
+        editingId={editingChargeId}
+        editingTitle={editingChargeTitle}
+        editingItems={editingChargeItems}
+        busy={additionalBusy}
+        jobEmail={jobInfo?.email || null}
+        onShowNewForm={() => {
+          setShowNewChargeForm(true);
+          setNewChargeTitle('');
+          setNewChargeItems([{ id: newId(), description: '', price: 0 }]);
+        }}
+        onCancelNewForm={() => setShowNewChargeForm(false)}
+        onNewTitleChange={setNewChargeTitle}
+        onNewItemUpdate={(id, patch) =>
+          setNewChargeItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i))
+        }
+        onNewItemAdd={() => setNewChargeItems(prev => [...prev, { id: newId(), description: '', price: 0 }])}
+        onNewItemRemove={id => setNewChargeItems(prev => prev.filter(i => i.id !== id))}
+        onCreate={createAdditionalCharge}
+        onStartEdit={inv => {
+          setEditingChargeId(inv.id);
+          setEditingChargeTitle(inv.notes || '');
+          setEditingChargeItems(inv.items.map(i => ({ id: String(i.id), description: i.description, price: i.unit_price })));
+        }}
+        onCancelEdit={() => setEditingChargeId(null)}
+        onEditTitleChange={setEditingChargeTitle}
+        onEditItemUpdate={(id, patch) =>
+          setEditingChargeItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i))
+        }
+        onEditItemAdd={() => setEditingChargeItems(prev => [...prev, { id: newId(), description: '', price: 0 }])}
+        onEditItemRemove={id => setEditingChargeItems(prev => prev.filter(i => i.id !== id))}
+        onSaveEdit={updateAdditionalCharge}
+        onDelete={deleteAdditionalCharge}
+        onTogglePaid={toggleAdditionalChargePaid}
+        onEmail={openAdditionalChargeEmail}
+      />
+
+      {/* ── Additional charge email modal ─────────────────────────────────── */}
+      {activeAdditionalModal && jobInfo && (
+        <SendDocumentModal
+          open={!!activeAdditionalModal}
+          onClose={() => setActiveAdditionalModal(null)}
+          documentType="additional-invoice"
+          customerName={jobInfo.full_name}
+          customerEmail={jobInfo.email || ''}
+          documentNumber={activeAdditionalModal.invoiceNumber}
+          amount={activeAdditionalModal.amount}
+          previewPdfUrl={`/api/crm/jobs/${jobId}/invoices/${activeAdditionalModal.invoiceId}/pdf`}
+          onSend={handleSendAdditionalCharge}
+        />
+      )}
 
       {/* ── Send Document modal ───────────────────────────────────────────── */}
       {activeModal && modalConfig && jobInfo && (
@@ -1824,6 +2045,331 @@ function ReadPaidRow({
           {fmtDateShort(date)}
         </span>
       )}
+    </div>
+  );
+}
+
+// ── Additional Charges Block ──────────────────────────────────────────────────
+
+function AdditionalChargesBlock({
+  invoices,
+  showNewForm, newTitle, newItems,
+  editingId, editingTitle, editingItems,
+  busy, jobEmail,
+  onShowNewForm, onCancelNewForm,
+  onNewTitleChange, onNewItemUpdate, onNewItemAdd, onNewItemRemove,
+  onCreate,
+  onStartEdit, onCancelEdit,
+  onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove,
+  onSaveEdit,
+  onDelete, onTogglePaid, onEmail,
+}: {
+  invoices: AdditionalInvoice[];
+  showNewForm: boolean;
+  newTitle: string;
+  newItems: LineItem[];
+  editingId: number | null;
+  editingTitle: string;
+  editingItems: LineItem[];
+  busy: number | 'new' | null;
+  jobEmail: string | null;
+  onShowNewForm: () => void;
+  onCancelNewForm: () => void;
+  onNewTitleChange: (v: string) => void;
+  onNewItemUpdate: (id: string, patch: Partial<LineItem>) => void;
+  onNewItemAdd: () => void;
+  onNewItemRemove: (id: string) => void;
+  onCreate: () => void;
+  onStartEdit: (inv: AdditionalInvoice) => void;
+  onCancelEdit: () => void;
+  onEditTitleChange: (v: string) => void;
+  onEditItemUpdate: (id: string, patch: Partial<LineItem>) => void;
+  onEditItemAdd: () => void;
+  onEditItemRemove: (id: string) => void;
+  onSaveEdit: (id: number) => void;
+  onDelete: (id: number) => void;
+  onTogglePaid: (inv: AdditionalInvoice) => void;
+  onEmail: (inv: AdditionalInvoice) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-rose-200/70 bg-white overflow-hidden shadow-sm">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-rose-200/70 bg-gradient-to-br from-rose-50 to-rose-100/50 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold tracking-tight text-rose-700 flex items-center gap-1.5">
+            <CreditCard className="w-4 h-4" />
+            Custom Invoice / Additional Charges
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">Separate invoices for extra services</p>
+        </div>
+        {!showNewForm && (
+          <button
+            type="button"
+            onClick={onShowNewForm}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white shadow-sm active:scale-95 transition-all flex-shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add additional charge
+          </button>
+        )}
+      </div>
+
+      {/* Invoice cards — each gets its own rounded box */}
+      <div className="p-3 space-y-2.5">
+        {invoices.map(inv => (
+          <AdditionalInvoiceCard
+            key={inv.id}
+            inv={inv}
+            isEditing={editingId === inv.id}
+            editingTitle={editingTitle}
+            editingItems={editingItems}
+            busy={busy === inv.id}
+            jobEmail={jobEmail}
+            onStartEdit={() => onStartEdit(inv)}
+            onCancelEdit={onCancelEdit}
+            onEditTitleChange={onEditTitleChange}
+            onEditItemUpdate={onEditItemUpdate}
+            onEditItemAdd={onEditItemAdd}
+            onEditItemRemove={onEditItemRemove}
+            onSaveEdit={() => onSaveEdit(inv.id)}
+            onDelete={() => onDelete(inv.id)}
+            onTogglePaid={() => onTogglePaid(inv)}
+            onEmail={() => onEmail(inv)}
+          />
+        ))}
+
+        {/* Empty state */}
+        {invoices.length === 0 && !showNewForm && (
+          <div className="py-6 text-center">
+            <p className="text-xs text-slate-400 italic">No additional charges yet</p>
+            <p className="text-xs text-slate-400 mt-1">Create a custom invoice for any extra services</p>
+          </div>
+        )}
+
+        {/* New charge form */}
+        {showNewForm && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50/30 p-3 space-y-3">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">New additional charge</p>
+
+            <input
+              type="text"
+              placeholder="Invoice title (e.g. Storage clearance, Garage rearrangement)"
+              className="input w-full"
+              value={newTitle}
+              onChange={e => onNewTitleChange(e.target.value)}
+            />
+
+            <div className="space-y-1">
+              {newItems.map(item => (
+                <ItemEditRow
+                  key={item.id}
+                  item={item}
+                  onUpdate={patch => onNewItemUpdate(item.id, patch)}
+                  onRemove={() => onNewItemRemove(item.id)}
+                  placeholder="Item description"
+                />
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={onNewItemAdd}
+              className="text-xs font-semibold text-rose-600 hover:text-rose-700 inline-flex items-center gap-1.5"
+            >
+              <PlusCircle className="w-4 h-4" /> Add item
+            </button>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={onCreate}
+                disabled={busy === 'new' || !newItems.some(i => i.description.trim())}
+                className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white transition-colors active:scale-95"
+              >
+                {busy === 'new'
+                  ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating…</>
+                  : <><Check className="w-3.5 h-3.5" /> Create Invoice</>}
+              </button>
+              <button
+                type="button"
+                onClick={onCancelNewForm}
+                className="text-xs font-semibold px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdditionalInvoiceCard({
+  inv, isEditing, editingTitle, editingItems, busy, jobEmail,
+  onStartEdit, onCancelEdit, onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove,
+  onSaveEdit, onDelete, onTogglePaid, onEmail,
+}: {
+  inv: AdditionalInvoice;
+  isEditing: boolean;
+  editingTitle: string;
+  editingItems: LineItem[];
+  busy: boolean;
+  jobEmail: string | null;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onEditTitleChange: (v: string) => void;
+  onEditItemUpdate: (id: string, patch: Partial<LineItem>) => void;
+  onEditItemAdd: () => void;
+  onEditItemRemove: (id: string) => void;
+  onSaveEdit: () => void;
+  onDelete: () => void;
+  onTogglePaid: () => void;
+  onEmail: () => void;
+}) {
+  const isPaid = inv.status === 'paid';
+  const isSent = inv.status === 'sent';
+
+  const sentLabel = inv.sent_at
+    ? new Date(inv.sent_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : null;
+
+  return (
+    <div className={`rounded-lg border bg-white shadow-sm overflow-hidden ${
+      isPaid ? 'border-emerald-200' : isSent ? 'border-blue-200' : 'border-slate-200'
+    }`}>
+      {/* Summary row */}
+      <div className="px-3 py-2.5 flex items-center gap-3">
+        {/* Left: number + status badge */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold text-slate-400 font-mono tracking-wide">{inv.invoice_number}</span>
+            {isPaid && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                <Check className="w-2.5 h-2.5" strokeWidth={3} /> Paid
+              </span>
+            )}
+            {isSent && !isPaid && (
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                Sent {sentLabel && `· ${sentLabel}`}
+              </span>
+            )}
+            {inv.status === 'draft' && (
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                Draft
+              </span>
+            )}
+          </div>
+          {inv.notes && (
+            <p className="text-sm font-semibold text-slate-800 mt-0.5 truncate">{inv.notes}</p>
+          )}
+          <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">
+            {inv.items.length} item{inv.items.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+
+        {/* Right: total */}
+        <span className={`text-base font-bold tabular-nums tracking-tight flex-shrink-0 ${
+          isPaid ? 'text-emerald-700' : 'text-slate-900'
+        }`}>{fmt(inv.total)}</span>
+      </div>
+
+      {/* Edit form (only visible when editing) */}
+      {isEditing && (
+        <div className="px-3 pb-3 pt-1 border-t border-slate-100 space-y-3 bg-slate-50/50">
+          <input
+            type="text"
+            placeholder="Invoice title"
+            className="input w-full"
+            value={editingTitle}
+            onChange={e => onEditTitleChange(e.target.value)}
+          />
+          <div className="space-y-1">
+            {editingItems.map(item => (
+              <ItemEditRow
+                key={item.id}
+                item={item}
+                onUpdate={patch => onEditItemUpdate(item.id, patch)}
+                onRemove={() => onEditItemRemove(item.id)}
+                placeholder="Item description"
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={onEditItemAdd}
+            className="text-xs font-semibold text-rose-600 hover:text-rose-700 inline-flex items-center gap-1.5"
+          >
+            <PlusCircle className="w-4 h-4" /> Add item
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onSaveEdit}
+              disabled={busy || !editingItems.some(i => i.description.trim())}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white transition-colors active:scale-95"
+            >
+              {busy
+                ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving…</>
+                : <><Check className="w-3.5 h-3.5" /> Save</>}
+            </button>
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Action bar */}
+      <div className={`px-3 py-2 flex items-center gap-1.5 border-t ${
+        isPaid ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100 bg-slate-50/30'
+      }`}>
+        <button
+          type="button"
+          onClick={onEmail}
+          disabled={busy || !jobEmail}
+          title={!jobEmail ? 'No customer email on file' : 'Email invoice to client'}
+          className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-95"
+        >
+          <Mail className="w-3.5 h-3.5" /> Email
+        </button>
+        <button
+          type="button"
+          onClick={onStartEdit}
+          disabled={busy}
+          className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-95"
+        >
+          <Pencil className="w-3.5 h-3.5" /> Edit
+        </button>
+        <button
+          type="button"
+          onClick={onTogglePaid}
+          disabled={busy}
+          className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border transition-colors active:scale-95 disabled:opacity-50 ${
+            isPaid
+              ? 'border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          {busy
+            ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            : isPaid
+              ? <><CheckCircle className="w-3.5 h-3.5" /> Paid</>
+              : <><CreditCard className="w-3.5 h-3.5" /> Mark paid</>}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-transparent text-red-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 transition-colors active:scale-95 ml-auto"
+        >
+          <Trash2 className="w-3.5 h-3.5" /> Delete
+        </button>
+      </div>
     </div>
   );
 }

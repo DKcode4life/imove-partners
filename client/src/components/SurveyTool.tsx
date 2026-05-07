@@ -160,7 +160,10 @@ function NoteModal({ itemName, itemIcon, currentNote, currentPhoto, onSave, onCl
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-3">
-          <span className="text-2xl leading-none">{itemIcon}</span>
+          {itemIcon.startsWith('data:image')
+            ? <img src={itemIcon} alt="" className="w-8 h-8 object-contain select-none" />
+            : <span className="text-2xl leading-none">{itemIcon}</span>
+          }
           <div className="flex-1">
             <h3 className="text-sm font-bold text-slate-900">{itemName}</h3>
             <p className="text-xs text-slate-400">Note &amp; photo</p>
@@ -322,9 +325,10 @@ function ItemSquare({ name, icon, count, note, photo, volumeCuFt, onIncrement, o
       </button>
 
       {/* Icon — display only */}
-      <div className="text-3xl leading-none mb-1.5 select-none">
-        {icon}
-      </div>
+      {icon.startsWith('data:image')
+        ? <img src={icon} alt="" className="w-8 h-8 object-contain select-none mb-1.5" />
+        : <div className="text-3xl leading-none mb-1.5 select-none">{icon}</div>
+      }
 
       {/* Name */}
       <p className={`text-[10px] font-medium text-center leading-tight px-1 ${

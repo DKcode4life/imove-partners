@@ -16,7 +16,8 @@ export type DocumentType =
   | 'deposit-invoice'
   | 'deposit-receipt'
   | 'main-invoice'
-  | 'move-receipt';
+  | 'move-receipt'
+  | 'additional-invoice';
 
 export interface SendDocumentData {
   to: string;
@@ -43,12 +44,13 @@ interface Props {
 }
 
 const TITLES: Record<DocumentType, string> = {
-  'estimate-quote':  'Email Estimate Quote',
-  'fixed-quote':     'Email Fixed Quote',
-  'deposit-invoice': 'Email Deposit Invoice',
-  'deposit-receipt': 'Email Deposit Receipt',
-  'main-invoice':    'Email Final Invoice',
-  'move-receipt':    'Email Move Receipt',
+  'estimate-quote':    'Email Estimate Quote',
+  'fixed-quote':       'Email Fixed Quote',
+  'deposit-invoice':   'Email Deposit Invoice',
+  'deposit-receipt':   'Email Deposit Receipt',
+  'main-invoice':      'Email Final Invoice',
+  'move-receipt':      'Email Move Receipt',
+  'additional-invoice': 'Email Additional Charge Invoice',
 };
 
 function defaultSubject(t: DocumentType, ref: string): string {
@@ -57,8 +59,9 @@ function defaultSubject(t: DocumentType, ref: string): string {
     case 'fixed-quote':     return `Your fixed quote from iMove Partners — Quote ${ref}`;
     case 'deposit-invoice': return `Deposit invoice for your move — Invoice ${ref}`;
     case 'deposit-receipt': return `Deposit received — your move is confirmed!`;
-    case 'main-invoice':    return `Final invoice for your move — Invoice ${ref}`;
-    case 'move-receipt':    return `Payment received — thank you from iMove Partners!`;
+    case 'main-invoice':        return `Final invoice for your move — Invoice ${ref}`;
+    case 'move-receipt':        return `Payment received — thank you from iMove Partners!`;
+    case 'additional-invoice':  return `Additional charge invoice from iMove Partners — Invoice ${ref}`;
   }
 }
 

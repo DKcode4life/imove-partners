@@ -80,8 +80,8 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
     items = [],
   } = req.body;
 
-  if (!['deposit', 'main'].includes(invoice_type)) {
-    return res.status(400).json({ error: "invoice_type must be 'deposit' or 'main'" });
+  if (!['deposit', 'main', 'additional'].includes(invoice_type)) {
+    return res.status(400).json({ error: "invoice_type must be 'deposit', 'main', or 'additional'" });
   }
   if (!items.length) {
     return res.status(400).json({ error: 'At least one line item is required' });
@@ -158,8 +158,9 @@ router.get('/jobs/:id/invoices/:invoiceId/pdf', wrap(async (req, res) => {
       s + inv.payments.reduce((ps, p) => ps + p.amount, 0), 0);
   }
 
+  const pdfMode = invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice';
   const pdf = await generateInvoicePDF({
-    mode: invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice',
+    mode: pdfMode,
     invoice_number: invoice.invoice_number,
     ...jobToPdfFields(job),
     due_date: invoice.due_date,
@@ -212,8 +213,9 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
   // Build PDF attachment
   let pdfAttachment = null;
   if (attach_pdf) {
+    const invoicePdfMode = invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice';
     const pdf = await generateInvoicePDF({
-      mode: invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice',
+      mode: invoicePdfMode,
       invoice_number: invoice.invoice_number,
       ...jobToPdfFields(job),
       due_date: invoice.due_date,
@@ -242,6 +244,7 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
   };
 
   const templateSlug = invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice';
+  // 'additional' invoices reuse the main-invoice template (same structure)
 
   const emailResult = await sendTemplated({
     to,
@@ -352,6 +355,84 @@ router.post('/jobs/:id/invoices/:invoiceId/payments', wrap(async (req, res) => {
   });
 
   res.status(201).json({ payment, invoiceFullyPaid: isFullyPaid });
+}));
+
+// ─── PUT: update an additional invoice's items and notes ────────────────
+router.put('/jobs/:id/invoices/:invoiceId', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id);
+  const invoiceId = parseInt(req.params.invoiceId);
+  if (isNaN(jobId) || isNaN(invoiceId)) return res.status(400).json({ error: 'Invalid IDs' });
+
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, job_id: jobId },
+  });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (invoice.invoice_type !== 'additional') {
+    return res.status(400).json({ error: 'Only additional invoices can be edited this way' });
+  }
+
+  const { notes, subtotal = 0, total = 0, items = [] } = req.body;
+  if (!items.length) return res.status(400).json({ error: 'At least one line item is required' });
+
+  await prisma.invoiceItem.deleteMany({ where: { invoice_id: invoiceId } });
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      notes: notes || null,
+      subtotal: parseFloat(subtotal) || 0,
+      tax_amount: 0,
+      total: parseFloat(total) || 0,
+      updated_at: new Date(),
+      items: {
+        create: items.map((item, idx) => ({
+          description: item.description || '',
+          quantity: parseFloat(item.quantity) || 1,
+          unit_price: parseFloat(item.unit_price) || 0,
+          total: parseFloat(item.total) || 0,
+          sort_order: idx,
+        })),
+      },
+    },
+    include: { items: true, payments: true },
+  });
+
+  await prisma.crmActivity.create({
+    data: { job_id: jobId, type: 'note', note: `Updated additional invoice ${invoice.invoice_number}` },
+  });
+
+  res.json(updated);
+}));
+
+// ─── PATCH: toggle an additional invoice's paid status ───────────────────
+router.patch('/jobs/:id/invoices/:invoiceId/paid', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id);
+  const invoiceId = parseInt(req.params.invoiceId);
+  if (isNaN(jobId) || isNaN(invoiceId)) return res.status(400).json({ error: 'Invalid IDs' });
+
+  const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, job_id: jobId } });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+  const { paid } = req.body;
+  const newStatus = paid ? 'paid' : 'sent';
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      status: newStatus,
+      paid_at: paid ? new Date() : null,
+    },
+  });
+
+  await prisma.crmActivity.create({
+    data: {
+      job_id: jobId,
+      type: 'note',
+      note: `${invoice.invoice_number} marked as ${paid ? 'paid' : 'unpaid'}`,
+    },
+  });
+
+  res.json(updated);
 }));
 
 // ─── DELETE: remove an invoice (and its line items + payments) ──────────
