@@ -118,6 +118,8 @@ function extractDepositSection(state: QuoteBuilderState): DepositSection {
 
 interface Props {
   jobId: number | string | undefined;
+  /** Mileage pre-calculated by the parent from full address fields (not just postcodes). Used as fallback when postcodes are absent or as the primary source. */
+  distanceMiles?: number;
   /**
    * Fired after a server action that may have changed the parent job's
    * status / quote_amount (sending a quote/invoice, marking paid, etc.).
@@ -181,7 +183,7 @@ const REF_PLACEHOLDER: Record<DocumentType, string> = {
   'move-receipt':     'INV-?????',
 };
 
-export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
+export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles }: Props) {
   const storageKey = jobId ? `crm-quote-${jobId}` : null;
 
   const [committed, setCommitted] = useState<QuoteBuilderState>(() => loadFromStorage(jobId));
@@ -252,16 +254,22 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
           });
 
           // ── Guide Quote calculation ───────────────────────────────────────
-          if (!fromPostcode || !toPostcode) {
+          // Use parent's pre-calculated mileage if available (supports rough areas without postcodes).
+          // Fall back to a fresh route-info call when postcodes are present but no mileage was passed.
+          if (!distanceMiles && (!fromPostcode || !toPostcode)) {
             setGuideQuote({ status: 'incomplete', reason: 'Add property addresses to calculate' });
           } else {
             setGuideQuote({ status: 'loading' });
             try {
+              const routePromise = distanceMiles
+                ? Promise.resolve({ data: { direct: { miles: distanceMiles } } })
+                : api.post('/crm/route-info', { from: fromPostcode, to: toPostcode }).catch(() => ({ data: null }));
+
               const [surveyRes, catalogData, bandsRes, routeRes] = await Promise.all([
                 api.get(`/crm/jobs/${jobId}/survey`).catch(() => ({ data: null })),
                 loadCatalog(),
                 api.get('/settings/distance-price-bands').catch(() => ({ data: DEFAULT_PRICE_BANDS })),
-                api.post('/crm/route-info', { from: fromPostcode, to: toPostcode }).catch(() => ({ data: null })),
+                routePromise,
               ]);
 
               const miles: number | null = routeRes.data?.direct?.miles ?? null;
@@ -311,7 +319,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated }: Props) {
         }
       })();
     }
-  }, [jobId]);
+  }, [jobId, distanceMiles]);
 
   // Auto-clear toast after 4 seconds
   useEffect(() => {

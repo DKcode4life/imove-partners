@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
-  Navigation, MapPin, FileText, ChevronDown,
+  Navigation, MapPin, FileText, ChevronDown, Calendar,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -767,6 +767,36 @@ export default function CRMDetailPage() {
     }
   };
 
+  // ── Sync survey to Google Calendar ───────────────────────────────────────────
+
+  const handleSyncCalendar = () => {
+    if (!surveyDate) return;
+
+    const dateStr = surveyDate.replace(/-/g, '');
+    const [startHH, startMM] = surveyTime ? surveyTime.split(':').map(Number) : [10, 0];
+    const endHH = (startHH + 1) % 24;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const start = `${dateStr}T${pad(startHH)}${pad(startMM)}00`;
+    const end   = `${dateStr}T${pad(endHH)}${pad(startMM)}00`;
+
+    const title    = `Survey – ${fullName || 'Client'}`;
+    const location = [fromLine1, fromLine2, fromCity, fromPostcode].filter(Boolean).join(', ');
+    const details  = [
+      surveyType    ? `Survey Type: ${surveyType}`   : '',
+      phone         ? `Client Phone: ${phone}`        : '',
+      location      ? `Address: ${location}`          : '',
+    ].filter(Boolean).join('\n');
+
+    const url = new URL('https://calendar.google.com/calendar/render');
+    url.searchParams.set('action', 'TEMPLATE');
+    url.searchParams.set('text', title);
+    url.searchParams.set('dates', `${start}/${end}`);
+    if (details)  url.searchParams.set('details', details);
+    if (location) url.searchParams.set('location', location);
+
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  };
+
   // ── Loading ──────────────────────────────────────────────────────────────────
 
   if (loading) return (
@@ -1050,6 +1080,7 @@ export default function CRMDetailPage() {
           <Section title="Quote" accent="bg-amber-500">
             <QuoteBuilder
               jobId={id}
+              distanceMiles={routeInfo?.direct?.miles ?? undefined}
               onJobUpdated={() => {
                 if (!id) return;
                 api.get(`/crm/jobs/${id}`)
@@ -1175,16 +1206,25 @@ export default function CRMDetailPage() {
                       <ReadF label="Survey Time" value={surveyTime ? surveyTime : undefined} />
                     </div>
                     {surveyType && surveyDate && (
-                      <button
-                        type="button"
-                        onClick={handleSendSurveyEmail}
-                        disabled={sendingSurveyEmail || !email}
-                        className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 text-xs font-semibold hover:bg-cyan-100 hover:border-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                      >
-                        {sendingSurveyEmail
-                          ? <><span className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" /> Sending…</>
-                          : <><Send className="w-3.5 h-3.5" /> Send Survey Confirmation</>}
-                      </button>
+                      <div className="mt-1 space-y-2">
+                        <button
+                          type="button"
+                          onClick={handleSendSurveyEmail}
+                          disabled={sendingSurveyEmail || !email}
+                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 text-xs font-semibold hover:bg-cyan-100 hover:border-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                          {sendingSurveyEmail
+                            ? <><span className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" /> Sending…</>
+                            : <><Send className="w-3.5 h-3.5" /> Send Survey Confirmation</>}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSyncCalendar}
+                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-semibold hover:bg-indigo-100 hover:border-indigo-300 transition-all"
+                        >
+                          <Calendar className="w-3.5 h-3.5" /> Sync to Calendar
+                        </button>
+                      </div>
                     )}
                     {!email && surveyType && surveyDate && (
                       <p className="text-[11px] text-amber-600">Add a client email address to enable sending.</p>
