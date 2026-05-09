@@ -1,0 +1,8 @@
+[phases.build]
+cmds = [
+  "npm run build",
+  "rm -rf client/node_modules"
+]
+
+[phases.start]
+cmd = "npm start"

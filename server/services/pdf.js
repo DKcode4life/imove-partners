@@ -236,7 +236,7 @@ function drawServicesTable(doc, y, title, items, subtotal, taxRate, taxAmount, t
   doc.fillColor(C.dark).rect(LEFT, y, CONTENT_W, HEADER_H).fill();
   doc.fillColor(C.white).font(F.bold).fontSize(11)
      .text(title, LEFT + 12, y + 8)
-     .text('Amount (excl. VAT)', amountX, y + 8, { width: amountW, align: 'right' });
+     .text(Number(taxAmount) > 0 ? 'Amount (excl. VAT)' : 'Amount', amountX, y + 8, { width: amountW, align: 'right' });
   y += HEADER_H;
 
   // Rows
@@ -260,10 +260,12 @@ function drawServicesTable(doc, y, title, items, subtotal, taxRate, taxAmount, t
     });
   }
 
-  // Totals stack
+  // Totals stack — omit VAT row when there is no VAT applied
   const totalsRows = [
     { label: `Sub-total ${title}`, value: fmtMoney(subtotal), bold: false, color: C.body },
-    { label: `${Number(taxRate || 0).toFixed(0)}% VAT`, value: fmtMoney(taxAmount), bold: false, color: C.body },
+    ...(Number(taxAmount) > 0
+      ? [{ label: `${Number(taxRate || 20).toFixed(0)}% VAT`, value: fmtMoney(taxAmount), bold: false, color: C.body }]
+      : []),
     { label: `Total ${title}`,     value: fmtMoney(total),    bold: true,  color: C.dark },
   ];
 

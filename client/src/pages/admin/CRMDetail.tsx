@@ -801,10 +801,12 @@ export default function CRMDetailPage() {
 
     const title    = `Survey – ${fullName || 'Client'}`;
     const location = [fromLine1, fromLine2, fromCity, fromPostcode].filter(Boolean).join(', ');
+    const jobUrl   = `${window.location.origin}/admin/crm/${id}`;
     const details  = [
       surveyType    ? `Survey Type: ${surveyType}`   : '',
       phone         ? `Client Phone: ${phone}`        : '',
       location      ? `Address: ${location}`          : '',
+      `Job Profile: ${jobUrl}`,
     ].filter(Boolean).join('\n');
 
     const url = new URL('https://calendar.google.com/calendar/render');

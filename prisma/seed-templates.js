@@ -10,6 +10,7 @@
  */
 
 const { PrismaClient } = require('@prisma/client');
+const { DEFAULT_CATALOG } = require('../server/data/default-catalog');
 const prisma = new PrismaClient();
 
 // ── Shared blocks ─────────────────────────────────────────────────────────────
@@ -400,6 +401,17 @@ async function main() {
   }
 
   console.log(`\n✅ Re-seeded ${templates.length} email templates.\n`);
+
+  // ── Inventory catalog ─────────────────────────────────────────────────────
+  // Always upsert so the server's catalog stays in sync with the codebase.
+  // Any changes committed to server/data/default-catalog.js are reflected
+  // on the next startup/deploy without needing a manual DB update.
+  await prisma.companySetting.upsert({
+    where:  { key: 'inventory-catalog' },
+    update: { value: JSON.stringify(DEFAULT_CATALOG) },
+    create: { key: 'inventory-catalog', value: JSON.stringify(DEFAULT_CATALOG) },
+  });
+  console.log('✅ Inventory catalog synced to database.\n');
 }
 
 main()

@@ -31,6 +31,8 @@ type QuoteBuilderState = {
   estimateItems: LineItem[];
   quotationItems: LineItem[];   // Fix Quotation mandatory items
   quotationAddons: AddonItem[]; // Fix Quotation optional add-ons
+  estimateVatEnabled: boolean;
+  fixedVatEnabled: boolean;
 } & DepositSection;
 
 type AdditionalInvoice = {
@@ -57,6 +59,8 @@ const DEFAULT_STATE: QuoteBuilderState = {
   estimateItems: [],
   quotationItems: [],
   quotationAddons: [],
+  estimateVatEnabled: false,
+  fixedVatEnabled: false,
   ...DEFAULT_DEPOSIT,
 };
 
@@ -638,23 +642,40 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   const unselectedAddonsTotal = useMemo(() => listTotal(unselectedAddons), [unselectedAddons]);
   const fixQuotationTotal    = mandatoryTotal + selectedAddonsTotal;
 
+  // ── VAT toggles ───────────────────────────────────────────────────────────
+  function toggleEstimateVat() {
+    const next = { ...committed, estimateVatEnabled: !committed.estimateVatEnabled };
+    setCommitted(next);
+    persist(next);
+  }
+  function toggleFixedVat() {
+    const next = { ...committed, fixedVatEnabled: !committed.fixedVatEnabled };
+    setCommitted(next);
+    persist(next);
+  }
+
+  const estimateTotal   = listTotal(committed.estimateItems);
+  const estimateVat     = committed.estimateVatEnabled ? Math.round(estimateTotal * 0.20 * 100) / 100 : 0;
+  const estimateGrandTotal = estimateTotal + estimateVat;
+  const fixVat          = committed.fixedVatEnabled ? Math.round(fixQuotationTotal * 0.20 * 100) / 100 : 0;
+  const fixGrandTotal   = fixQuotationTotal + fixVat;
+
   const depositValueNum = parseFloat(depositSection.depositValue) || 0;
   const depositAmount = useMemo(() => {
     if (depositSection.depositType === 'none') return 0;
     if (depositSection.depositType === 'percentage') {
-      return Math.max(0, (fixQuotationTotal * depositValueNum) / 100);
+      return Math.max(0, (fixGrandTotal * depositValueNum) / 100);
     }
     return Math.max(0, depositValueNum);
-  }, [depositSection.depositType, depositValueNum, fixQuotationTotal]);
-  const remainingBalance = Math.max(0, fixQuotationTotal - depositAmount);
+  }, [depositSection.depositType, depositValueNum, fixGrandTotal]);
+  const remainingBalance = Math.max(0, fixGrandTotal - depositAmount);
   const fullyPaid =
     depositSection.balancePaid &&
     (depositSection.depositType === 'none' || depositSection.depositPaid) &&
-    fixQuotationTotal > 0;
+    fixGrandTotal > 0;
 
   // ── Send-to-client helpers ─────────────────────────────────────────────────
 
-  const estimateTotal = listTotal(committed.estimateItems);
   const hasEstimateItems = committed.estimateItems.length > 0;
   const hasFixedItems = committed.quotationItems.length > 0 || quotationAddons.some(a => a.selected);
   const fixedReadyToSend = hasFixedItems && fixQuotationTotal > 0;
@@ -680,13 +701,17 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
           ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: `${a.description} (add-on)`, quantity: 1, unit_price: a.price, total: a.price })),
         ];
 
-    const total = quote_type === 'estimate' ? estimateTotal : fixQuotationTotal;
+    const subtotal = quote_type === 'estimate' ? estimateTotal : fixQuotationTotal;
+    const vatEnabled = quote_type === 'estimate' ? committed.estimateVatEnabled : committed.fixedVatEnabled;
+    const taxAmount = vatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
+    const total = subtotal + taxAmount;
 
     const res = await api.post(`/crm/jobs/${jobId}/quotes`, {
       quote_type,
       // No quote_number — server generates it.
-      subtotal: total,
-      tax_amount: 0, // VAT already included in line prices for now
+      subtotal,
+      tax_rate: vatEnabled ? 20 : 0,
+      tax_amount: taxAmount,
       total,
       deposit: quote_type === 'fixed' ? depositAmount : 0,
       items,
@@ -720,14 +745,16 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
           ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: `${a.description} (add-on)`, quantity: 1, unit_price: a.price, total: a.price })),
         ];
 
-    const total = invoice_type === 'deposit' ? depositAmount : fixQuotationTotal;
+    const invoiceTotal = invoice_type === 'deposit' ? depositAmount : fixGrandTotal;
+    const invoiceSubtotal = invoice_type === 'deposit' ? depositAmount : fixQuotationTotal;
+    const invoiceTax = invoice_type === 'deposit' ? 0 : fixVat;
 
     const res = await api.post(`/crm/jobs/${jobId}/invoices`, {
       invoice_type,
       quote_id: fixedQuoteId,
-      subtotal: total,
-      tax_amount: 0,
-      total,
+      subtotal: invoiceSubtotal,
+      tax_amount: invoiceTax,
+      total: invoiceTotal,
       items,
     });
 
@@ -846,33 +873,33 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         switch (activeModal) {
           case 'estimate-quote': return {
             docNumber: existingDocs.estimateQuoteNumber ?? placeholder,
-            amount: estimateTotal,
+            amount: estimateGrandTotal,
             previewUrl: existingDocs.estimateQuoteId ? `/api/crm/jobs/${jobId}/quotes/${existingDocs.estimateQuoteId}/pdf` : undefined,
           };
           case 'fixed-quote': return {
             docNumber: existingDocs.fixedQuoteNumber ?? placeholder,
-            amount: fixQuotationTotal,
+            amount: fixGrandTotal,
             previewUrl: existingDocs.fixedQuoteId ? `/api/crm/jobs/${jobId}/quotes/${existingDocs.fixedQuoteId}/pdf` : undefined,
           };
           case 'deposit-invoice': return {
             docNumber: existingDocs.depositInvoiceNumber ?? placeholder,
             amount: depositAmount,
-            jobTotal: fixQuotationTotal,
+            jobTotal: fixGrandTotal,
             previewUrl: existingDocs.depositInvoiceId ? `/api/crm/jobs/${jobId}/invoices/${existingDocs.depositInvoiceId}/pdf` : undefined,
           };
           case 'deposit-receipt': return {
             docNumber: existingDocs.depositInvoiceNumber ?? placeholder,
             amount: depositAmount,
-            jobTotal: fixQuotationTotal,
+            jobTotal: fixGrandTotal,
           };
           case 'main-invoice': return {
             docNumber: existingDocs.mainInvoiceNumber ?? placeholder,
-            amount: fixQuotationTotal,
+            amount: fixGrandTotal,
             previewUrl: existingDocs.mainInvoiceId ? `/api/crm/jobs/${jobId}/invoices/${existingDocs.mainInvoiceId}/pdf` : undefined,
           };
           case 'move-receipt': return {
             docNumber: existingDocs.mainInvoiceNumber ?? placeholder,
-            amount: fixQuotationTotal,
+            amount: fixGrandTotal,
           };
           case 'additional-invoice': return null;
         }
@@ -1001,7 +1028,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
           <SendButton
             label="Estimate Quote"
-            sub={hasEstimateItems ? fmt(estimateTotal) : 'Add items first'}
+            sub={hasEstimateItems ? fmt(estimateGrandTotal) : 'Add items first'}
             icon={<FileText className="w-4 h-4" />}
             disabled={!hasEstimateItems || !jobInfo?.email}
             busy={busyAction === 'estimate-quote'}
@@ -1011,7 +1038,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
           />
           <SendButton
             label="Fixed Quote"
-            sub={fixedReadyToSend ? fmt(fixQuotationTotal) : 'Add items first'}
+            sub={fixedReadyToSend ? fmt(fixGrandTotal) : 'Add items first'}
             icon={<FileText className="w-4 h-4" />}
             disabled={!fixedReadyToSend || !jobInfo?.email}
             busy={busyAction === 'fixed-quote'}
@@ -1040,7 +1067,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
           />
           <SendButton
             label="Final Invoice"
-            sub={fixedReadyToSend ? fmt(fixQuotationTotal - (existingDocs.depositInvoicePaid ? depositAmount : 0)) : 'Add items first'}
+            sub={fixedReadyToSend ? fmt(fixGrandTotal - (existingDocs.depositInvoicePaid ? depositAmount : 0)) : 'Add items first'}
             icon={<Receipt className="w-4 h-4" />}
             disabled={!fixedReadyToSend || !jobInfo?.email}
             busy={busyAction === 'main-invoice'}
@@ -1072,6 +1099,8 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         onUpdate={updateEstimateItem}
         onRemove={removeEstimateItem}
         accent="cyan"
+        vatEnabled={committed.estimateVatEnabled}
+        onToggleVat={toggleEstimateVat}
       />
 
       <FixQuotationBlock
@@ -1092,6 +1121,8 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         selectedAddonsTotal={selectedAddonsTotal}
         unselectedAddonsTotal={unselectedAddonsTotal}
         fixQuotationTotal={fixQuotationTotal}
+        vatEnabled={committed.fixedVatEnabled}
+        onToggleVat={toggleFixedVat}
       />
 
       <DepositBlock
@@ -1101,7 +1132,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         onSave={saveDeposit}
         onCancel={cancelDeposit}
         onChange={setDepositField}
-        quotationTotal={fixQuotationTotal}
+        quotationTotal={fixGrandTotal}
         depositAmount={depositAmount}
         remainingBalance={remainingBalance}
         fullyPaid={fullyPaid}
@@ -1322,7 +1353,7 @@ function LineItemBlock({
   title, subtitle, items,
   editing, onEdit, onSave, onCancel,
   onAdd, onUpdate, onRemove,
-  accent,
+  accent, vatEnabled, onToggleVat,
 }: {
   title: string;
   subtitle: string;
@@ -1335,9 +1366,13 @@ function LineItemBlock({
   onUpdate: (id: string, patch: Partial<LineItem>) => void;
   onRemove: (id: string) => void;
   accent: AccentName;
+  vatEnabled?: boolean;
+  onToggleVat?: () => void;
 }) {
-  const cfg   = ACCENT[accent];
-  const total = listTotal(items);
+  const cfg      = ACCENT[accent];
+  const subtotal = listTotal(items);
+  const vat      = vatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
+  const grandTotal = subtotal + vat;
 
   return (
     <div className={`rounded-xl border bg-white overflow-hidden shadow-sm ${cfg.headerBorder}`}>
@@ -1395,9 +1430,43 @@ function LineItemBlock({
       )}
 
       {items.length > 0 && (
-        <div className="px-4 py-3 border-t border-slate-100 bg-gradient-to-br from-slate-50 to-slate-100/30 flex items-center justify-between">
-          <span className={`text-sm font-bold ${cfg.label}`}>{title} Total</span>
-          <span className={`font-bold tabular-nums tracking-tight text-lg ${cfg.total}`}>{fmt(total)}</span>
+        <div className="px-4 py-3 border-t border-slate-100 bg-gradient-to-br from-slate-50 to-slate-100/30 space-y-2">
+          {vatEnabled ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">Subtotal</span>
+                <span className="text-sm tabular-nums text-slate-700">{fmt(subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">VAT (20%)</span>
+                <span className="text-sm tabular-nums text-slate-700">{fmt(vat)}</span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200/70">
+                <span className={`text-sm font-bold ${cfg.label}`}>{title} Total (inc. VAT)</span>
+                <span className={`font-bold tabular-nums tracking-tight text-lg ${cfg.total}`}>{fmt(grandTotal)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className={`text-sm font-bold ${cfg.label}`}>{title} Total</span>
+              <span className={`font-bold tabular-nums tracking-tight text-lg ${cfg.total}`}>{fmt(subtotal)}</span>
+            </div>
+          )}
+          {onToggleVat && (
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={onToggleVat}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
+                  vatEnabled
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600'
+                }`}
+              >
+                VAT 20%
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1467,6 +1536,7 @@ function FixQuotationBlock({
   onAddMandatory, onUpdateMandatory, onRemoveMandatory,
   onAddAddon, onUpdateAddon, onRemoveAddon, onToggleAddonSelected,
   mandatoryTotal, selectedAddonsTotal, unselectedAddonsTotal, fixQuotationTotal,
+  vatEnabled, onToggleVat,
 }: {
   mandatoryItems: LineItem[];
   addonItems: AddonItem[];
@@ -1485,11 +1555,15 @@ function FixQuotationBlock({
   selectedAddonsTotal: number;
   unselectedAddonsTotal: number;
   fixQuotationTotal: number;
+  vatEnabled?: boolean;
+  onToggleVat?: () => void;
 }) {
   const cfg = ACCENT.emerald;
   const selectedAddons   = addonItems.filter(a => a.selected);
   const unselectedAddons = addonItems.filter(a => !a.selected);
   const isEmpty = mandatoryItems.length === 0 && addonItems.length === 0;
+  const vat = vatEnabled ? Math.round(fixQuotationTotal * 0.20 * 100) / 100 : 0;
+  const grandTotal = fixQuotationTotal + vat;
 
   return (
     <div className={`rounded-xl border bg-white overflow-hidden shadow-sm ${cfg.headerBorder}`}>
@@ -1528,19 +1602,43 @@ function FixQuotationBlock({
       {/* Totals */}
       {!isEmpty && (
         <div className="px-4 py-3 border-t border-slate-100 bg-gradient-to-br from-slate-50 to-slate-100/30 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className={`text-sm font-bold ${cfg.label}`}>Fix Quotation Total</span>
-              {selectedAddons.length > 0 && (
-                <span className="text-[11px] text-slate-400 ml-2 tabular-nums">
-                  {fmt(mandatoryTotal)} + {fmt(selectedAddonsTotal)} add-on{selectedAddons.length > 1 ? 's' : ''}
-                </span>
-              )}
+          {vatEnabled ? (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-500">Subtotal</span>
+                  {selectedAddons.length > 0 && (
+                    <span className="text-[11px] text-slate-400 ml-2 tabular-nums">
+                      {fmt(mandatoryTotal)} + {fmt(selectedAddonsTotal)} add-on{selectedAddons.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm tabular-nums text-slate-700">{fmt(fixQuotationTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">VAT (20%)</span>
+                <span className="text-sm tabular-nums text-slate-700">{fmt(vat)}</span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200/70">
+                <span className={`text-sm font-bold ${cfg.label}`}>Fix Quotation Total (inc. VAT)</span>
+                <span className={`font-bold tabular-nums tracking-tight text-2xl ${cfg.total}`}>{fmt(grandTotal)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <span className={`text-sm font-bold ${cfg.label}`}>Fix Quotation Total</span>
+                {selectedAddons.length > 0 && (
+                  <span className="text-[11px] text-slate-400 ml-2 tabular-nums">
+                    {fmt(mandatoryTotal)} + {fmt(selectedAddonsTotal)} add-on{selectedAddons.length > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              <span className={`font-bold tabular-nums tracking-tight text-2xl ${cfg.total}`}>
+                {fmt(fixQuotationTotal)}
+              </span>
             </div>
-            <span className={`font-bold tabular-nums tracking-tight text-2xl ${cfg.total}`}>
-              {fmt(fixQuotationTotal)}
-            </span>
-          </div>
+          )}
           {(unselectedAddons.length > 0 || (editing && addonItems.length > 0)) && (
             <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
               <div>
@@ -1550,6 +1648,21 @@ function FixQuotationBlock({
               <span className="text-base font-bold text-slate-700 tabular-nums tracking-tight">
                 {fmt(unselectedAddonsTotal)}
               </span>
+            </div>
+          )}
+          {onToggleVat && (
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={onToggleVat}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
+                  vatEnabled
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600'
+                }`}
+              >
+                VAT 20%
+              </button>
             </div>
           )}
         </div>
