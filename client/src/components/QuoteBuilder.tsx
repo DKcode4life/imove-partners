@@ -691,8 +691,25 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
    */
   async function ensureQuote(quote_type: 'estimate' | 'fixed'): Promise<number | null> {
     if (!jobId) return null;
-    if (quote_type === 'estimate' && existingDocs.estimateQuoteId) return existingDocs.estimateQuoteId;
-    if (quote_type === 'fixed' && existingDocs.fixedQuoteId) return existingDocs.fixedQuoteId;
+
+    const subtotal   = quote_type === 'estimate' ? estimateTotal : fixQuotationTotal;
+    const vatEnabled = quote_type === 'estimate' ? committed.estimateVatEnabled : committed.fixedVatEnabled;
+    const taxAmount  = vatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
+    const total      = subtotal + taxAmount;
+
+    // If quote already exists: update its financial fields so the PDF always
+    // reflects the current VAT setting, then return the existing ID.
+    const existingId = quote_type === 'estimate' ? existingDocs.estimateQuoteId : existingDocs.fixedQuoteId;
+    if (existingId) {
+      await api.patch(`/crm/jobs/${jobId}/quotes/${existingId}/financials`, {
+        subtotal,
+        tax_rate:   vatEnabled ? 20 : 0,
+        tax_amount: taxAmount,
+        total,
+        deposit: quote_type === 'fixed' ? depositAmount : undefined,
+      });
+      return existingId;
+    }
 
     const items = quote_type === 'estimate'
       ? committed.estimateItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price }))
@@ -700,11 +717,6 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
           ...committed.quotationItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
           ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: `${a.description} (add-on)`, quantity: 1, unit_price: a.price, total: a.price })),
         ];
-
-    const subtotal = quote_type === 'estimate' ? estimateTotal : fixQuotationTotal;
-    const vatEnabled = quote_type === 'estimate' ? committed.estimateVatEnabled : committed.fixedVatEnabled;
-    const taxAmount = vatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
-    const total = subtotal + taxAmount;
 
     const res = await api.post(`/crm/jobs/${jobId}/quotes`, {
       quote_type,

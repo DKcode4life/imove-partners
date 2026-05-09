@@ -127,8 +127,47 @@ router.post('/jobs/:id/quotes', wrap(async (req, res) => {
 }));
 
 /**
+ * PATCH /api/crm/jobs/:id/quotes/:quoteId/financials
+ *
+ * Update only the financial fields (subtotal, tax_rate, tax_amount, total,
+ * deposit) of an existing quote without changing its quote_number or items.
+ * Called by the client whenever VAT settings change and the quote already
+ * exists, so the PDF is always generated with up-to-date amounts.
+ */
+router.patch('/jobs/:id/quotes/:quoteId/financials', wrap(async (req, res) => {
+  const jobId   = parseInt(req.params.id);
+  const quoteId = parseInt(req.params.quoteId);
+  if (isNaN(jobId) || isNaN(quoteId)) {
+    return res.status(400).json({ error: 'Invalid job ID or quote ID' });
+  }
+
+  const { subtotal, tax_rate, tax_amount, total, deposit } = req.body;
+
+  try {
+    const quote = await prisma.quote.findFirst({ where: { id: quoteId, job_id: jobId } });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    const updated = await prisma.quote.update({
+      where: { id: quoteId },
+      data: {
+        subtotal:   subtotal   != null ? parseFloat(subtotal)   : quote.subtotal,
+        tax_rate:   tax_rate   != null ? parseFloat(tax_rate)   : quote.tax_rate,
+        tax_amount: tax_amount != null ? parseFloat(tax_amount) : quote.tax_amount,
+        total:      total      != null ? parseFloat(total)      : quote.total,
+        deposit:    deposit    != null ? parseFloat(deposit)    : quote.deposit,
+      },
+    });
+
+    res.json({ ok: true, id: updated.id, total: updated.total });
+  } catch (error) {
+    console.error('[Quote] Error updating quote financials:', error);
+    res.status(500).json({ error: 'Failed to update quote' });
+  }
+}));
+
+/**
  * GET /api/crm/jobs/:id/quotes/:quoteId/pdf
- * 
+ *
  * Generate PDF for a quote
  */
 router.get('/jobs/:id/quotes/:quoteId/pdf', wrap(async (req, res) => {
