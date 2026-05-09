@@ -1,2 +1,2 @@
 [phases.build]
-cmds = ["npm run build && rm -rf client/node_modules"]
+cmds = ["npm run build && rm -rf client/node_modules && npm prune --production"]

@@ -403,15 +403,18 @@ async function main() {
   console.log(`\n✅ Re-seeded ${templates.length} email templates.\n`);
 
   // ── Inventory catalog ─────────────────────────────────────────────────────
-  // Always upsert so the server's catalog stays in sync with the codebase.
-  // Any changes committed to server/data/default-catalog.js are reflected
-  // on the next startup/deploy without needing a manual DB update.
-  await prisma.companySetting.upsert({
-    where:  { key: 'inventory-catalog' },
-    update: { value: JSON.stringify(DEFAULT_CATALOG) },
-    create: { key: 'inventory-catalog', value: JSON.stringify(DEFAULT_CATALOG) },
-  });
-  console.log('✅ Inventory catalog synced to database.\n');
+  // Only seed the default catalog when no catalog exists yet. If one already
+  // exists (with custom icons/order set via the admin UI), leave it untouched
+  // so admin customizations survive deploys.
+  const existingCatalog = await prisma.companySetting.findUnique({ where: { key: 'inventory-catalog' } });
+  if (!existingCatalog) {
+    await prisma.companySetting.create({
+      data: { key: 'inventory-catalog', value: JSON.stringify(DEFAULT_CATALOG) },
+    });
+    console.log('✅ Inventory catalog seeded (first install).\n');
+  } else {
+    console.log('ℹ️  Inventory catalog already exists — preserving admin customizations.\n');
+  }
 }
 
 main()
