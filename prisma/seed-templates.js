@@ -9,6 +9,8 @@
  *     npm run seed:templates
  */
 
+const fs = require('fs');
+const path = require('path');
 const { PrismaClient } = require('@prisma/client');
 const { DEFAULT_CATALOG } = require('../server/data/default-catalog');
 const prisma = new PrismaClient();
@@ -403,17 +405,36 @@ async function main() {
   console.log(`\n✅ Re-seeded ${templates.length} email templates.\n`);
 
   // ── Inventory catalog ─────────────────────────────────────────────────────
-  // Only seed the default catalog when no catalog exists yet. If one already
-  // exists (with custom icons/order set via the admin UI), leave it untouched
-  // so admin customizations survive deploys.
+  // Three-tier behaviour:
+  //   1. If prisma/catalog-snapshot.json exists AND we haven't restored it yet,
+  //      overwrite the DB catalog from the snapshot (one-time recovery path
+  //      for prod after the bad seed wiped admin customizations). A marker row
+  //      is written so this only runs once per snapshot version.
+  //   2. Else if no catalog row exists, seed from the built-in DEFAULT_CATALOG.
+  //   3. Else leave the existing catalog alone so admin edits persist.
+  const SNAPSHOT_PATH   = path.join(__dirname, 'catalog-snapshot.json');
+  const RESTORE_MARKER  = 'catalog-snapshot-restored-v1';
   const existingCatalog = await prisma.companySetting.findUnique({ where: { key: 'inventory-catalog' } });
-  if (!existingCatalog) {
+  const restoreMarker   = await prisma.companySetting.findUnique({ where: { key: RESTORE_MARKER } });
+
+  if (fs.existsSync(SNAPSHOT_PATH) && !restoreMarker) {
+    const snapshot = fs.readFileSync(SNAPSHOT_PATH, 'utf8');
+    await prisma.companySetting.upsert({
+      where:  { key: 'inventory-catalog' },
+      update: { value: snapshot },
+      create: { key: 'inventory-catalog', value: snapshot },
+    });
+    await prisma.companySetting.create({
+      data: { key: RESTORE_MARKER, value: new Date().toISOString() },
+    });
+    console.log(`✅ Inventory catalog restored from snapshot (${(snapshot.length / 1024).toFixed(1)} KB).\n`);
+  } else if (!existingCatalog) {
     await prisma.companySetting.create({
       data: { key: 'inventory-catalog', value: JSON.stringify(DEFAULT_CATALOG) },
     });
     console.log('✅ Inventory catalog seeded (first install).\n');
   } else {
-    console.log('ℹ️  Inventory catalog already exists — preserving admin customizations.\n');
+    console.log('ℹ️  Inventory catalog preserved — admin customizations intact.\n');
   }
 }
 
