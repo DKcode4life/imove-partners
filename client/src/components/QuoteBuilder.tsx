@@ -697,8 +697,17 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     const taxAmount  = vatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
     const total      = subtotal + taxAmount;
 
-    // If quote already exists: update its financial fields so the PDF always
-    // reflects the current VAT setting, then return the existing ID.
+    const items = quote_type === 'estimate'
+      ? committed.estimateItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price }))
+      : [
+          ...committed.quotationItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price, is_optional: false })),
+          ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: a.description, quantity: 1, unit_price: a.price, total: a.price, is_optional: false })),
+          ...committed.quotationAddons.filter(a => !a.selected).map(a => ({ description: a.description, quantity: 1, unit_price: a.price, total: a.price, is_optional: true })),
+        ];
+
+    // If quote already exists: update its financial fields AND replace its
+    // items so the PDF reflects the current VAT setting and the latest
+    // mandatory/selected/optional addon mix.
     const existingId = quote_type === 'estimate' ? existingDocs.estimateQuoteId : existingDocs.fixedQuoteId;
     if (existingId) {
       await api.patch(`/crm/jobs/${jobId}/quotes/${existingId}/financials`, {
@@ -707,16 +716,10 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         tax_amount: taxAmount,
         total,
         deposit: quote_type === 'fixed' ? depositAmount : undefined,
+        items,
       });
       return existingId;
     }
-
-    const items = quote_type === 'estimate'
-      ? committed.estimateItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price }))
-      : [
-          ...committed.quotationItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
-          ...committed.quotationAddons.filter(a => a.selected).map(a => ({ description: `${a.description} (add-on)`, quantity: 1, unit_price: a.price, total: a.price })),
-        ];
 
     const res = await api.post(`/crm/jobs/${jobId}/quotes`, {
       quote_type,

@@ -292,13 +292,14 @@ model Quote {
 }
 
 model QuoteItem {
-  id          Int    @id @default(autoincrement())
+  id          Int     @id @default(autoincrement())
   quote_id    Int
   description String
-  quantity    Float  @default(1)
-  unit_price  Float  @default(0)
-  total       Float  @default(0)
-  sort_order  Int    @default(0)
+  quantity    Float   @default(1)
+  unit_price  Float   @default(0)
+  total       Float   @default(0)
+  sort_order  Int     @default(0)
+  is_optional Boolean @default(false)
 
   quote Quote @relation(fields: [quote_id], references: [id], onDelete: Cascade)
 

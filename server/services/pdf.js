@@ -287,6 +287,45 @@ function drawServicesTable(doc, y, title, items, subtotal, taxRate, taxAmount, t
   return y + 14;
 }
 
+// Optional services table — items only, no subtotal/VAT/total rows.
+// When `vatIncluded` is true, each item price is grossed up to include VAT
+// and the amount column is labelled "Amount (inc VAT)".
+function drawOptionalServicesTable(doc, y, items, vatRate, vatIncluded) {
+  if (y > 640) {
+    doc.addPage();
+    drawWatermark(doc);
+    y = 50;
+  }
+
+  const HEADER_H = 26;
+  const ROW_H    = 22;
+  const amountX  = LEFT + CONTENT_W - 160;
+  const amountW  = 150;
+  const rate     = Number(vatRate) || 0;
+  const factor   = vatIncluded ? 1 + rate / 100 : 1;
+
+  // Header bar
+  doc.fillColor(C.dark).rect(LEFT, y, CONTENT_W, HEADER_H).fill();
+  doc.fillColor(C.white).font(F.bold).fontSize(11)
+     .text('Optional Services', LEFT + 12, y + 8)
+     .text(vatIncluded ? 'Amount (inc VAT)' : 'Amount', amountX, y + 8, { width: amountW, align: 'right' });
+  y += HEADER_H;
+
+  items.forEach((item, i) => {
+    const bg = i % 2 === 0 ? C.white : C.lightBg;
+    doc.fillColor(bg).rect(LEFT, y, CONTENT_W, ROW_H).fill();
+
+    doc.fillColor(C.dark).font(F.regular).fontSize(10)
+       .text(item.description || '', LEFT + 12, y + 6, { width: amountX - LEFT - 20 });
+
+    const displayAmount = (Number(item.total) || 0) * factor;
+    doc.fillColor(C.dark).text(fmtMoney(displayAmount), amountX, y + 6, { width: amountW, align: 'right' });
+    y += ROW_H;
+  });
+
+  return y + 14;
+}
+
 function drawDepositAdjustment(doc, y, depositPaid, total, balance) {
   const amountX = LEFT + CONTENT_W - 160;
   const amountW = 150;
@@ -520,13 +559,13 @@ async function renderDocument(data) {
     );
 
     // Optional Services (quotes only, if we have any optional items)
+    // Show items with prices only — no subtotal/VAT/total rows. If the main
+    // quote has VAT applied, gross up each optional price so the customer
+    // sees the inc-VAT amount they'd pay.
     const optItems = data.optional_items || [];
     if (optItems.length > 0 && config.docType === 'quote') {
-      const optSubtotal = optItems.reduce((s, i) => s + (Number(i.total) || 0), 0);
-      const optTaxRate = data.tax_rate || 20;
-      const optTax = optSubtotal * optTaxRate / 100;
-      const optTotal = optSubtotal + optTax;
-      y = drawServicesTable(doc, y, 'Optional Services', optItems, optSubtotal, optTaxRate, optTax, optTotal);
+      const vatIncluded = Number(data.tax_amount) > 0;
+      y = drawOptionalServicesTable(doc, y, optItems, data.tax_rate || 20, vatIncluded);
     }
 
     // Deposit deduction (main-invoice with prior deposit)
