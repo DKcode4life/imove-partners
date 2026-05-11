@@ -5,8 +5,10 @@ import {
   AlertCircle, CheckCircle, Eye, EyeOff, KeyRound,
   Phone, Mail, CreditCard, StickyNote, MapPin,
   Package, ChevronDown, ChevronRight, RotateCcw, List, LayoutGrid,
+  BarChart3,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
+import AnalyticsTab from './settings/AnalyticsTab';
 import Modal from '../../components/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../lib/api';
@@ -2525,6 +2527,7 @@ const TABS = [
   { label: 'Contracts',        icon: <FileText className="w-4 h-4" /> },
   { label: 'Inventory',        icon: <Package className="w-4 h-4" /> },
   { label: 'Email Templates',  icon: <Mail className="w-4 h-4" /> },
+  { label: 'Analytics',        icon: <BarChart3 className="w-4 h-4" /> },
 ];
 
 export default function CRMSettings() {
@@ -2567,6 +2570,7 @@ export default function CRMSettings() {
       {activeTab === 4 && <ContractsTab showToast={showToast} />}
       {activeTab === 5 && <InventoryTab />}
       {activeTab === 6 && <EmailTemplatesTab showToast={showToast} />}
+      {activeTab === 7 && <AnalyticsTab showToast={showToast} />}
 
       {/* Toast */}
       {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}

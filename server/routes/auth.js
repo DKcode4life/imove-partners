@@ -46,6 +46,17 @@ router.post('/login', wrap(async (req, res) => {
 
   const payload = buildSessionPayload(user, partner);
 
+  // Log login event for analytics
+  prisma.partnerActivityLog.create({
+    data: {
+      user_id:    user.id,
+      partner_id: partner?.id ?? null,
+      event_type: 'login',
+      ip_address: req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || null,
+      user_agent: req.headers['user-agent'] || null,
+    },
+  }).catch(() => {});
+
   const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' });
   res.json({ token, user: payload });
 }));

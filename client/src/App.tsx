@@ -5,6 +5,7 @@ import { getSurface } from './lib/surface';
 
 import Login from './pages/Login';
 import AuthHandoff from './pages/AuthHandoff';
+import PartnerActivityTracker from './components/PartnerActivityTracker';
 
 // Partner pages
 import PartnerDashboard from './pages/partner/Dashboard';
@@ -46,12 +47,14 @@ export default function App() {
           {/* Partner routes */}
           {showPartnerPortal && (
             <Route element={<ProtectedRoute role="partner" />}>
-              <Route path="/partner/dashboard" element={<PartnerDashboard />} />
-              <Route path="/partner/leads" element={<PartnerLeads />} />
-              <Route path="/partner/leads/new" element={<PartnerSubmitLead />} />
-              <Route path="/partner/leads/:id" element={<PartnerLeadDetail />} />
-              <Route path="/partner/commissions" element={<PartnerCommissions />} />
-              <Route path="/partner/settings" element={<PartnerSettings />} />
+              <Route element={<PartnerActivityTracker />}>
+                <Route path="/partner/dashboard" element={<PartnerDashboard />} />
+                <Route path="/partner/leads" element={<PartnerLeads />} />
+                <Route path="/partner/leads/new" element={<PartnerSubmitLead />} />
+                <Route path="/partner/leads/:id" element={<PartnerLeadDetail />} />
+                <Route path="/partner/commissions" element={<PartnerCommissions />} />
+                <Route path="/partner/settings" element={<PartnerSettings />} />
+              </Route>
             </Route>
           )}
 

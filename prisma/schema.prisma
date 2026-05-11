@@ -607,6 +607,24 @@ model JobChangeLog {
   @@map("job_change_logs")
 }
 
+// Partner Portal usage tracking (logins, page views, etc.)
+model PartnerActivityLog {
+  id          Int      @id @default(autoincrement())
+  user_id     Int
+  partner_id  Int?
+  event_type  String   // "login" | "logout" | "page_view"
+  path        String?
+  ip_address  String?
+  user_agent  String?
+  created_at  DateTime @default(now())
+
+  @@index([user_id])
+  @@index([partner_id])
+  @@index([event_type])
+  @@index([created_at])
+  @@map("partner_activity_logs")
+}
+
 // API Keys for external integrations (AI assistants, third-party systems)
 model ApiKey {
   id          Int       @id @default(autoincrement())
