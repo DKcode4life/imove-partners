@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
+import { Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getSurface, surfaceUrl } from '../lib/surface';
 import { defaultLandingFor } from '../lib/landing';
 
 const SURFACE_COPY = {
-  partners: { title: 'Partner Portal', subtitle: 'Sign in to your partner account' },
+  partners: { title: 'iMove Partners Portal', subtitle: 'Sign in to your partner account' },
   crm: { title: 'iMove CRM', subtitle: 'Sign in to manage operations' },
-  unknown: { title: 'Partner Portal', subtitle: 'Sign in to your account' },
+  unknown: { title: 'iMove Partners Portal', subtitle: 'Sign in to your account' },
 } as const;
 
 export default function Login() {
@@ -66,13 +66,8 @@ export default function Login() {
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           {/* Logo */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-sm">
-              <Building2 className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900 leading-none">iMove</h1>
-              <p className="text-xs text-slate-400 leading-none mt-0.5">{copy.title}</p>
-            </div>
+            <img src="/logo.png" alt="iMove" className="h-12 w-auto object-contain flex-shrink-0" />
+            <h1 className="text-xl font-bold text-slate-900 leading-tight">{copy.title}</h1>
           </div>
 
           <div className="mb-6">

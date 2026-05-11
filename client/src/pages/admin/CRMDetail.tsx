@@ -4,6 +4,7 @@ import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
   Navigation, MapPin, FileText, ChevronDown, Calendar, Phone, Mail,
+  Paperclip, Download,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -439,6 +440,10 @@ export default function CRMDetailPage() {
   const [editingAdminNoteText, setEditingAdminNoteText] = useState('');
   const [savingAdminNoteId,    setSavingAdminNoteId]    = useState<number | null>(null);
   const [deletingAdminNoteId,  setDeletingAdminNoteId]  = useState<number | null>(null);
+  const [attachments,      setAttachments]      = useState<any[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [deletingAttachId, setDeletingAttachId] = useState<number | null>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const [toast,           setToast]          = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pipelineSaving,  setPipelineSaving]  = useState<number | null>(null);
   const [leadSources,     setLeadSources]     = useState<string[]>([]);
@@ -566,6 +571,9 @@ export default function CRMDetailPage() {
       .finally(() => setLoading(false));
     api.get(`/planner/assignments?job_id=${id}`)
       .then(r => setPlannerAssignments(r.data))
+      .catch(() => {});
+    api.get(`/crm/jobs/${id}/attachments`)
+      .then(r => setAttachments(r.data))
       .catch(() => {});
   }, [id, navigate, populate]);
 
@@ -770,6 +778,57 @@ export default function CRMDetailPage() {
       setActivities(res.data);
     } catch { showToast('Failed to delete note', 'error'); }
     finally { setDeletingAdminNoteId(null); }
+  };
+
+  // ── Attachments ───────────────────────────────────────────────────────────────
+
+  const handleAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setUploadingAttachment(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await api.post(`/crm/jobs/${id}/attachments`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setAttachments(prev => [res.data, ...prev]);
+      showToast('File attached');
+    } catch {
+      showToast('Failed to attach file', 'error');
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleDownloadAttachment = async (doc: any) => {
+    try {
+      const res = await api.get(`/crm/jobs/${id}/attachments/${doc.id}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast('Failed to download file', 'error');
+    }
+  };
+
+  const handleDeleteAttachment = async (docId: number) => {
+    setDeletingAttachId(docId);
+    try {
+      await api.delete(`/crm/jobs/${id}/attachments/${docId}`);
+      setAttachments(prev => prev.filter(a => a.id !== docId));
+      showToast('Attachment removed');
+    } catch {
+      showToast('Failed to remove attachment', 'error');
+    } finally {
+      setDeletingAttachId(null);
+    }
   };
 
   // ── Send survey confirmation email ────────────────────────────────────────────
@@ -1480,6 +1539,70 @@ export default function CRMDetailPage() {
                     <ReadF label="Storage"      value={storageReq     ? 'Yes' : 'No'} />
                   </div>
                 </>
+              )}
+            </div>
+
+            {/* Attachments */}
+            <div className="border-t border-slate-100 pt-4 mt-1">
+              <div className="flex items-center justify-between mb-2">
+                <label className="label mb-0 flex items-center gap-1.5">
+                  <Paperclip className="w-3.5 h-3.5 text-slate-400" /> Attachments
+                </label>
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={uploadingAttachment}
+                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1 disabled:opacity-50"
+                >
+                  {uploadingAttachment
+                    ? <><span className="w-3.5 h-3.5 border border-brand-500 border-t-transparent rounded-full animate-spin inline-block" /> Uploading…</>
+                    : <><PlusCircle className="w-3.5 h-3.5" /> Attach</>}
+                </button>
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                  onChange={handleAttachFile}
+                />
+              </div>
+
+              {attachments.length > 0 ? (
+                <div className="space-y-1.5">
+                  {attachments.map(doc => (
+                    <div key={doc.id} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                      <Paperclip className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-800 truncate font-medium">{doc.name}</p>
+                        <p className="text-xs text-slate-400">
+                          {new Date(doc.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {doc.size_bytes ? ` · ${(doc.size_bytes / 1024).toFixed(0)} KB` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAttachment(doc)}
+                        className="p-1 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0"
+                        title="Download"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAttachment(doc.id)}
+                        disabled={deletingAttachId === doc.id}
+                        className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors flex-shrink-0"
+                        title="Remove"
+                      >
+                        {deletingAttachId === doc.id
+                          ? <span className="w-3.5 h-3.5 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" />
+                          : <X className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">No attachments yet.</p>
               )}
             </div>
           </Section>

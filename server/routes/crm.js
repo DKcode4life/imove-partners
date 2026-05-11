@@ -1,8 +1,11 @@
 const express = require('express');
+const multer  = require('multer');
+const path    = require('path');
 const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { send: sendEmail } = require('../services/email');
+const storage = require('../services/storage');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -813,6 +816,81 @@ router.post('/jobs/:id/send-survey-email', wrap(async (req, res) => {
   }
 
   res.json({ ok: true });
+}));
+
+// ── Attachments ───────────────────────────────────────────────────────────────
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+});
+
+// GET /api/crm/jobs/:id/attachments
+router.get('/jobs/:id/attachments', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const docs = await prisma.document.findMany({
+    where: { job_id: id, type: 'attachment' },
+    orderBy: { created_at: 'desc' },
+  });
+  res.json(docs);
+}));
+
+// POST /api/crm/jobs/:id/attachments
+router.post('/jobs/:id/attachments', upload.single('file'), wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+  const job = await prisma.crmJob.findUnique({ where: { id }, select: { id: true } });
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const ext        = path.extname(req.file.originalname);
+  const safeName   = req.file.originalname.replace(/[^a-zA-Z0-9._\- ]/g, '_');
+  const storageKey = `jobs/${id}/${Date.now()}-${safeName}`;
+
+  await storage.save(storageKey, req.file.buffer, req.file.mimetype);
+
+  const doc = await prisma.document.create({
+    data: {
+      job_id:      id,
+      name:        req.file.originalname,
+      type:        'attachment',
+      storage_key: storageKey,
+      mime_type:   req.file.mimetype,
+      size_bytes:  req.file.size,
+    },
+  });
+
+  res.json(doc);
+}));
+
+// DELETE /api/crm/jobs/:id/attachments/:docId
+router.delete('/jobs/:id/attachments/:docId', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id, 10);
+  const docId = parseInt(req.params.docId, 10);
+
+  const doc = await prisma.document.findFirst({ where: { id: docId, job_id: jobId, type: 'attachment' } });
+  if (!doc) return res.status(404).json({ error: 'Attachment not found' });
+
+  await storage.remove(doc.storage_key).catch(() => {});
+  await prisma.document.delete({ where: { id: docId } });
+
+  res.json({ ok: true });
+}));
+
+// GET /api/crm/jobs/:id/attachments/:docId/download
+router.get('/jobs/:id/attachments/:docId/download', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id, 10);
+  const docId = parseInt(req.params.docId, 10);
+
+  const doc = await prisma.document.findFirst({ where: { id: docId, job_id: jobId, type: 'attachment' } });
+  if (!doc) return res.status(404).json({ error: 'Attachment not found' });
+
+  const buffer = await storage.get(doc.storage_key);
+  if (!buffer) return res.status(404).json({ error: 'File not found in storage' });
+
+  res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${doc.name}"`);
+  res.send(buffer);
 }));
 
 // GET /api/crm/jobs/:id/survey
