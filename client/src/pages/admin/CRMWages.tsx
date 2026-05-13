@@ -170,6 +170,20 @@ export default function CRMWages() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staff, edits]);
 
+  // Per-day wages spend (sum of every staff member's rate × count for that day)
+  const dailyTotals = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const d of dates) {
+      let sum = 0;
+      for (const s of staff) {
+        const cell = s.days[d];
+        if (cell) sum += (Number(cell.rate) || 0) * (Number(cell.count) || 1);
+      }
+      t[d] = sum;
+    }
+    return t;
+  }, [dates, staff]);
+
   return (
     <CRMLayout>
       <div className="space-y-6">
@@ -236,10 +250,17 @@ export default function CRMWages() {
                     <th className="text-left px-4 py-2 font-semibold text-slate-600 whitespace-nowrap">Staff</th>
                     {dates.map(d => {
                       const lbl = fmtDayLabel(d);
+                      const dayTotal = dailyTotals[d] || 0;
                       return (
                         <th key={d} className="text-center px-2 py-2 font-semibold text-slate-600 whitespace-nowrap">
                           <div className="text-[11px] uppercase tracking-wider text-slate-500">{lbl.day}</div>
                           <div className="text-xs font-normal text-slate-400">{lbl.date}</div>
+                          <div
+                            className={`text-[10px] font-semibold tabular-nums mt-0.5 ${dayTotal > 0 ? 'text-emerald-700' : 'text-slate-300'}`}
+                            title="Wages spend for this day"
+                          >
+                            {fmtMoney(dayTotal)}
+                          </div>
                         </th>
                       );
                     })}

@@ -121,6 +121,7 @@ function MobileAssignZone({
   assignments,
   availableAssets,
   vehicleAssignments,
+  pickedVehicleIds,
   onAdd,
   onRemove,
   onUpdateRate,
@@ -131,10 +132,11 @@ function MobileAssignZone({
   assignments: PlannerAssignment[];
   availableAssets: PlannerAsset[];
   vehicleAssignments?: PlannerAssignment[];
+  pickedVehicleIds?: Set<number>;
   onAdd: (assetId: number) => void;
   onRemove: (id: number) => void;
   onUpdateRate?: (id: number, rate: number) => void;
-  onUpdateVehicle?: (id: number, vid: number | null) => void;
+  onUpdateVehicle?: (id: number, vid: number | null, rateOverride?: number) => void;
 }) {
   const [selectedId, setSelectedId] = useState('');
   const isVehicle = !onUpdateRate;
@@ -145,22 +147,54 @@ function MobileAssignZone({
         {label}
       </p>
       <div className="space-y-1 mb-2">
-        {assignments.map(a => (
+        {assignments.map(a => {
+          const unassignedVehicle = isVehicle && pickedVehicleIds && !pickedVehicleIds.has(a.asset_id);
+          return (
           <div
             key={a.id}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${colorClass.bg} ${colorClass.border}`}
+            title={unassignedVehicle ? 'Not allocated to a driver' : undefined}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${
+              unassignedVehicle
+                ? 'bg-red-50 border-red-200/70 text-red-600/80'
+                : `${colorClass.bg} ${colorClass.border}`
+            }`}
           >
             {!isVehicle ? <Users className="w-3 h-3 flex-shrink-0 opacity-60" /> : <Truck className="w-3 h-3 flex-shrink-0 opacity-60" />}
             <span className={`font-semibold flex-1 min-w-0 truncate ${colorClass.text}`}>{a.asset_name}</span>
 
             {/* Daily rate (staff only) */}
-            {onUpdateRate && <MobileRateInput a={a} onUpdateRate={onUpdateRate} />}
+            {onUpdateRate && (
+              <span className="flex items-center gap-0.5 flex-shrink-0">
+                <MobileRateInput a={a} onUpdateRate={onUpdateRate} />
+                {a.daily_rate !== 0 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onUpdateRate(a.id, 0); }}
+                    title="Set wage to £0"
+                    className="inline-flex items-center justify-center w-4 h-4 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </span>
+            )}
 
             {/* Vehicle picker (drivers only) */}
             {onUpdateVehicle && vehicleAssignments && vehicleAssignments.length > 0 && (
               <select
                 value={a.vehicle_asset_id != null ? String(a.vehicle_asset_id) : ''}
-                onChange={e => { e.stopPropagation(); onUpdateVehicle(a.id, e.target.value ? Number(e.target.value) : null); }}
+                onChange={e => {
+                  e.stopPropagation();
+                  const vid = e.target.value ? Number(e.target.value) : null;
+                  const v = vid != null ? vehicleAssignments.find(x => x.asset_id === vid) : null;
+                  // Lorry bonus: +£30 on top of the £150 driver default. Only auto-adjust
+                  // when the current rate is a default (null/150/180).
+                  const cur = a.daily_rate;
+                  const isDefaultRate = cur == null || cur === 150 || cur === 180;
+                  const rateOverride = isDefaultRate
+                    ? (v && /lorry/i.test(v.asset_name) ? 180 : 150)
+                    : undefined;
+                  onUpdateVehicle(a.id, vid, rateOverride);
+                }}
                 onClick={e => e.stopPropagation()}
                 className="flex-shrink-0 text-[10px] border border-slate-200 rounded bg-white text-slate-600 py-0.5 px-1 max-w-[76px]"
               >
@@ -178,7 +212,8 @@ function MobileAssignZone({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {availableAssets.length > 0 && (
@@ -622,12 +657,13 @@ function AssetPanel({
 // ── Assignment chip ───────────────────────────────────────────────────────────
 
 function AssignmentChip({
-  a, onRemove, onDragStart, onDragEnd,
+  a, onRemove, onDragStart, onDragEnd, unassigned,
 }: {
   a: PlannerAssignment;
   onRemove: () => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  unassigned?: boolean;
 }) {
   return (
     <span
@@ -637,11 +673,14 @@ function AssignmentChip({
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
       onDragEnd={onDragEnd}
+      title={unassigned ? 'Not allocated to a driver' : undefined}
       className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold transition-all duration-150 select-none border shadow-sm ${
         onDragStart ? 'cursor-grab active:cursor-grabbing active:scale-95 hover:shadow-md hover:-translate-y-px' : ''
       } ${
         a.asset_type === 'staff'
           ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 border-indigo-200/70'
+          : unassigned
+          ? 'bg-gradient-to-br from-red-50 to-red-100/70 text-red-600/80 border-red-200/70'
           : 'bg-gradient-to-br from-teal-50 to-teal-100 text-teal-700 border-teal-200/70'
       }`}
     >
@@ -674,7 +713,7 @@ function StaffAssignmentRow({
   vehicleAssignments: PlannerAssignment[];
   onRemove: () => void;
   onUpdateRate: (rate: number) => void;
-  onUpdateVehicle: (vehicleAssetId: number | null) => void;
+  onUpdateVehicle: (vehicleAssetId: number | null, rateOverride?: number) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }) {
@@ -717,21 +756,43 @@ function StaffAssignmentRow({
           <span className="text-[10px] text-slate-400">/day</span>
         </span>
       ) : (
-        <button
-          onClick={e => { e.stopPropagation(); setRateInput(String(a.daily_rate ?? '')); setEditingRate(true); }}
-          title="Click to edit daily rate"
-          className="flex items-center gap-0.5 flex-shrink-0 text-[10px] font-semibold bg-white border border-indigo-200/60 shadow-sm rounded-md px-1.5 py-0.5 text-slate-700 hover:border-indigo-400 hover:text-indigo-700 hover:shadow transition-all tabular-nums"
-        >
-          {a.daily_rate != null ? `£${a.daily_rate}/day` : <span className="text-slate-400 italic font-normal">+rate</span>}
-          <Edit2 className="w-2.5 h-2.5 opacity-40 ml-0.5" />
-        </button>
+        <span className="flex items-center gap-0.5 flex-shrink-0">
+          <button
+            onClick={e => { e.stopPropagation(); setRateInput(String(a.daily_rate ?? '')); setEditingRate(true); }}
+            title="Click to edit daily rate"
+            className="text-[10px] font-semibold bg-white border border-indigo-200/60 shadow-sm rounded-md px-1.5 py-0.5 text-slate-700 hover:border-indigo-400 hover:text-indigo-700 hover:shadow transition-all tabular-nums"
+          >
+            {a.daily_rate != null ? `£${a.daily_rate}/day` : <span className="text-slate-400 italic font-normal">+rate</span>}
+          </button>
+          {a.daily_rate !== 0 && (
+            <button
+              onClick={e => { e.stopPropagation(); onUpdateRate(0); }}
+              title="Set wage to £0"
+              className="inline-flex items-center justify-center w-4 h-4 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </span>
       )}
 
       {/* Vehicle dropdown for drivers */}
       {isDriver && vehicleAssignments.length > 0 && (
         <select
           value={a.vehicle_asset_id != null ? String(a.vehicle_asset_id) : ''}
-          onChange={e => { e.stopPropagation(); onUpdateVehicle(e.target.value ? Number(e.target.value) : null); }}
+          onChange={e => {
+            e.stopPropagation();
+            const vid = e.target.value ? Number(e.target.value) : null;
+            const v = vid != null ? vehicleAssignments.find(x => x.asset_id === vid) : null;
+            // Lorry bonus: +£30 on top of the £150 driver default. Only auto-adjust
+            // when the current rate is a default (null/150/180); custom edits are preserved.
+            const cur = a.daily_rate;
+            const isDefaultRate = cur == null || cur === 150 || cur === 180;
+            const rateOverride = isDefaultRate
+              ? (v && /lorry/i.test(v.asset_name) ? 180 : 150)
+              : undefined;
+            onUpdateVehicle(vid, rateOverride);
+          }}
           onClick={e => e.stopPropagation()}
           className="flex-shrink-0 text-[10px] border border-slate-200 rounded bg-white text-slate-600 py-0.5 px-1 max-w-[76px] hover:border-indigo-300 focus:outline-none focus:border-indigo-300"
         >
@@ -814,6 +875,12 @@ function JobCard({
   const vehicleAssignments = (item.assignments || []).filter(a => a.asset_type === 'vehicle');
   const driverAssignments  = staffAssignments.filter(a => (a.assigned_role ?? a.asset_role) === 'driver');
   const porterAssignments  = staffAssignments.filter(a => (a.assigned_role ?? a.asset_role) !== 'driver');
+  // Vehicles picked up by a driver — anything else gets the "unassigned" treatment.
+  const pickedVehicleIds = new Set<number>(
+    driverAssignments
+      .filter(a => a.vehicle_asset_id != null)
+      .map(a => a.vehicle_asset_id as number)
+  );
 
   return (
     <div
@@ -946,7 +1013,7 @@ function JobCard({
                 onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'driver'); }}
                 onRemove={onRemoveAssignment}
                 onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
-                onUpdateVehicle={(id, vid) => onUpdateAssignment(id, { vehicle_asset_id: vid })}
+                onUpdateVehicle={(id, vid, rateOverride) => onUpdateAssignment(id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
               />
               <MobileAssignZone
                 label="Porters"
@@ -968,6 +1035,7 @@ function JobCard({
                   a.type === 'vehicle' && a.availability === 'available' &&
                   !(item.assignments || []).some(x => x.asset_id === a.id)
                 )}
+                pickedVehicleIds={pickedVehicleIds}
                 onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'vehicle'); }}
                 onRemove={onRemoveAssignment}
               />
@@ -1000,7 +1068,7 @@ function JobCard({
                       vehicleAssignments={vehicleAssignments}
                       onRemove={() => onRemoveAssignment(a.id)}
                       onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
-                      onUpdateVehicle={vid => onUpdateAssignment(a.id, { vehicle_asset_id: vid })}
+                      onUpdateVehicle={(vid, rateOverride) => onUpdateAssignment(a.id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
                       onDragStart={() => onAssignmentDragStart(a)}
                       onDragEnd={onAssignmentDragEnd}
                     />
@@ -1038,7 +1106,7 @@ function JobCard({
                       vehicleAssignments={vehicleAssignments}
                       onRemove={() => onRemoveAssignment(a.id)}
                       onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
-                      onUpdateVehicle={vid => onUpdateAssignment(a.id, { vehicle_asset_id: vid })}
+                      onUpdateVehicle={(vid, rateOverride) => onUpdateAssignment(a.id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
                       onDragStart={() => onAssignmentDragStart(a)}
                       onDragEnd={onAssignmentDragEnd}
                     />
@@ -1075,6 +1143,7 @@ function JobCard({
                       onRemove={() => onRemoveAssignment(a.id)}
                       onDragStart={() => onAssignmentDragStart(a)}
                       onDragEnd={onAssignmentDragEnd}
+                      unassigned={!pickedVehicleIds.has(a.asset_id)}
                     />
                   ))}
                   {vehicleAssignments.length === 0 && dragOverZone !== `${cardKey}|vehicle` && (
@@ -1900,14 +1969,58 @@ export default function CRMPlanner() {
       const isSameTarget =
         (item.source === 'job'   && draggingAssignment.job_id   === item.id) ||
         (item.source === 'event' && draggingAssignment.event_id === item.id);
-      if (isSameTarget) return;
+
+      // Dropped back onto the same job — only meaningful if the role zone changed.
+      if (isSameTarget) {
+        if (zone !== 'driver' && zone !== 'porter') return;
+        const currentRole = draggingAssignment.assigned_role ?? draggingAssignment.asset_role;
+        if (currentRole === zone) return;
+
+        // Default rate for the new role; preserve custom rates (anything other than
+        // a recognised default like null/125/150/180).
+        const cur = draggingAssignment.daily_rate;
+        const isDefaultRate = cur == null || cur === 125 || cur === 150 || cur === 180;
+        const newRate = isDefaultRate ? (zone === 'driver' ? 150 : 125) : cur;
+
+        const patch: Record<string, unknown> = {
+          assigned_role: zone,
+          daily_rate: newRate,
+        };
+        // Porters can't drive — drop any attached vehicle when switching to porter.
+        if (zone === 'porter' && draggingAssignment.vehicle_asset_id != null) {
+          patch.vehicle_asset_id = null;
+        }
+
+        try {
+          await api.patch(`/planner/assignments/${draggingAssignment.id}`, patch);
+          showToast(`${draggingAssignment.asset_name} is now a ${zone}`, 'success');
+          await loadData();
+        } catch {
+          showToast('Failed to change role', 'error');
+        }
+        return;
+      }
 
       try {
+        // Cross-job move: preserve role unless the destination zone is explicitly
+        // a different role (driver↔porter), in which case adopt the new role and
+        // bump the rate to its default when the current rate is one of the defaults.
+        let newRole = draggingAssignment.assigned_role ?? null;
+        let newRate: number | null = draggingAssignment.daily_rate ?? null;
+        if (zone === 'driver' || zone === 'porter') {
+          const currentRole = draggingAssignment.assigned_role ?? draggingAssignment.asset_role;
+          if (currentRole !== zone) {
+            newRole = zone;
+            const isDefaultRate = newRate == null || newRate === 125 || newRate === 150 || newRate === 180;
+            if (isDefaultRate) newRate = zone === 'driver' ? 150 : 125;
+          }
+        }
+
         const payload: Record<string, unknown> = {
           asset_id: draggingAssignment.asset_id,
           assigned_date: assignedDate,
-          assigned_role: draggingAssignment.assigned_role ?? null,
-          daily_rate: draggingAssignment.daily_rate ?? null,
+          assigned_role: newRole,
+          daily_rate: newRate,
         };
         if (item.source === 'job')   payload.job_id   = item.id;
         if (item.source === 'event') payload.event_id = item.id;
