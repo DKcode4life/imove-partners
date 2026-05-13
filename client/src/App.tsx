@@ -26,6 +26,7 @@ import AdminCRMCustomers from './pages/admin/CRMCustomers';
 import AdminCRMCustomerDetail from './pages/admin/CRMCustomerDetail';
 import AdminCRMJobs from './pages/admin/CRMJobs';
 import AdminCRMPlanner from './pages/admin/CRMPlanner';
+import AdminCRMWages from './pages/admin/CRMWages';
 import AdminCRMSettings from './pages/admin/CRMSettings';
 
 export default function App() {
@@ -73,6 +74,7 @@ export default function App() {
                 <Route path="/admin/crm" element={<AdminCRM />} />
                 <Route path="/admin/crm/jobs" element={<AdminCRMJobs />} />
                 <Route path="/admin/crm/planner" element={<AdminCRMPlanner />} />
+                <Route path="/admin/crm/wages" element={<AdminCRMWages />} />
                 <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
                 <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />
                 <Route path="/admin/crm/settings" element={<AdminCRMSettings />} />

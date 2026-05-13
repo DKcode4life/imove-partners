@@ -44,6 +44,7 @@ app.use('/api/crm',       require('./routes/crm-invoices')); // Invoice & receip
 app.use('/api/crm-proxy',  require('./routes/crm-proxy'));   // Proxy to Railway API (avoids CORS)
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/planner',   require('./routes/planner'));
+app.use('/api/wages',     require('./routes/wages'));
 app.use('/api/settings',  require('./routes/settings'));
 app.use('/api/contracts', require('./routes/contracts'));
 app.use('/api/analytics', require('./routes/analytics'));

@@ -219,7 +219,8 @@ model PlannerAsset {
   sort_order     Int      @default(0)
   created_at     DateTime @default(now())
 
-  assignments PlannerAssignment[]
+  assignments  PlannerAssignment[]
+  wage_periods WagePeriod[]
 
   @@map("planner_assets")
 }
@@ -261,6 +262,24 @@ model PlannerAssignment {
   event PlannerEvent? @relation(fields: [event_id], references: [id], onDelete: Cascade)
 
   @@map("planner_assignments")
+}
+
+model WagePeriod {
+  id         Int       @id @default(autoincrement())
+  asset_id   Int
+  week_start String    // YYYY-MM-DD (Monday)
+  expenses   Float     @default(0)
+  advances   Float     @default(0)
+  notes      String?
+  paid       Boolean   @default(false)
+  paid_at    DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+
+  asset PlannerAsset @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  @@unique([asset_id, week_start])
+  @@map("wage_periods")
 }
 
 // ─── New entities ───────────────────────────────────────────────────────────
