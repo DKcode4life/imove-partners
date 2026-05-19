@@ -3,6 +3,27 @@ const router = express.Router();
 const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
+const { syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
+
+/**
+ * If a PlannerEvent is linked to a ContractJob (via ContractJob.planner_event_id),
+ * propagate the new date back to the job and reconcile any draft invoice that
+ * covers the old or new week.
+ */
+async function syncContractJobFromPlannerEvent(eventId, newDate) {
+  if (!eventId || !newDate) return;
+  const job = await prisma.contractJob.findUnique({
+    where: { planner_event_id: eventId },
+    select: { id: true, contract_id: true, job_date: true, invoiced: true },
+  });
+  if (!job) return;
+  if (job.invoiced) return; // job is locked on a finalised invoice — don't shift it
+  if (job.job_date === newDate) return;
+  const oldDate = job.job_date;
+  await prisma.contractJob.update({ where: { id: job.id }, data: { job_date: newDate } });
+  await syncDraftInvoiceForJobDate(job.contract_id, newDate);
+  if (oldDate !== newDate) await syncDraftInvoiceForJobDate(job.contract_id, oldDate);
+}
 
 router.use(authenticate, requireAdmin);
 
@@ -139,6 +160,11 @@ router.put('/events/:id', wrap(async (req, res) => {
     },
     include: { contract: { select: { id: true, company_name: true } } },
   });
+
+  if (event_date && event_date !== ev.event_date) {
+    await syncContractJobFromPlannerEvent(id, event_date);
+  }
+
   res.json(updated);
 }));
 
@@ -370,6 +396,9 @@ router.patch('/reschedule', wrap(async (req, res) => {
     const ev = await prisma.plannerEvent.findUnique({ where: { id } });
     if (!ev) return res.status(404).json({ error: 'Event not found' });
     await prisma.plannerEvent.update({ where: { id }, data: { event_date: date } });
+    if (date !== ev.event_date) {
+      await syncContractJobFromPlannerEvent(id, date);
+    }
     return res.json({ ok: true });
   }
 

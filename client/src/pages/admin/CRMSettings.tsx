@@ -5,7 +5,7 @@ import {
   AlertCircle, CheckCircle, Eye, EyeOff, KeyRound,
   Phone, Mail, CreditCard, StickyNote, MapPin,
   Package, ChevronDown, ChevronRight, RotateCcw, List, LayoutGrid,
-  BarChart3,
+  BarChart3, Tag,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import AnalyticsTab from './settings/AnalyticsTab';
@@ -1594,6 +1594,7 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
   const [formError, setFormError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Contract | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [itemsTarget, setItemsTarget] = useState<Contract | null>(null);
 
   const fetchContracts = useCallback(async () => {
     const r = await api.get('/contracts');
@@ -1745,6 +1746,14 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => setItemsTarget(c)}
+                    title="Manage price-list items"
+                    className="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1.5"
+                  >
+                    <Tag className="w-3.5 h-3.5" />
+                    Items
+                  </button>
                   <button onClick={() => openEdit(c)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
                     <Pencil className="w-4 h-4" />
                   </button>
@@ -1855,7 +1864,195 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
           </button>
         </div>
       </Modal>
+
+      {/* Items / price list editor */}
+      <ContractItemsModal
+        contract={itemsTarget}
+        onClose={() => setItemsTarget(null)}
+        showToast={showToast}
+      />
     </div>
+  );
+}
+
+// ── Per-contractor price-list items modal ─────────────────────────────────────
+
+interface ContractItem {
+  id: number;
+  contract_id: number;
+  name: string;
+  unit_price: number;
+  sort_order: number;
+  archived: boolean;
+}
+
+function ContractItemsModal({
+  contract, onClose, showToast,
+}: {
+  contract: Contract | null;
+  onClose: () => void;
+  showToast: (m: string, t?: 'success' | 'error') => void;
+}) {
+  const [items, setItems] = useState<ContractItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const [draftPrice, setDraftPrice] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const fetchItems = useCallback(async (cid: number) => {
+    setLoading(true);
+    try {
+      const r = await api.get(`/contract-jobs/contractors/${cid}/items`);
+      setItems(r.data);
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (contract) {
+      setDraftName(''); setDraftPrice('');
+      fetchItems(contract.id);
+    }
+  }, [contract, fetchItems]);
+
+  const addItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contract || !draftName.trim()) return;
+    setAdding(true);
+    try {
+      await api.post(`/contract-jobs/contractors/${contract.id}/items`, {
+        name: draftName.trim(),
+        unit_price: parseFloat(draftPrice) || 0,
+      });
+      setDraftName(''); setDraftPrice('');
+      await fetchItems(contract.id);
+    } catch {
+      showToast('Failed to add item', 'error');
+    } finally { setAdding(false); }
+  };
+
+  const updateItem = async (id: number, patch: Partial<ContractItem>) => {
+    if (!contract) return;
+    // Optimistic
+    setItems(prev => prev.map(i => i.id === id ? { ...i, ...patch } : i));
+    try {
+      await api.put(`/contract-jobs/contractors/${contract.id}/items/${id}`, patch);
+    } catch {
+      showToast('Failed to update item', 'error');
+      await fetchItems(contract.id);
+    }
+  };
+
+  const removeItem = async (id: number) => {
+    if (!contract) return;
+    try {
+      await api.delete(`/contract-jobs/contractors/${contract.id}/items/${id}`);
+      await fetchItems(contract.id);
+    } catch {
+      showToast('Failed to delete item', 'error');
+    }
+  };
+
+  return (
+    <Modal
+      open={!!contract}
+      onClose={onClose}
+      title={contract ? `Price list — ${contract.company_name}` : ''}
+      size="lg"
+    >
+      <p className="text-sm text-slate-500 -mt-1 mb-4">
+        These items appear when you create jobs for this contractor and their prices flow through to the weekly invoice. Editing a price here does not change past invoices.
+      </p>
+
+      {/* Add row */}
+      <form onSubmit={addItem} className="flex items-end gap-3 mb-5">
+        <div className="flex-1">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Item Name</label>
+          <input
+            value={draftName}
+            onChange={e => setDraftName(e.target.value)}
+            placeholder="e.g. Porter, High van, Standard van"
+            className="input-field w-full"
+          />
+        </div>
+        <div className="w-32">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Price (£)</label>
+          <input
+            type="number" step="0.01" min="0"
+            value={draftPrice}
+            onChange={e => setDraftPrice(e.target.value)}
+            placeholder="0.00"
+            className="input-field w-full"
+          />
+        </div>
+        <button type="submit" disabled={adding || !draftName.trim()} className="btn-primary flex items-center gap-1.5">
+          <Plus className="w-4 h-4" />
+          Add
+        </button>
+      </form>
+
+      {/* Items list */}
+      {loading ? (
+        <div className="text-sm text-slate-400 py-6 text-center">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="bg-slate-50 rounded-xl border border-slate-200 border-dashed py-10 text-center">
+          <Tag className="w-7 h-7 text-slate-300 mx-auto mb-2" />
+          <p className="text-sm font-medium text-slate-500">No items yet</p>
+          <p className="text-xs text-slate-400 mt-1">Add your first billable item above.</p>
+        </div>
+      ) : (
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+              <tr>
+                <th className="text-left px-4 py-2.5 font-semibold">Item</th>
+                <th className="text-right px-4 py-2.5 font-semibold w-32">Unit Price</th>
+                <th className="w-12"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, idx) => (
+                <tr key={it.id} className={idx > 0 ? 'border-t border-slate-100' : ''}>
+                  <td className="px-4 py-2">
+                    <input
+                      defaultValue={it.name}
+                      onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.name) updateItem(it.id, { name: v }); }}
+                      className="w-full px-2 py-1 bg-transparent border border-transparent hover:border-slate-200 focus:border-slate-300 focus:bg-white focus:outline-none rounded text-sm"
+                    />
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <div className="inline-flex items-center gap-1">
+                      <span className="text-slate-400 text-sm">£</span>
+                      <input
+                        type="number" step="0.01" min="0"
+                        defaultValue={it.unit_price.toFixed(2)}
+                        onBlur={e => {
+                          const v = parseFloat(e.target.value);
+                          if (Number.isFinite(v) && v !== it.unit_price) updateItem(it.id, { unit_price: v });
+                        }}
+                        className="w-24 px-2 py-1 bg-transparent border border-transparent hover:border-slate-200 focus:border-slate-300 focus:bg-white focus:outline-none rounded text-sm text-right tabular-nums"
+                      />
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    <button
+                      onClick={() => removeItem(it.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete item"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex justify-end pt-5">
+        <button onClick={onClose} className="btn-secondary">Done</button>
+      </div>
+    </Modal>
   );
 }
 

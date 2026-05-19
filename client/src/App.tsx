@@ -28,6 +28,9 @@ import AdminCRMJobs from './pages/admin/CRMJobs';
 import AdminCRMPlanner from './pages/admin/CRMPlanner';
 import AdminCRMWages from './pages/admin/CRMWages';
 import AdminCRMSettings from './pages/admin/CRMSettings';
+import AdminCRMContractJobs from './pages/admin/CRMContractJobs';
+import AdminCRMContractor from './pages/admin/CRMContractor';
+import AdminCRMContractInvoice from './pages/admin/CRMContractInvoice';
 
 export default function App() {
   // Subdomain-aware route gating:
@@ -74,6 +77,9 @@ export default function App() {
                 <Route path="/admin/crm" element={<AdminCRM />} />
                 <Route path="/admin/crm/jobs" element={<AdminCRMJobs />} />
                 <Route path="/admin/crm/planner" element={<AdminCRMPlanner />} />
+                <Route path="/admin/crm/contract-jobs" element={<AdminCRMContractJobs />} />
+                <Route path="/admin/crm/contract-jobs/:id" element={<AdminCRMContractor />} />
+                <Route path="/admin/crm/contract-jobs/:id/invoices/:invoiceId" element={<AdminCRMContractInvoice />} />
                 <Route path="/admin/crm/wages" element={<AdminCRMWages />} />
                 <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
                 <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />

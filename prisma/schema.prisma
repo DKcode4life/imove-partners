@@ -243,8 +243,9 @@ model PlannerEvent {
   created_at     DateTime @default(now())
   updated_at     DateTime @default(now()) @updatedAt
 
-  assignments PlannerAssignment[]
-  contract    Contract? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  assignments  PlannerAssignment[]
+  contract     Contract?    @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  contract_job ContractJob?
 
   @@map("planner_events")
 }
@@ -602,9 +603,117 @@ model Contract {
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now()) @updatedAt
 
-  planner_events PlannerEvent[]
+  planner_events    PlannerEvent[]
+  items             ContractItem[]
+  jobs              ContractJob[]
+  contract_invoices ContractInvoice[]
 
   @@map("contracts")
+}
+
+model ContractItem {
+  id          Int      @id @default(autoincrement())
+  contract_id Int
+  name        String
+  unit_price  Float    @default(0)
+  sort_order  Int      @default(0)
+  archived    Boolean  @default(false)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  contract       Contract           @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  job_items      ContractJobItem[]
+
+  @@index([contract_id])
+  @@map("contract_items")
+}
+
+model ContractJob {
+  id                Int      @id @default(autoincrement())
+  contract_id       Int
+  job_date          String   // YYYY-MM-DD
+  description       String?
+  notes             String?
+  men_needed        Int      @default(0)
+  vans_needed       Int      @default(0)
+  hgv_needed        Int      @default(0)
+  planner_event_id  Int?     @unique
+  invoiced          Boolean  @default(false)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  contract         Contract               @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  planner_event    PlannerEvent?          @relation(fields: [planner_event_id], references: [id], onDelete: SetNull)
+  items            ContractJobItem[]
+  invoice_items    ContractInvoiceItem[]
+
+  @@index([contract_id, job_date])
+  @@map("contract_jobs")
+}
+
+model ContractJobItem {
+  id               Int    @id @default(autoincrement())
+  contract_job_id  Int
+  contract_item_id Int?
+  description      String
+  quantity         Float  @default(1)
+  unit_price       Float  @default(0)
+  total            Float  @default(0)
+  sort_order       Int    @default(0)
+
+  contract_job  ContractJob           @relation(fields: [contract_job_id], references: [id], onDelete: Cascade)
+  contract_item ContractItem?         @relation(fields: [contract_item_id], references: [id], onDelete: SetNull)
+  invoice_items ContractInvoiceItem[]
+
+  @@index([contract_job_id])
+  @@map("contract_job_items")
+}
+
+model ContractInvoice {
+  id                 Int       @id @default(autoincrement())
+  contract_id        Int
+  invoice_number     String    @unique
+  week_start         String    // YYYY-MM-DD (Monday)
+  week_end           String    // YYYY-MM-DD (Sunday)
+  header_description String?
+  status             String    @default("draft") // draft | sent | paid
+  subtotal           Float     @default(0)
+  tax_rate           Float     @default(20.0)
+  tax_amount         Float     @default(0)
+  total              Float     @default(0)
+  notes              String?
+  sent_at            DateTime?
+  sent_to            String?
+  paid_at            DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+
+  contract Contract              @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  items    ContractInvoiceItem[]
+
+  @@index([contract_id, week_start])
+  @@map("contract_invoices")
+}
+
+model ContractInvoiceItem {
+  id                          Int     @id @default(autoincrement())
+  contract_invoice_id         Int
+  source_contract_job_id      Int?
+  source_contract_job_item_id Int?
+  job_date                    String  // YYYY-MM-DD
+  description                 String
+  quantity                    Float   @default(1)
+  unit_price                  Float   @default(0)
+  total                       Float   @default(0)
+  sort_order                  Int     @default(0)
+
+  invoice          ContractInvoice  @relation(fields: [contract_invoice_id], references: [id], onDelete: Cascade)
+  source_job       ContractJob?     @relation(fields: [source_contract_job_id], references: [id], onDelete: SetNull)
+  source_job_item  ContractJobItem? @relation(fields: [source_contract_job_item_id], references: [id], onDelete: SetNull)
+
+  @@index([contract_invoice_id])
+  @@index([source_contract_job_item_id])
+  @@map("contract_invoice_items")
 }
 
 // ─── Audit Trail ──────────────────────────────────────────────────────────────

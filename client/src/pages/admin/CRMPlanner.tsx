@@ -22,6 +22,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }>
   'Survey':          { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
   'Sundry':          { bg: 'bg-slate-100',   text: 'text-slate-600',   dot: '#94A3B8' },
   'Quick Job':       { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
+  'Contract Job':    { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700', dot: '#C026D3' },
   // legacy aliases kept for existing records
   'Move':             { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
   'Packing Box':      { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, LogOut, ArrowLeftCircle, UserCircle2, ClipboardList, CalendarDays,
-  ChevronLeft, ChevronRight, Settings, Banknote,
+  ChevronLeft, ChevronRight, Settings, Banknote, Briefcase,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
@@ -30,11 +30,12 @@ const FALLBACK_STATUSES: JobStatusSetting[] = [
 ];
 
 const MAIN_NAV = [
-  { to: '/admin/crm',           label: 'Overview',   icon: <LayoutDashboard className="w-5 h-5" />, end: true },
-  { to: '/admin/crm/jobs',      label: 'Jobs',       icon: <ClipboardList className="w-5 h-5" />,   end: false },
-  { to: '/admin/crm/planner',   label: 'Planner',    icon: <CalendarDays className="w-5 h-5" />,    end: false },
-  { to: '/admin/crm/wages',     label: 'Wages',      icon: <Banknote className="w-5 h-5" />,        end: false },
-  { to: '/admin/crm/customers', label: 'Customers',  icon: <UserCircle2 className="w-5 h-5" />,     end: false },
+  { to: '/admin/crm',                label: 'Overview',       icon: <LayoutDashboard className="w-5 h-5" />, end: true },
+  { to: '/admin/crm/jobs',           label: 'Jobs',           icon: <ClipboardList className="w-5 h-5" />,   end: false },
+  { to: '/admin/crm/planner',        label: 'Planner',        icon: <CalendarDays className="w-5 h-5" />,    end: false },
+  { to: '/admin/crm/contract-jobs',  label: 'Contract Jobs',  icon: <Briefcase className="w-5 h-5" />,       end: false },
+  { to: '/admin/crm/wages',          label: 'Wages',          icon: <Banknote className="w-5 h-5" />,        end: false },
+  { to: '/admin/crm/customers',      label: 'Customers',      icon: <UserCircle2 className="w-5 h-5" />,     end: false },
 ];
 
 export default function CRMSidebar() {

@@ -47,6 +47,7 @@ app.use('/api/planner',   require('./routes/planner'));
 app.use('/api/wages',     require('./routes/wages'));
 app.use('/api/settings',  require('./routes/settings'));
 app.use('/api/contracts', require('./routes/contracts'));
+app.use('/api/contract-jobs', require('./routes/contract-jobs'));
 app.use('/api/analytics', require('./routes/analytics'));
 
 app.get('/api/health', async (_req, res) => {

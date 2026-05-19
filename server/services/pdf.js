@@ -480,6 +480,160 @@ function drawFooter(doc) {
      .text(`Page ${currentPage} of ${totalPages}`, RIGHT - 80, y + 20, { width: 80, align: 'right' });
 }
 
+// ── Contract invoice helpers ───────────────────────────────────────────────
+function drawContractorBlock(doc, y, contract, weekStart) {
+  // Two columns: contractor on left, week summary on right
+  const colW = (CONTENT_W - 20) / 2;
+
+  // LEFT — contractor (bill-to)
+  doc.fillColor(C.gray).font(F.bold).fontSize(9)
+     .text('BILL TO', LEFT, y);
+  doc.fillColor(C.dark).font(F.bold).fontSize(12)
+     .text(contract.company_name || '—', LEFT, y + 14, { width: colW });
+
+  let lineY = y + 32;
+  const lines = [];
+  if (contract.contact_name) lines.push(contract.contact_name);
+  if (contract.address) lines.push(contract.address);
+  if (contract.email) lines.push(contract.email);
+  const phones = [contract.office_number, contract.direct_line].filter(Boolean).join(' · ');
+  if (phones) lines.push(phones);
+
+  doc.fillColor(C.body).font(F.regular).fontSize(10);
+  for (const ln of lines) {
+    doc.text(ln, LEFT, lineY, { width: colW });
+    lineY = doc.y + 2;
+  }
+
+  // RIGHT — week label
+  const rightX = LEFT + colW + 20;
+  doc.fillColor(C.gray).font(F.bold).fontSize(9)
+     .text('WEEK COMMENCING', rightX, y, { width: colW, align: 'right' });
+
+  const ws = new Date(weekStart + 'T00:00:00');
+  const wsLabel = ws.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  doc.fillColor(C.dark).font(F.bold).fontSize(14)
+     .text(wsLabel, rightX, y + 14, { width: colW, align: 'right' });
+
+  return Math.max(lineY, y + 60) + 14;
+}
+
+function drawHeaderDescription(doc, y, text) {
+  if (!text) return y;
+  doc.fillColor(C.body).font(F.italic).fontSize(10)
+     .text(text, LEFT, y, { width: CONTENT_W, lineGap: 2 });
+  return doc.y + 14;
+}
+
+function drawContractItemsTable(doc, startY, items) {
+  // Day-grouped items. Each new job_date gets a sub-header row, then its lines.
+  // Page-break aware.
+  const HEADER_H = 26;
+  const ROW_H    = 22;
+  const SUB_H    = 22;
+  const dateW    = 90;
+  const qtyW     = 60;
+  const priceW   = 90;
+  const totalW   = 100;
+  const descX    = LEFT + dateW;
+  const qtyX     = LEFT + CONTENT_W - qtyW - priceW - totalW;
+  const priceX   = LEFT + CONTENT_W - priceW - totalW;
+  const totalX   = LEFT + CONTENT_W - totalW;
+  const descW    = qtyX - descX - 8;
+
+  let y = startY;
+
+  const drawHeaderRow = () => {
+    doc.fillColor(C.dark).rect(LEFT, y, CONTENT_W, HEADER_H).fill();
+    doc.fillColor(C.white).font(F.bold).fontSize(10);
+    doc.text('Date',        LEFT + 10, y + 8, { width: dateW - 10 });
+    doc.text('Description', descX,     y + 8, { width: descW });
+    doc.text('Qty',         qtyX,      y + 8, { width: qtyW, align: 'center' });
+    doc.text('Unit',        priceX,    y + 8, { width: priceW, align: 'right' });
+    doc.text('Amount',      totalX - 10, y + 8, { width: totalW, align: 'right' });
+    y += HEADER_H;
+  };
+
+  drawHeaderRow();
+
+  let lastDate = null;
+  let rowIndex = 0;
+  for (const item of items) {
+    // Page-break check
+    if (y > 720) {
+      doc.addPage();
+      drawWatermark(doc);
+      y = 50;
+      drawHeaderRow();
+      lastDate = null;
+      rowIndex = 0;
+    }
+
+    const itemDate = item.job_date;
+    const dateLabel = fmtDate(itemDate);
+
+    // First row of a new day gets the date in the left column;
+    // subsequent rows on the same day leave date blank for readability.
+    const showDate = itemDate !== lastDate;
+    if (showDate) lastDate = itemDate;
+
+    const bg = rowIndex % 2 === 0 ? C.white : C.lightBg;
+    doc.fillColor(bg).rect(LEFT, y, CONTENT_W, ROW_H).fill();
+
+    doc.fillColor(C.dark).font(showDate ? F.bold : F.regular).fontSize(showDate ? 10 : 9);
+    doc.text(showDate ? dateLabel : '', LEFT + 10, y + 6, { width: dateW - 10 });
+
+    doc.fillColor(C.dark).font(F.regular).fontSize(10);
+    doc.text(item.description || '', descX, y + 6, { width: descW, ellipsis: true });
+    doc.text(String(item.quantity ?? 1), qtyX, y + 6, { width: qtyW, align: 'center' });
+    doc.text(fmtMoney(item.unit_price || 0), priceX, y + 6, { width: priceW, align: 'right' });
+    doc.text(fmtMoney(item.total || 0), totalX - 10, y + 6, { width: totalW, align: 'right' });
+
+    y += ROW_H;
+    rowIndex++;
+  }
+
+  return y + 4;
+}
+
+function drawContractTotals(doc, y, subtotal, taxRate, taxAmount, total) {
+  if (y > 700) {
+    doc.addPage();
+    drawWatermark(doc);
+    y = 50;
+  }
+
+  const ROW_H = 22;
+  const labelX = LEFT + CONTENT_W - 280;
+  const labelW = 170;
+  const valueX = LEFT + CONTENT_W - 100;
+  const valueW = 90;
+
+  const rows = [
+    { label: 'Subtotal', value: fmtMoney(subtotal), bold: false },
+    ...(Number(taxAmount) > 0
+      ? [{ label: `${Number(taxRate || 20).toFixed(0)}% VAT`, value: fmtMoney(taxAmount), bold: false }]
+      : []),
+    { label: 'Total Due', value: fmtMoney(total), bold: true },
+  ];
+
+  // Top divider
+  doc.strokeColor(C.border).lineWidth(0.5)
+     .moveTo(labelX, y).lineTo(LEFT + CONTENT_W, y).stroke();
+
+  rows.forEach((r) => {
+    if (r.bold) {
+      doc.fillColor(C.lightBg).rect(labelX, y, 280, ROW_H).fill();
+    }
+    doc.fillColor(r.bold ? C.dark : C.body).font(r.bold ? F.bold : F.regular).fontSize(r.bold ? 12 : 10);
+    doc.text(r.label, labelX + 8, y + 6, { width: labelW, align: 'left' });
+    doc.text(r.value, valueX, y + 6, { width: valueW, align: 'right' });
+    y += ROW_H;
+  });
+
+  return y + 14;
+}
+
 // ── Main renderer ──────────────────────────────────────────────────────────
 const DOC_CONFIG = {
   'estimate-quote': {
@@ -696,6 +850,104 @@ async function generateInvoicePDF(data) {
   });
 }
 
+/**
+ * Generate a contract (B2B) invoice PDF.
+ *
+ * Differs from the customer invoice in three ways:
+ *   - No "Dear customer" greeting or move-details table.
+ *   - No from/to addresses.
+ *   - A day-grouped items table (Date | Description | Qty | Unit | Amount).
+ *
+ * @param {Object} data
+ * @param {string} data.invoice_number
+ * @param {Object} data.contract — { company_name, contact_name, address, email, office_number, direct_line }
+ * @param {string} data.week_start — YYYY-MM-DD (Monday)
+ * @param {string} data.week_end — YYYY-MM-DD (Sunday)
+ * @param {string} [data.header_description]
+ * @param {Array}  data.items — [{ job_date, description, quantity, unit_price, total }]
+ * @param {number} data.subtotal
+ * @param {number} data.tax_rate
+ * @param {number} data.tax_amount
+ * @param {number} data.total
+ * @param {string} [data.notes]
+ * @param {Date}   [data.created_at]
+ */
+async function generateContractInvoicePDF(data) {
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: 0,
+    bufferPages: true,
+    info: {
+      Title:    `Invoice ${data.invoice_number || ''}`,
+      Author:   COMPANY.name,
+      Subject:  `Contract invoice for ${data.contract?.company_name || ''}`,
+      Keywords: 'invoice, contract, iMove',
+      Creator:  'iMove CRM',
+    },
+  });
+
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+
+  // Page 1
+  drawWatermark(doc);
+  let y = drawHeader(doc, 'Invoice');
+
+  // Info row: Date · Contractor · Invoice ID
+  y = drawInfoRow(doc, y, {
+    date: data.created_at || new Date(),
+    customer_name: data.contract?.company_name || '—',
+    doc_number: data.invoice_number || '—',
+  }, 'Invoice');
+
+  // Bill-to + week commencing
+  y = drawContractorBlock(doc, y, data.contract || {}, data.week_start);
+
+  // Optional opening description
+  y = drawHeaderDescription(doc, y, data.header_description);
+
+  // Items table (day-grouped)
+  y = drawContractItemsTable(doc, y, data.items || []);
+
+  // Totals
+  y = drawContractTotals(doc, y, data.subtotal || 0, data.tax_rate || 0, data.tax_amount || 0, data.total || 0);
+
+  // Optional invoice notes
+  if (data.notes) {
+    if (y > 700) { doc.addPage(); drawWatermark(doc); y = 50; }
+    doc.fillColor(C.gray).font(F.bold).fontSize(9).text('NOTES', LEFT, y);
+    doc.fillColor(C.body).font(F.regular).fontSize(10)
+       .text(data.notes, LEFT, y + 14, { width: CONTENT_W, lineGap: 2 });
+    y = doc.y + 14;
+  }
+
+  // Bank details (same as customer invoice)
+  y = drawBankBox(doc, y, data.invoice_number);
+
+  // Closing + signature
+  y = drawClosing(doc, y, 'invoice');
+
+  // Footer on every page
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    drawFooter(doc);
+  }
+
+  doc.end();
+
+  return new Promise((resolve, reject) => {
+    doc.on('end', () => {
+      resolve({
+        buffer: Buffer.concat(buffers),
+        filename: `contract-invoice-${data.invoice_number || Date.now()}.pdf`,
+        mimeType: 'application/pdf',
+      });
+    });
+    doc.on('error', reject);
+  });
+}
+
 async function renderHTMLToPDF(html, filename) {
   console.log(`[pdf] HTML->PDF fallback invoked for: ${filename}`);
   return {
@@ -708,6 +960,7 @@ async function renderHTMLToPDF(html, filename) {
 module.exports = {
   generateQuotePDF,
   generateInvoicePDF,
+  generateContractInvoicePDF,
   renderDocument,
   renderHTMLToPDF,
 };

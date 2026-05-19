@@ -13,11 +13,12 @@
  */
 
 const REFERENCE_TYPES = {
-  estimate:   { prefix: 'EST', model: 'quote',   field: 'quote_number'   },
-  fixed:      { prefix: 'iMQ', model: 'quote',   field: 'quote_number'   },
-  deposit:    { prefix: 'DEP', model: 'invoice', field: 'invoice_number' },
-  main:       { prefix: 'INV', model: 'invoice', field: 'invoice_number' },
-  additional: { prefix: 'ADC', model: 'invoice', field: 'invoice_number' },
+  estimate:   { prefix: 'EST', model: 'quote',           field: 'quote_number'   },
+  fixed:      { prefix: 'iMQ', model: 'quote',           field: 'quote_number'   },
+  deposit:    { prefix: 'DEP', model: 'invoice',         field: 'invoice_number' },
+  main:       { prefix: 'INV', model: 'invoice',         field: 'invoice_number' },
+  additional: { prefix: 'ADC', model: 'invoice',         field: 'invoice_number' },
+  contract:   { prefix: 'CIN', model: 'contractInvoice', field: 'invoice_number' },
 };
 
 /**
