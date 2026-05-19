@@ -572,14 +572,25 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   const editingDeposit = depositDraft !== null;
   const depositSection = depositDraft ?? extractDepositSection(committed);
   function startEditDeposit() { setDepositDraft(extractDepositSection(committed)); }
-  function saveDeposit() {
+  async function saveDeposit() {
     if (!depositDraft) return;
     const depositJustPaid = depositDraft.depositPaid && !committed.depositPaid;
     const balanceJustPaid = depositDraft.balancePaid && !committed.balancePaid;
     const next = { ...committed, ...depositDraft };
     setCommitted(next);
-    persist(next);
     setDepositDraft(null);
+
+    if ((depositJustPaid || balanceJustPaid) && jobId) {
+      // Flush immediately so the server marks the invoice paid before callbacks fire
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      if (storageKey) { try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* ignore */ } }
+      try { await api.put(`/crm/jobs/${jobId}/quote-state`, next); } catch { /* ignore */ }
+      if (depositJustPaid) setExistingDocs(prev => ({ ...prev, depositInvoicePaid: true }));
+      if (balanceJustPaid) setExistingDocs(prev => ({ ...prev, mainInvoicePaid: true }));
+    } else {
+      persist(next);
+    }
+
     if (depositJustPaid) onDepositPaid?.();
     if (balanceJustPaid) onBalancePaid?.();
   }

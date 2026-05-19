@@ -256,6 +256,23 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     newStatus = isVideo ? 'Survey Video' : 'Survey Physical';
   }
 
+  // When deposit is manually marked paid, mark the deposit invoice as paid and advance status
+  const depositJustPaid = !!b.deposit_paid && !existing.deposit_paid;
+  if (depositJustPaid) {
+    const depositInvoice = await prisma.invoice.findFirst({
+      where: { job_id: id, invoice_type: 'deposit' },
+    });
+    if (depositInvoice && depositInvoice.status !== 'paid') {
+      await prisma.invoice.update({
+        where: { id: depositInvoice.id },
+        data: { status: 'paid', paid_at: new Date() },
+      });
+    }
+    if (newStatus !== 'Confirmed Paid') {
+      newStatus = 'Confirmed Deposit';
+    }
+  }
+
   // Helper function to compare values for audit trail
   const getValue = (val) => val === undefined || val === null ? null : String(val);
   const compareValue = (oldVal, newVal) => {
@@ -923,9 +940,54 @@ router.get('/jobs/:id/quote-state', wrap(async (req, res) => {
 // PUT /api/crm/jobs/:id/quote-state
 router.put('/jobs/:id/quote-state', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const existing = await prisma.crmJob.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.crmJob.findUnique({
+    where: { id },
+    select: { id: true, deposit_paid: true, status: true, quote_state: true },
+  });
   if (!existing) return res.status(404).json({ error: 'Job not found' });
-  await prisma.crmJob.update({ where: { id }, data: { quote_state: req.body } });
+
+  const newState = req.body;
+  const wasDepositPaid = existing.deposit_paid || existing.quote_state?.depositPaid === true;
+  const isDepositPaid = newState?.depositPaid === true;
+  const depositJustPaid = isDepositPaid && !wasDepositPaid;
+
+  const jobUpdates = { quote_state: newState };
+
+  if (depositJustPaid) {
+    jobUpdates.deposit_paid = true;
+    if (existing.status !== 'Confirmed Paid') {
+      jobUpdates.status = 'Confirmed Deposit';
+    }
+
+    // Mark the deposit invoice as paid so the receipt can be sent
+    const depositInvoice = await prisma.invoice.findFirst({
+      where: { job_id: id, invoice_type: 'deposit' },
+      include: { payments: true },
+    });
+    if (depositInvoice && depositInvoice.status !== 'paid') {
+      const paidAt = newState?.depositPaidDate ? new Date(newState.depositPaidDate) : new Date();
+      await prisma.invoice.update({
+        where: { id: depositInvoice.id },
+        data: { status: 'paid', paid_at: paidAt },
+      });
+      // Create a payment record so the receipt PDF shows the correct amount and date
+      const alreadyPaid = depositInvoice.payments.reduce((s, p) => s + p.amount, 0);
+      const remaining = depositInvoice.total - alreadyPaid;
+      if (remaining > 0) {
+        await prisma.payment.create({
+          data: { invoice_id: depositInvoice.id, amount: remaining, method: 'bank_transfer', paid_at: paidAt },
+        });
+      }
+    }
+
+    if (jobUpdates.status && jobUpdates.status !== existing.status) {
+      await prisma.crmActivity.create({
+        data: { job_id: id, type: 'note', note: 'Deposit marked as paid — status advanced to Confirmed Deposit' },
+      });
+    }
+  }
+
+  await prisma.crmJob.update({ where: { id }, data: jobUpdates });
   res.json({ ok: true });
 }));
 

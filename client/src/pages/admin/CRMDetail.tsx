@@ -1172,7 +1172,12 @@ export default function CRMDetailPage() {
                   })
                   .catch(() => {});
               }}
-              onDepositPaid={() => handlePipelineChange('Quote Accepted' as CrmStatus)}
+              onDepositPaid={() => {
+                if (!id) return;
+                api.get(`/crm/jobs/${id}`)
+                  .then(r => { setJob(r.data); setStatus(r.data.status); setActivities(r.data.activities || []); })
+                  .catch(() => {});
+              }}
               onBalancePaid={() => handlePipelineChange('Confirmed Paid' as CrmStatus)}
             />
           </Section>
