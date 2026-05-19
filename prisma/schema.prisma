@@ -153,6 +153,10 @@ model CrmJob {
   partner_commission_rate Float?
   // Survey inventory (stored as JSON: { data, searchData, customRooms, roomPhotos })
   survey_data             Json?
+  // QuoteBuilder per-job state (estimateItems, quotationItems, quotationAddons, VAT flags, deposit section)
+  quote_state             Json?
+  // FurnitureCovers per-job custom edits (CoverItem[])
+  covers_state            Json?
   // Timestamps
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt

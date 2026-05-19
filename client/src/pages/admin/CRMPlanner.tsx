@@ -1287,15 +1287,37 @@ function WeeklyView({
   const today = toISO(new Date());
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
 
-  // ── Within-day ordering (localStorage-backed) ────────────────────────────
+  // ── Within-day ordering (server-synced, localStorage-cached) ────────────
+  // Local cache paints instantly on load; the server copy is the source of
+  // truth across devices and overwrites the cache on mount.
   const [dayOrders, setDayOrders] = useState<Record<string, string[]>>(() => {
     try { return JSON.parse(localStorage.getItem('planner-day-orders') || '{}'); }
     catch { return {}; }
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get('/settings/planner-day-orders');
+        if (cancelled) return;
+        if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
+          localStorage.setItem('planner-day-orders', JSON.stringify(r.data));
+          setDayOrders(r.data as Record<string, string[]>);
+        }
+      } catch { /* offline — use cache */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const dayOrdersSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   function saveDayOrders(next: Record<string, string[]>) {
     setDayOrders(next);
     localStorage.setItem('planner-day-orders', JSON.stringify(next));
+    if (dayOrdersSyncRef.current) clearTimeout(dayOrdersSyncRef.current);
+    dayOrdersSyncRef.current = setTimeout(() => {
+      api.put('/settings/planner-day-orders', next).catch(() => {});
+    }, 500);
   }
 
   function getSortedItems(date: string, raw: PlannerCalendarItem[]): PlannerCalendarItem[] {

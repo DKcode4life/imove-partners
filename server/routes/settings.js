@@ -422,4 +422,26 @@ router.put('/distance-price-bands', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Planner Day Orders ────────────────────────────────────────────────────────
+// Shape: { [dateISO: string]: string[] }  — within-day card ordering shared
+// across all devices so desktop and mobile show the same drag order.
+
+router.get('/planner-day-orders', wrap(async (_req, res) => {
+  const row = await prisma.companySetting.findUnique({ where: { key: 'planner_day_orders' } });
+  res.json(row?.value ? JSON.parse(row.value) : {});
+}));
+
+router.put('/planner-day-orders', wrap(async (req, res) => {
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Expected object' });
+  }
+  const value = JSON.stringify(req.body);
+  await prisma.companySetting.upsert({
+    where:  { key: 'planner_day_orders' },
+    update: { value },
+    create: { key: 'planner_day_orders', value },
+  });
+  res.json({ ok: true });
+}));
+
 module.exports = router;

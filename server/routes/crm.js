@@ -910,4 +910,43 @@ router.put('/jobs/:id/survey', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// GET /api/crm/jobs/:id/quote-state
+// Returns the QuoteBuilder per-job state so every device can render the same
+// estimate items, fixed-quote items, add-ons, VAT toggles, and deposit section.
+router.get('/jobs/:id/quote-state', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await prisma.crmJob.findUnique({ where: { id }, select: { quote_state: true } });
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job.quote_state || null);
+}));
+
+// PUT /api/crm/jobs/:id/quote-state
+router.put('/jobs/:id/quote-state', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const existing = await prisma.crmJob.findUnique({ where: { id }, select: { id: true } });
+  if (!existing) return res.status(404).json({ error: 'Job not found' });
+  await prisma.crmJob.update({ where: { id }, data: { quote_state: req.body } });
+  res.json({ ok: true });
+}));
+
+// GET /api/crm/jobs/:id/covers-state
+// FurnitureCovers custom edits (CoverItem[]). `null` means "auto-calculate from survey".
+router.get('/jobs/:id/covers-state', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const job = await prisma.crmJob.findUnique({ where: { id }, select: { covers_state: true } });
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job.covers_state || null);
+}));
+
+// PUT /api/crm/jobs/:id/covers-state
+// Pass an array of CoverItem to store custom edits, or `null` to reset to auto.
+router.put('/jobs/:id/covers-state', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const existing = await prisma.crmJob.findUnique({ where: { id }, select: { id: true } });
+  if (!existing) return res.status(404).json({ error: 'Job not found' });
+  const payload = req.body === null || req.body === undefined ? null : req.body;
+  await prisma.crmJob.update({ where: { id }, data: { covers_state: payload } });
+  res.json({ ok: true });
+}));
+
 module.exports = router;

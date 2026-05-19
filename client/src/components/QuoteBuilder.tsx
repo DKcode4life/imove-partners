@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator, CreditCard, Plus } from 'lucide-react';
 import api from '../lib/api';
 import { loadCatalog } from '../lib/catalogStorage';
@@ -203,10 +203,68 @@ const REF_PLACEHOLDER: Record<DocumentType, string> = {
   'additional-invoice': 'ADC-?????',
 };
 
+function mergeServerQuoteState(raw: unknown): QuoteBuilderState {
+  if (!raw || typeof raw !== 'object') return DEFAULT_STATE;
+  const parsed = raw as Partial<QuoteBuilderState> & Record<string, unknown>;
+  const stripItems = (items: unknown): LineItem[] =>
+    Array.isArray(items)
+      ? items.map(i => ({
+          id: typeof (i as LineItem)?.id === 'string' ? (i as LineItem).id : newId(),
+          description: typeof (i as LineItem)?.description === 'string' ? (i as LineItem).description : '',
+          price: typeof (i as LineItem)?.price === 'number' ? (i as LineItem).price : 0,
+        }))
+      : [];
+  const stripAddons = (items: unknown): AddonItem[] =>
+    Array.isArray(items)
+      ? items.map(i => ({
+          id: typeof (i as AddonItem)?.id === 'string' ? (i as AddonItem).id : newId(),
+          description: typeof (i as AddonItem)?.description === 'string' ? (i as AddonItem).description : '',
+          price: typeof (i as AddonItem)?.price === 'number' ? (i as AddonItem).price : 0,
+          selected: typeof (i as AddonItem)?.selected === 'boolean' ? (i as AddonItem).selected : false,
+        }))
+      : [];
+  return {
+    ...DEFAULT_STATE,
+    ...parsed,
+    estimateItems:   stripItems(parsed.estimateItems),
+    quotationItems:  stripItems(parsed.quotationItems),
+    quotationAddons: stripAddons(parsed.quotationAddons),
+  };
+}
+
 export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDepositPaid, onBalancePaid }: Props) {
   const storageKey = jobId ? `crm-quote-${jobId}` : null;
 
   const [committed, setCommitted] = useState<QuoteBuilderState>(() => loadFromStorage(jobId));
+
+  // Debounced server-sync. The localStorage write inside persist() makes the UI
+  // feel instant; this debounce buffers rapid edits before pushing to the API.
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestStateRef = useRef<QuoteBuilderState>(committed);
+  latestStateRef.current = committed;
+
+  function scheduleServerSync(state: QuoteBuilderState) {
+    if (!jobId) return;
+    latestStateRef.current = state;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      api.put(`/crm/jobs/${jobId}/quote-state`, latestStateRef.current).catch(() => {
+        // Network failure — localStorage still has the latest copy; next save retries.
+      });
+    }, 600);
+  }
+
+  // Flush pending server-sync if the component unmounts or jobId changes.
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        if (jobId) {
+          api.put(`/crm/jobs/${jobId}/quote-state`, latestStateRef.current).catch(() => {});
+        }
+      }
+    };
+  }, [jobId]);
 
   // Per-block draft state. null = that block is in read mode.
   const [estimateDraft,  setEstimateDraft]  = useState<LineItem[] | null>(null);
@@ -260,6 +318,22 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     setActiveAdditionalModal(null);
 
     if (jobId) {
+      // Cross-device sync: pull the server's quote-state (last-write-wins) and
+      // overwrite the local cache so desktop and mobile always render the same
+      // estimate/quotation/add-ons/deposit blocks.
+      (async () => {
+        try {
+          const r = await api.get(`/crm/jobs/${jobId}/quote-state`);
+          if (r.data) {
+            const serverState = mergeServerQuoteState(r.data);
+            try { localStorage.setItem(`crm-quote-${jobId}`, JSON.stringify(serverState)); } catch { /* ignore */ }
+            setCommitted(serverState);
+          }
+        } catch {
+          // Offline or 404 — fall back to whatever loadFromStorage already gave us.
+        }
+      })();
+
       // Load job + existing quotes + invoices for the send panel
       (async () => {
         try {
@@ -379,8 +453,10 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   }, [sendingToast]);
 
   function persist(next: QuoteBuilderState) {
-    if (!storageKey) return;
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* ignore */ }
+    if (storageKey) {
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* ignore */ }
+    }
+    scheduleServerSync(next);
   }
 
   // ── Guide Quote manual edit handlers ─────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Pencil, RefreshCw, Plus, Minus, X } from 'lucide-react';
+import api from '../lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -174,6 +175,24 @@ function loadSavedCovers(jobId: string): CoverItem[] | null {
 
 function persistCovers(jobId: string, items: CoverItem[]) {
   localStorage.setItem(coversKey(jobId), JSON.stringify(items));
+  // Mirror the custom edits to the server so other devices stay in sync.
+  api.put(`/crm/jobs/${jobId}/covers-state`, items).catch(() => {});
+}
+
+function sanitizeCovers(raw: unknown): CoverItem[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: CoverItem[] = [];
+  for (const r of raw) {
+    if (
+      r && typeof r === 'object' &&
+      typeof (r as CoverItem).id === 'string' &&
+      typeof (r as CoverItem).label === 'string' &&
+      typeof (r as CoverItem).qty === 'number'
+    ) {
+      out.push({ id: (r as CoverItem).id, label: (r as CoverItem).label, qty: (r as CoverItem).qty });
+    }
+  }
+  return out;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -187,6 +206,7 @@ export default function FurnitureCovers({ jobId }: { jobId: string | undefined }
 
   useEffect(() => {
     if (!jobId) return;
+    // Start from local cache so the UI paints instantly.
     const saved = loadSavedCovers(jobId);
     if (saved) {
       setItems(saved);
@@ -194,6 +214,31 @@ export default function FurnitureCovers({ jobId }: { jobId: string | undefined }
     } else {
       setItems(calculateCovers(jobId));
     }
+
+    // Then reconcile with the server (last-write-wins across devices).
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/crm/jobs/${jobId}/covers-state`);
+        if (cancelled) return;
+        if (r.data === null || r.data === undefined) {
+          // Server says "auto" — clear any stale local custom edits.
+          localStorage.removeItem(coversKey(jobId));
+          setItems(calculateCovers(jobId));
+          setIsCustom(false);
+        } else {
+          const cleaned = sanitizeCovers(r.data);
+          if (cleaned) {
+            localStorage.setItem(coversKey(jobId), JSON.stringify(cleaned));
+            setItems(cleaned);
+            setIsCustom(true);
+          }
+        }
+      } catch {
+        // Offline — local cache is already showing.
+      }
+    })();
+    return () => { cancelled = true; };
   }, [jobId]);
 
   const recalculate = useCallback(() => {
@@ -201,6 +246,8 @@ export default function FurnitureCovers({ jobId }: { jobId: string | undefined }
     localStorage.removeItem(coversKey(jobId));
     setItems(calculateCovers(jobId));
     setIsCustom(false);
+    // Tell the server to drop its custom-edits row so other devices also revert to auto.
+    api.put(`/crm/jobs/${jobId}/covers-state`, null).catch(() => {});
   }, [jobId]);
 
   const startEdit = () => {
