@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as ImageIcon, Cloud, CloudOff, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as ImageIcon, Cloud, CloudOff, AlertCircle, CheckCircle2, RefreshCw, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
 import ImageModal from './ImageModal';
@@ -32,6 +32,21 @@ const SURVEY_ROOMS = [
   { id: 'garage',        name: 'Garage / Garden',     categoryId: 'garage-garden' },
   { id: 'office',        name: 'Office & Commercial', categoryId: 'office-commercial' },
 ];
+
+// ── Room label helpers ─────────────────────────────────────────────────────────
+
+function roomShortLabel(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('living')) return 'L/R';
+  const bedMatch = lower.match(/bedroom\s*(\d+)/);
+  if (bedMatch) return `B${bedMatch[1]}`;
+  if (lower.includes('kitchen')) return 'KIT';
+  if (lower.includes('garage') || lower.includes('garden')) return 'GAR';
+  if (lower.includes('office')) return 'OFC';
+  const words = name.split(/[\s/&-]+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return name.slice(0, 3).toUpperCase();
+}
 
 // ── Volume helpers ─────────────────────────────────────────────────────────────
 
@@ -440,6 +455,7 @@ export default function SurveyTool({
   }, [isControlled, onOpenChange]);
   const [data,           setData]           = useState<SurveyData>({});
   const [selectedRoomId, setSelectedRoomId] = useState(SURVEY_ROOMS[0].id);
+  const [roomsCollapsed, setRoomsCollapsed] = useState(false);
   const [noteModal,      setNoteModal]      = useState<{ room: string; item: string; icon: string; isSearch: boolean } | null>(null);
   const [customRooms,    setCustomRooms]    = useState<CustomRoom[]>([]);
   const [addingRoomType, setAddingRoomType] = useState<'bedroom' | 'room' | null>(null);
@@ -910,11 +926,46 @@ export default function SurveyTool({
 
           <div className="flex flex-1 min-h-0 relative">
             {/* ── Room sidebar ─────────────────────────────────────────────── */}
-            <div className="w-52 bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto py-3 px-2">
+            <div className={`${roomsCollapsed ? 'w-14' : 'w-52'} bg-white border-r border-slate-200 flex-shrink-0 overflow-y-auto py-3 px-2 transition-[width] duration-200`}>
+              <button
+                onClick={() => setRoomsCollapsed(c => !c)}
+                title={roomsCollapsed ? 'Expand rooms' : 'Collapse rooms'}
+                className={`mb-2 flex items-center gap-1 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-slate-50 transition-colors ${
+                  roomsCollapsed ? 'w-full justify-center py-1.5' : 'w-full justify-end px-2 py-1'
+                }`}
+              >
+                {roomsCollapsed
+                  ? <ChevronsRight className="w-4 h-4" />
+                  : <><span className="text-[10px] font-semibold uppercase tracking-wider">Collapse</span><ChevronsLeft className="w-4 h-4" /></>
+                }
+              </button>
               {allRooms.map(r => {
                 const count    = roomItemCount(r.name);
                 const vol      = getRoomVol(r);
                 const isActive = r.id === selectedRoomId;
+                if (roomsCollapsed) {
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedRoomId(r.id)}
+                      title={r.name}
+                      className={`relative w-full flex items-center justify-center px-1 py-2 rounded-xl text-xs font-bold transition-all mb-1 ${
+                        isActive
+                          ? 'bg-teal-50 text-teal-800 shadow-sm ring-1 ring-teal-100'
+                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
+                      }`}
+                    >
+                      <span className="tabular-nums">{roomShortLabel(r.name)}</span>
+                      {count > 0 && (
+                        <span className={`absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center tabular-nums ${
+                          isActive ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                }
                 return (
                   <button
                     key={r.id}
@@ -945,7 +996,7 @@ export default function SurveyTool({
               })}
 
               {/* Room photos indicator per room */}
-              {Object.keys(roomPhotos).length > 0 && (
+              {Object.keys(roomPhotos).length > 0 && !roomsCollapsed && (
                 <div className="border-t border-slate-100 pt-2 mt-1">
                   <p className="px-3 pb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                     Room Photos
@@ -977,6 +1028,17 @@ export default function SurveyTool({
               )}
 
               {/* Add Bedroom / Add Room */}
+              {roomsCollapsed ? (
+                <div className="mt-1 border-t border-slate-100 pt-2 space-y-1">
+                  <button
+                    onClick={() => { setRoomsCollapsed(false); setAddingRoomType('bedroom'); }}
+                    title="Add Bedroom"
+                    className="w-full flex items-center justify-center px-1 py-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-teal-600 transition-colors border border-dashed border-slate-200"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
               <div className="mt-1 border-t border-slate-100 pt-2 space-y-1">
                 {addingRoomType ? (
                   <div className="px-1">
@@ -1033,6 +1095,7 @@ export default function SurveyTool({
                   </>
                 )}
               </div>
+              )}
             </div>
 
             {/* ── Items grid ───────────────────────────────────────────────── */}
