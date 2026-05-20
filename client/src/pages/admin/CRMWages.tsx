@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Banknote, RefreshCw, CheckCircle2 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import api from '../../lib/api';
@@ -87,6 +88,7 @@ function fmtWeekRange(start: string, end: string): string {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CRMWages() {
+  const navigate = useNavigate();
   const [weekStart, setWeekStart] = useState<string>(() => isoDate(mondayOf(new Date())));
   const [data, setData] = useState<WagesWeekResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -301,14 +303,19 @@ export default function CRMWages() {
                           return (
                             <td key={d} className="text-center px-2 py-2 align-middle">
                               {cell ? (
-                                <div className="inline-flex flex-col items-center">
-                                  <span className="text-sm font-semibold text-slate-800 tabular-nums">
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/admin/crm/planner?view=week&date=${d}`)}
+                                  title="Open this day in the weekly planner"
+                                  className="inline-flex flex-col items-center px-2 py-1 rounded hover:bg-emerald-50 hover:ring-1 hover:ring-emerald-200 transition-colors cursor-pointer"
+                                >
+                                  <span className="text-sm font-semibold text-slate-800 tabular-nums group-hover:text-emerald-700">
                                     {fmtMoney(cell.rate)}
                                   </span>
                                   {cell.count > 1 && (
                                     <span className="text-[10px] text-slate-400">×{cell.count}</span>
                                   )}
-                                </div>
+                                </button>
                               ) : (
                                 <span className="text-slate-300">—</span>
                               )}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, CalendarDays, Plus, Users, Truck,
   X, Edit2, Trash2, CheckCircle, AlertCircle, Save, GripVertical, Copy, ArrowUpRight,
@@ -1849,9 +1849,18 @@ function ItemDetailModal({
 
 export default function CRMPlanner() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [view,        setView]        = useState<'month' | 'week'>('month');
-  const [currentDate, setCurrentDate] = useState(new Date());
+  // Honour ?view=week and ?date=YYYY-MM-DD on first mount so other pages can
+  // deep-link to a specific week (e.g. clicking a wage cell on the Wages page).
+  const initialView: 'month' | 'week' = searchParams.get('view') === 'week' ? 'week' : 'month';
+  const initialDate = (() => {
+    const d = searchParams.get('date');
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + 'T00:00:00') : new Date();
+  })();
+
+  const [view,        setView]        = useState<'month' | 'week'>(initialView);
+  const [currentDate, setCurrentDate] = useState(initialDate);
   const [items,       setItems]       = useState<PlannerCalendarItem[]>([]);
   const [assets,      setAssets]      = useState<PlannerAsset[]>([]);
   const [assignments, setAssignments] = useState<PlannerAssignment[]>([]);

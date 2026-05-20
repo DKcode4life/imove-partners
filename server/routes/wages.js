@@ -44,6 +44,8 @@ router.get('/week', wrap(async (req, res) => {
         id: true, asset_id: true, assigned_date: true, daily_rate: true,
         assigned_role: true, job_id: true, event_id: true,
         asset: { select: { id: true, name: true, role: true } },
+        job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true } },
+        event: { select: { event_date: true } },
       },
       orderBy: { assigned_date: 'asc' },
     }),
@@ -54,6 +56,23 @@ router.get('/week', wrap(async (req, res) => {
   const staffMap = new Map();
 
   for (const a of assignments) {
+    // Skip orphan assignments — rows where the underlying job/event no longer
+    // matches this date. These accumulate when a job is moved to another day,
+    // marked Lost / Cancelled, or its move date is cleared. Without this filter,
+    // wages would show stale earnings the planner no longer displays.
+    if (a.job_id) {
+      if (!a.job) continue; // cascade should have removed it; defensive
+      if (a.job.status === 'Lost / Cancelled') continue;
+      const jobDate = String(a.job.confirmed_move_date || a.job.preferred_move_date || '').slice(0, 10);
+      if (jobDate !== a.assigned_date) continue;
+    } else if (a.event_id) {
+      if (!a.event) continue;
+      if (String(a.event.event_date).slice(0, 10) !== a.assigned_date) continue;
+    } else {
+      // Assignment with neither job nor event — orphan
+      continue;
+    }
+
     const id = a.asset_id;
     if (!staffMap.has(id)) {
       staffMap.set(id, {
