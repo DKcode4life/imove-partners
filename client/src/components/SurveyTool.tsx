@@ -1,9 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as ImageIcon } from 'lucide-react';
+import { X, ClipboardList, Minus, Plus, MessageSquare, Search, Camera, Image as ImageIcon, Cloud, CloudOff, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import type { CatalogCategory } from '../data/inventoryCatalog';
 import { loadCatalog } from '../lib/catalogStorage';
 import ImageModal from './ImageModal';
 import api from '../lib/api';
+import {
+  loadDoc as idbLoadDoc,
+  isEmpty as idbIsEmpty,
+  saveData as idbSaveData,
+  saveSearchData as idbSaveSearchData,
+  saveCustomRooms as idbSaveCustomRooms,
+  saveRoomPhotos as idbSaveRoomPhotos,
+  replaceDoc as idbReplaceDoc,
+  markSynced as idbMarkSynced,
+  getMeta as idbGetMeta,
+  hasUnsynced,
+  migrateFromLocalStorageOnce,
+  type SurveyMeta,
+} from '../lib/surveyStorage';
 
 // ── Survey room definitions ────────────────────────────────────────────────────
 // Each room has a fixed display name (used as the key in SurveyData) and a
@@ -42,7 +56,7 @@ function roomVolumeFt(
   }, 0);
 }
 
-// ── Data types & storage ───────────────────────────────────────────────────────
+// ── Data types ────────────────────────────────────────────────────────────────
 
 type ItemEntry  = { count: number; note: string; photo?: string };
 type RoomRecord = Record<string, ItemEntry>;
@@ -50,61 +64,20 @@ type SurveyData = Record<string, RoomRecord>;
 
 type CustomRoom = { id: string; name: string; categoryId: string };
 
-const storageKey     = (jobId: string | undefined) => `crm-survey-${jobId}`;
-const searchDataKey  = (jobId: string | undefined) => `crm-survey-search-${jobId}`;
-const customRoomsKey = (jobId: string | undefined) => `crm-survey-rooms-${jobId}`;
-const roomPhotosKey  = (jobId: string | undefined) => `crm-survey-photos-${jobId}`;
-
-function loadCustomRooms(jobId: string | undefined): CustomRoom[] {
-  if (!jobId) return [];
-  try {
-    const raw = JSON.parse(localStorage.getItem(customRoomsKey(jobId)) || '[]') as
-      Array<{ id: string; name: string; categoryId?: string }>;
-    return raw.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId ?? '__all__' }));
-  }
-  catch { return []; }
-}
-
-function loadData(jobId: string | undefined): SurveyData {
-  if (!jobId) return {};
-  try {
-    const raw = JSON.parse(localStorage.getItem(storageKey(jobId)) || '{}') as
-      Record<string, Record<string, number | ItemEntry>>;
-    // Migrate old format where values were plain numbers
-    const out: SurveyData = {};
-    for (const [room, items] of Object.entries(raw)) {
-      out[room] = {};
-      for (const [item, val] of Object.entries(items)) {
-        out[room][item] = typeof val === 'number' ? { count: val, note: '' } : val;
-      }
+/**
+ * Migrate the old "plain number" format (pre-2025) where item entries were
+ * just counts. Kept here because some older surveys could still come back
+ * from the server in that shape.
+ */
+function normaliseSurveyData(raw: Record<string, Record<string, number | ItemEntry>>): SurveyData {
+  const out: SurveyData = {};
+  for (const [room, items] of Object.entries(raw)) {
+    out[room] = {};
+    for (const [item, val] of Object.entries(items)) {
+      out[room][item] = typeof val === 'number' ? { count: val, note: '' } : val;
     }
-    return out;
-  } catch {
-    return {};
   }
-}
-
-function loadSearchData(jobId: string | undefined): SurveyData {
-  if (!jobId) return {};
-  try {
-    const raw = JSON.parse(localStorage.getItem(searchDataKey(jobId)) || '{}') as
-      Record<string, Record<string, number | ItemEntry>>;
-    const out: SurveyData = {};
-    for (const [room, items] of Object.entries(raw)) {
-      out[room] = {};
-      for (const [item, val] of Object.entries(items)) {
-        out[room][item] = typeof val === 'number' ? { count: val, note: '' } : val;
-      }
-    }
-    return out;
-  } catch { return {}; }
-}
-
-function loadRoomPhotos(jobId: string | undefined): Record<string, string[]> {
-  if (!jobId) return {};
-  try {
-    return JSON.parse(localStorage.getItem(roomPhotosKey(jobId)) || '{}') as Record<string, string[]>;
-  } catch { return {}; }
+  return out;
 }
 
 // ── Image compression ──────────────────────────────────────────────────────────
@@ -368,86 +341,214 @@ function ItemSquare({ name, icon, count, note, photo, volumeCuFt, onIncrement, o
   );
 }
 
+// ── Sync status pill (used by the compact card and the overlay header) ──────
+
+function fmtAgo(ts: number): string {
+  if (!ts) return 'never';
+  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (seconds < 60) return 'just now';
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function SyncPill({
+  online, syncing, unsynced, lastSyncedAt, error, onSync, compact,
+}: {
+  online: boolean;
+  syncing: boolean;
+  unsynced: boolean;
+  lastSyncedAt: number;
+  error: string | null;
+  onSync: () => void;
+  compact?: boolean;
+}) {
+  const sizeText = compact ? 'text-[11px]' : 'text-xs';
+  const sizePad  = compact ? 'px-2 py-1' : 'px-2.5 py-1.5';
+  const btnPad   = compact ? 'px-2 py-1 text-[11px]' : 'px-3 py-1.5 text-xs';
+
+  // Status word + colour
+  let icon: React.ReactNode;
+  let label: string;
+  let cls: string;
+  if (syncing) {
+    icon = <RefreshCw className={`w-3.5 h-3.5 animate-spin`} />;
+    label = 'Syncing…';
+    cls = 'bg-blue-50 text-blue-700 border-blue-200';
+  } else if (error) {
+    icon = <AlertCircle className="w-3.5 h-3.5" />;
+    label = 'Sync failed';
+    cls = 'bg-red-50 text-red-700 border-red-200';
+  } else if (!online) {
+    icon = <CloudOff className="w-3.5 h-3.5" />;
+    label = unsynced ? 'Offline — saved on device' : 'Offline';
+    cls = 'bg-amber-50 text-amber-700 border-amber-200';
+  } else if (unsynced) {
+    icon = <Cloud className="w-3.5 h-3.5" />;
+    label = `Unsynced — saved on device`;
+    cls = 'bg-amber-50 text-amber-700 border-amber-200';
+  } else {
+    icon = <CheckCircle2 className="w-3.5 h-3.5" />;
+    label = `Synced ${fmtAgo(lastSyncedAt)}`;
+    cls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className={`inline-flex items-center gap-1.5 rounded-full border ${sizePad} ${sizeText} font-medium ${cls}`} title={error || undefined}>
+        {icon}
+        {label}
+      </span>
+      {(unsynced || error) && (
+        <button
+          onClick={onSync}
+          disabled={syncing || !online}
+          className={`inline-flex items-center gap-1.5 rounded-lg ${btnPad} font-semibold bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
+          title={!online ? 'Offline — connect to sync' : 'Push local changes to server'}
+        >
+          <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
+          Sync now
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
+export default function SurveyTool({
+  jobId,
+  open: openProp,
+  onOpenChange,
+}: {
+  jobId: string | undefined;
+  /** Optional controlled-mode open state. If omitted, the component manages its own. */
+  open?: boolean;
+  onOpenChange?: (next: boolean) => void;
+}) {
   const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
   useEffect(() => { loadCatalog().then(setCatalog); }, []);
-  const [open,           setOpen]           = useState(false);
-  const [data,           setData]           = useState<SurveyData>(() => loadData(jobId));
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
+  const setOpen = useCallback((next: boolean) => {
+    if (!isControlled) setInternalOpen(next);
+    onOpenChange?.(next);
+  }, [isControlled, onOpenChange]);
+  const [data,           setData]           = useState<SurveyData>({});
   const [selectedRoomId, setSelectedRoomId] = useState(SURVEY_ROOMS[0].id);
   const [noteModal,      setNoteModal]      = useState<{ room: string; item: string; icon: string; isSearch: boolean } | null>(null);
-  const [customRooms,    setCustomRooms]    = useState<CustomRoom[]>(() => loadCustomRooms(jobId));
+  const [customRooms,    setCustomRooms]    = useState<CustomRoom[]>([]);
   const [addingRoomType, setAddingRoomType] = useState<'bedroom' | 'room' | null>(null);
   const [newRoomName,    setNewRoomName]    = useState('');
   const [search,         setSearch]         = useState('');
-  const [searchData,     setSearchData]     = useState<SurveyData>(() => loadSearchData(jobId));
-  
+  const [searchData,     setSearchData]     = useState<SurveyData>({});
+  const [roomPhotos,     setRoomPhotos]     = useState<Record<string, string[]>>({});
+  const roomPhotoInputRef = useRef<HTMLInputElement>(null);
+
   // Image modal state
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [currentImage, setCurrentImage] = useState<string>('');
   const [currentImageAlt, setCurrentImageAlt] = useState<string>('');
 
-  useEffect(() => { setData(loadData(jobId)); }, [jobId]);
-  useEffect(() => { setSearchData(loadSearchData(jobId)); }, [jobId]);
-  useEffect(() => { setCustomRooms(loadCustomRooms(jobId)); }, [jobId]);
+  // ── Sync state ────────────────────────────────────────────────────────────
+  const [meta, setMeta] = useState<SurveyMeta>({ lastModified: 0, lastSyncedAt: 0 });
+  const [online, setOnline] = useState<boolean>(typeof navigator === 'undefined' ? true : navigator.onLine);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
+
+  const unsynced = hasUnsynced(meta);
+
+  // Listen for connectivity changes — we still let users save offline, but
+  // the status pill reflects it so they know whether Sync will succeed.
+  useEffect(() => {
+    const goOn  = () => setOnline(true);
+    const goOff = () => setOnline(false);
+    window.addEventListener('online', goOn);
+    window.addEventListener('offline', goOff);
+    return () => { window.removeEventListener('online', goOn); window.removeEventListener('offline', goOff); };
+  }, []);
+
   useEffect(() => { setSearch(''); }, [selectedRoomId]);
 
-  // ── API sync ───────────────────────────────────────────────────────────────
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Debounced write: bundles all 4 stores and PUTs to the server 1.5 s after last change.
-  const scheduleSyncToApi = useCallback(() => {
-    if (!jobId) return;
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(() => {
-      const payload = {
-        data:        JSON.parse(localStorage.getItem(storageKey(jobId))     || '{}'),
-        searchData:  JSON.parse(localStorage.getItem(searchDataKey(jobId))  || '{}'),
-        customRooms: JSON.parse(localStorage.getItem(customRoomsKey(jobId)) || '[]'),
-        roomPhotos:  JSON.parse(localStorage.getItem(roomPhotosKey(jobId))  || '{}'),
-      };
-      api.put(`/crm/jobs/${jobId}/survey`, payload).catch(() => {});
-    }, 1500);
-  }, [jobId]);
-
-  // On load: fetch from server and overwrite localStorage + state so all devices stay in sync.
+  // ── Mount / job change: load local first, only pull from server if local is empty
   useEffect(() => {
-    if (!jobId) return;
-    api.get(`/crm/jobs/${jobId}/survey`)
-      .then(res => {
-        const d = res.data as { data?: object; searchData?: object; customRooms?: unknown[]; roomPhotos?: object };
-        if (d.data && Object.keys(d.data).length > 0) {
-          localStorage.setItem(storageKey(jobId), JSON.stringify(d.data));
-          setData(loadData(jobId));
+    if (!jobId) {
+      setData({}); setSearchData({}); setCustomRooms([]); setRoomPhotos({});
+      setMeta({ lastModified: 0, lastSyncedAt: 0 });
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Move any pre-existing localStorage data into IDB once, then read from IDB.
+        await migrateFromLocalStorageOnce(jobId);
+        const doc = await idbLoadDoc(jobId);
+        if (cancelled) return;
+        setData(normaliseSurveyData(doc.data as Record<string, Record<string, number | ItemEntry>>));
+        setSearchData(normaliseSurveyData(doc.searchData as Record<string, Record<string, number | ItemEntry>>));
+        setCustomRooms(doc.customRooms.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId ?? '__all__' })));
+        setRoomPhotos(doc.roomPhotos);
+        setMeta(doc.meta);
+
+        // Only pull from the server when local is empty AND we have signal.
+        // Never silently clobber in-progress local work — that's exactly the
+        // bug that lost half a survey last time.
+        const empty = await idbIsEmpty(jobId);
+        if (empty && navigator.onLine) {
+          try {
+            const res = await api.get(`/crm/jobs/${jobId}/survey`);
+            if (cancelled) return;
+            const d = res.data as { data?: object; searchData?: object; customRooms?: unknown[]; roomPhotos?: object };
+            const hasAny =
+              (d.data && Object.keys(d.data).length > 0) ||
+              (d.searchData && Object.keys(d.searchData).length > 0) ||
+              (d.customRooms && (d.customRooms as unknown[]).length > 0) ||
+              (d.roomPhotos && Object.keys(d.roomPhotos).length > 0);
+            if (hasAny) {
+              await idbReplaceDoc(jobId, {
+                data: (d.data as SurveyData) ?? {},
+                searchData: (d.searchData as SurveyData) ?? {},
+                customRooms: (d.customRooms as CustomRoom[]) ?? [],
+                roomPhotos: (d.roomPhotos as Record<string, string[]>) ?? {},
+              });
+              const fresh = await idbLoadDoc(jobId);
+              if (cancelled) return;
+              setData(normaliseSurveyData(fresh.data as Record<string, Record<string, number | ItemEntry>>));
+              setSearchData(normaliseSurveyData(fresh.searchData as Record<string, Record<string, number | ItemEntry>>));
+              setCustomRooms(fresh.customRooms.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId ?? '__all__' })));
+              setRoomPhotos(fresh.roomPhotos);
+              setMeta(fresh.meta);
+            }
+          } catch {
+            // Offline or server error — perfectly fine, we already loaded local.
+          }
         }
-        if (d.searchData && Object.keys(d.searchData).length > 0) {
-          localStorage.setItem(searchDataKey(jobId), JSON.stringify(d.searchData));
-          setSearchData(loadSearchData(jobId));
-        }
-        if (d.customRooms && d.customRooms.length > 0) {
-          localStorage.setItem(customRoomsKey(jobId), JSON.stringify(d.customRooms));
-          setCustomRooms(loadCustomRooms(jobId));
-        }
-        if (d.roomPhotos && Object.keys(d.roomPhotos).length > 0) {
-          localStorage.setItem(roomPhotosKey(jobId), JSON.stringify(d.roomPhotos));
-          setRoomPhotos(loadRoomPhotos(jobId));
-        }
-      })
-      .catch(() => {});
+      } catch (err) {
+        setStorageError(err instanceof Error ? err.message : 'Failed to load local survey storage');
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [jobId]);
 
-  // ── Room photos (reference photos of the entire room) ──────────────────────
-  const [roomPhotos, setRoomPhotos] = useState<Record<string, string[]>>(() => loadRoomPhotos(jobId));
-  const roomPhotoInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { setRoomPhotos(loadRoomPhotos(jobId)); }, [jobId]);
-
-  const persistRoomPhotos = useCallback((next: Record<string, string[]>) => {
+  // ── Local persistence (always writes to IDB; never silent on failure) ────
+  const persistRoomPhotos = useCallback(async (next: Record<string, string[]>) => {
     setRoomPhotos(next);
-    if (jobId) localStorage.setItem(roomPhotosKey(jobId), JSON.stringify(next));
-    scheduleSyncToApi();
-  }, [jobId, scheduleSyncToApi]);
+    if (!jobId) return;
+    try {
+      const m = await idbSaveRoomPhotos(jobId, next);
+      setMeta(m);
+      setStorageError(null);
+    } catch (err) {
+      setStorageError(err instanceof Error ? err.message : 'Local save failed');
+    }
+  }, [jobId]);
 
   const addRoomPhoto = async (roomName: string, file: File) => {
     try {
@@ -470,17 +571,23 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     ...customRooms.map(r => ({ id: r.id, name: r.name, categoryId: r.categoryId })),
   ];
 
-  const handleAddRoom = (categoryId: string) => {
+  const handleAddRoom = async (categoryId: string) => {
     const name = newRoomName.trim();
     if (!name) return;
     const id = `custom-${Date.now()}`;
     const next = [...customRooms, { id, name, categoryId }];
     setCustomRooms(next);
-    if (jobId) localStorage.setItem(customRoomsKey(jobId), JSON.stringify(next));
     setNewRoomName('');
     setAddingRoomType(null);
     setSelectedRoomId(id);
-    scheduleSyncToApi();
+    if (!jobId) return;
+    try {
+      const m = await idbSaveCustomRooms(jobId, next);
+      setMeta(m);
+      setStorageError(null);
+    } catch (err) {
+      setStorageError(err instanceof Error ? err.message : 'Local save failed');
+    }
   };
 
   useEffect(() => {
@@ -495,11 +602,17 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
     return () => window.removeEventListener('keydown', handler);
   }, [open]);
 
-  const persist = useCallback((next: SurveyData) => {
+  const persist = useCallback(async (next: SurveyData) => {
     setData(next);
-    if (jobId) localStorage.setItem(storageKey(jobId), JSON.stringify(next));
-    scheduleSyncToApi();
-  }, [jobId, scheduleSyncToApi]);
+    if (!jobId) return;
+    try {
+      const m = await idbSaveData(jobId, next);
+      setMeta(m);
+      setStorageError(null);
+    } catch (err) {
+      setStorageError(err instanceof Error ? err.message : 'Local save failed');
+    }
+  }, [jobId]);
 
   const clone = () => JSON.parse(JSON.stringify(data)) as SurveyData;
 
@@ -543,11 +656,70 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
 
   // ── Search-specific data (separate store so catItems grid is unaffected) ──────
 
-  const persistSearch = useCallback((next: SurveyData) => {
+  const persistSearch = useCallback(async (next: SurveyData) => {
     setSearchData(next);
-    if (jobId) localStorage.setItem(searchDataKey(jobId), JSON.stringify(next));
-    scheduleSyncToApi();
-  }, [jobId, scheduleSyncToApi]);
+    if (!jobId) return;
+    try {
+      const m = await idbSaveSearchData(jobId, next);
+      setMeta(m);
+      setStorageError(null);
+    } catch (err) {
+      setStorageError(err instanceof Error ? err.message : 'Local save failed');
+    }
+  }, [jobId]);
+
+  // ── Explicit sync to server (replaces the old debounced auto-sync) ────────
+  const syncNow = useCallback(async () => {
+    if (!jobId || syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const doc = await idbLoadDoc(jobId);
+      await api.put(`/crm/jobs/${jobId}/survey`, {
+        data: doc.data,
+        searchData: doc.searchData,
+        customRooms: doc.customRooms,
+        roomPhotos: doc.roomPhotos,
+      });
+      const m = await idbMarkSynced(jobId);
+      setMeta(m);
+    } catch (err: unknown) {
+      const message =
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Sync failed';
+      setSyncError(message);
+    } finally {
+      setSyncing(false);
+    }
+  }, [jobId, syncing]);
+
+  // Warn the surveyor before they close the tab with unpushed changes.
+  useEffect(() => {
+    if (!unsynced) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [unsynced]);
+
+  // If we come back online and there are unsynced changes, do a one-shot
+  // best-effort push — non-blocking, the user can also click Sync manually.
+  useEffect(() => {
+    if (online && unsynced && !syncing && jobId) {
+      void syncNow();
+    }
+  }, [online, unsynced, syncing, jobId, syncNow]);
+
+  // Refresh meta in case something else writes (other useEffect mounts, etc).
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    void idbGetMeta(jobId).then(m => { if (!cancelled) setMeta(m); });
+    return () => { cancelled = true; };
+  }, [jobId]);
 
   const cloneSearch    = () => JSON.parse(JSON.stringify(searchData)) as SurveyData;
   const getSearchEntry = (room: string, item: string): ItemEntry =>
@@ -620,8 +792,19 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
   const curRoomCount= roomItemCount(currentRoom.name);
 
   const searchTerm  = search.trim().toLowerCase();
+  // Several catalog items ("Bags", "Sundry", standard box sizes) live in
+  // multiple categories with the same name and `id`. Without this dedupe,
+  // searching "bags" would render 5 React siblings keyed "Bags", all reading
+  // the same searchData entry — incrementing one made all 5 flicker and the
+  // grid layout broke on re-render.
   const displayItems = searchTerm
-    ? catalog.flatMap(c => c.items).filter(i => i.name.toLowerCase().includes(searchTerm))
+    ? Array.from(
+        new Map(
+          catalog.flatMap(c => c.items)
+            .filter(i => i.name.toLowerCase().includes(searchTerm))
+            .map(i => [i.name, i]),
+        ).values(),
+      )
     : catItems;
 
   // Items added to this room via the search bar (stored separately in searchData)
@@ -649,6 +832,18 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
           </div>
         ) : (
           <p className="text-xs text-slate-400 italic">No inventory recorded yet.</p>
+        )}
+
+        {jobId && (
+          <SyncPill
+            compact
+            online={online}
+            syncing={syncing}
+            unsynced={unsynced}
+            lastSyncedAt={meta.lastSyncedAt}
+            error={syncError}
+            onSync={() => void syncNow()}
+          />
         )}
 
         <button
@@ -686,14 +881,32 @@ export default function SurveyTool({ jobId }: { jobId: string | undefined }) {
                 )}
               </div>
             </div>
-            <button
-              onClick={() => setOpen(false)}
-              title="Close (Esc)"
-              className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-3">
+              {jobId && (
+                <SyncPill
+                  online={online}
+                  syncing={syncing}
+                  unsynced={unsynced}
+                  lastSyncedAt={meta.lastSyncedAt}
+                  error={syncError}
+                  onSync={() => void syncNow()}
+                />
+              )}
+              <button
+                onClick={() => setOpen(false)}
+                title="Close (Esc)"
+                className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
+          {storageError && (
+            <div className="px-6 py-2 bg-red-50 border-b border-red-100 text-xs text-red-700 flex items-center gap-2 flex-shrink-0">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+              Local save failed: {storageError}. Don't close this page until you can Sync.
+            </div>
+          )}
 
           <div className="flex flex-1 min-h-0 relative">
             {/* ── Room sidebar ─────────────────────────────────────────────── */}

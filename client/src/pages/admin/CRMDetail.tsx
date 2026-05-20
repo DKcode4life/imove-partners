@@ -4,7 +4,7 @@ import {
   ArrowLeft, Trash2, CheckCircle, AlertCircle,
   PlusCircle, RefreshCw, MessageSquare, Send, Pencil, X, Save,
   Navigation, MapPin, FileText, ChevronDown, Calendar, Phone, Mail,
-  Paperclip, Download,
+  Paperclip, Download, ClipboardList,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
@@ -148,7 +148,7 @@ const FALLBACK_PIPELINE: { name: string; color: string }[] = CRM_STATUSES
   .filter(s => s !== LOST)
   .map((name, i) => ({ name, color: ['#3b82f6','#8b5cf6','#7c3aed','#fbbf24','#06b6d4','#0d9488','#f59e0b','#f97316','#eab308','#10b981','#059669','#65a30d','#15803d','#94a3b8','#6b7280'][i] || '#94a3b8' }));
 
-function PipelineBar({ status, pipeline, saving, onChange, lostReason, lostNotes, onEditReason }: {
+function PipelineBar({ status, pipeline, saving, onChange, lostReason, lostNotes, onEditReason, onOpenSurvey }: {
   status: string;
   pipeline: { name: string; color: string }[];
   saving: number | null;
@@ -156,6 +156,8 @@ function PipelineBar({ status, pipeline, saving, onChange, lostReason, lostNotes
   lostReason?: string;
   lostNotes?: string;
   onEditReason?: () => void;
+  /** When provided, renders an "Open Survey Tool" button next to Lost / Cancelled. */
+  onOpenSurvey?: () => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -240,10 +242,19 @@ function PipelineBar({ status, pipeline, saving, onChange, lostReason, lostNotes
       </div>
       {/* Lost button row */}
       <div className="flex flex-col items-end gap-2 mt-3 pt-3 border-t border-slate-100">
-        <button type="button" onClick={() => onChange(LOST)}
-          className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${isLost ? 'bg-red-600 border-red-600 text-white' : 'border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-500'}`}>
-          {saving === -1 ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin inline-block" /> : isLost ? '✕ Lost / Cancelled' : 'Mark as Lost / Cancelled'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {onOpenSurvey && (
+            <button type="button" onClick={onOpenSurvey}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:border-teal-300 transition-colors inline-flex items-center gap-1.5">
+              <ClipboardList className="w-3.5 h-3.5" />
+              Open Survey Tool
+            </button>
+          )}
+          <button type="button" onClick={() => onChange(LOST)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${isLost ? 'bg-red-600 border-red-600 text-white' : 'border-slate-200 text-slate-500 hover:border-red-300 hover:text-red-500'}`}>
+            {saving === -1 ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin inline-block" /> : isLost ? '✕ Lost / Cancelled' : 'Mark as Lost / Cancelled'}
+          </button>
+        </div>
         {isLost && lostReason && (
           <button type="button" onClick={() => setShowDetail(d => !d)}
             className="flex items-center gap-1.5">
@@ -526,6 +537,7 @@ export default function CRMDetailPage() {
   const [routeInfo,    setRouteInfo]    = useState<{ direct: { miles: number; minutes: number } | null; total: { miles: number; minutes: number } | null } | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [showSurveyReport, setShowSurveyReport] = useState(false);
+  const [surveyOpen, setSurveyOpen] = useState(false);
   const [auditTrail, setAuditTrail] = useState<any[]>([]);
   const [loadingAuditTrail, setLoadingAuditTrail] = useState(false);
 
@@ -947,6 +959,7 @@ export default function CRMDetailPage() {
         lostReason={lostReason}
         lostNotes={lostNotes}
         onEditReason={() => setShowLostModal(true)}
+        onOpenSurvey={() => setSurveyOpen(true)}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -1430,7 +1443,7 @@ export default function CRMDetailPage() {
                   View Survey Report
                 </button>
               </div>
-              <SurveyTool jobId={id} />
+              <SurveyTool jobId={id} open={surveyOpen} onOpenChange={setSurveyOpen} />
             </div>
           </Section>
 
