@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator, CreditCard, Plus } from 'lucide-react';
+import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator, CreditCard, Plus, Download } from 'lucide-react';
 import api from '../lib/api';
 import { loadCatalog } from '../lib/catalogStorage';
 import SendDocumentModal, { type DocumentType, type SendDocumentData } from './SendDocumentModal';
@@ -84,6 +84,19 @@ function fmtDateShort(d: string) {
 
 function listTotal(items: { price: number }[]) {
   return items.reduce((a, i) => a + (Number.isFinite(i.price) ? i.price : 0), 0);
+}
+
+async function downloadPdfFromApi(apiPath: string, filename: string) {
+  const res = await api.get(apiPath, { responseType: 'blob' });
+  const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function loadFromStorage(jobId: string | number | undefined): QuoteBuilderState {
@@ -939,6 +952,43 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
    * require an existing paid invoice, so we don't create anything here;
    * the modal just shows the existing invoice number.
    */
+  async function downloadQuotePdf(t: 'estimate' | 'fixed') {
+    if (!jobId) return;
+    const docType: DocumentType = t === 'estimate' ? 'estimate-quote' : 'fixed-quote';
+    setBusyAction(docType);
+    try {
+      let quoteId = t === 'estimate' ? existingDocs.estimateQuoteId : existingDocs.fixedQuoteId;
+      let quoteNumber = t === 'estimate' ? existingDocs.estimateQuoteNumber : existingDocs.fixedQuoteNumber;
+      if (!quoteId) {
+        const newId = await ensureQuote(t);
+        if (!newId) throw new Error('Failed to prepare quote');
+        quoteId = newId;
+        // re-read the just-set number (state may not have flushed yet — fall back to placeholder)
+        quoteNumber = (t === 'estimate' ? existingDocs.estimateQuoteNumber : existingDocs.fixedQuoteNumber) ?? quoteNumber;
+      }
+      const filename = (quoteNumber || (t === 'estimate' ? 'estimate' : 'quote')) + '.pdf';
+      await downloadPdfFromApi(`/crm/jobs/${jobId}/quotes/${quoteId}/pdf`, filename);
+      setSendingToast({ kind: 'success', msg: 'PDF downloaded' });
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || err?.message || 'Failed to download PDF' });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function downloadAdditionalInvoicePdf(inv: AdditionalInvoice) {
+    if (!jobId) return;
+    setAdditionalBusy(inv.id);
+    try {
+      await downloadPdfFromApi(`/crm/jobs/${jobId}/invoices/${inv.id}/pdf`, `${inv.invoice_number}.pdf`);
+      setSendingToast({ kind: 'success', msg: 'PDF downloaded' });
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || err?.message || 'Failed to download PDF' });
+    } finally {
+      setAdditionalBusy(null);
+    }
+  }
+
   async function openSendModal(t: DocumentType) {
     if (!jobInfo?.email) {
       setSendingToast({ kind: 'error', msg: 'Customer has no email address on file. Add one in the Job Details panel.' });
@@ -1194,6 +1244,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             sent={!!existingDocs.estimateQuoteId}
             onClick={() => openSendModal('estimate-quote')}
             color="cyan"
+            secondaryAction={hasEstimateItems
+              ? { label: 'Download PDF', icon: <Download className="w-3 h-3" />, onClick: () => downloadQuotePdf('estimate') }
+              : undefined}
           />
           <SendButton
             label="Fixed Quote"
@@ -1204,6 +1257,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             sent={!!existingDocs.fixedQuoteId}
             onClick={() => openSendModal('fixed-quote')}
             color="emerald"
+            secondaryAction={fixedReadyToSend
+              ? { label: 'Download PDF', icon: <Download className="w-3 h-3" />, onClick: () => downloadQuotePdf('fixed') }
+              : undefined}
           />
           <SendButton
             label="Deposit Invoice"
@@ -1343,6 +1399,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         onTogglePaid={toggleAdditionalChargePaid}
         onToggleVat={toggleAdditionalChargeVat}
         onEmail={openAdditionalChargeEmail}
+        onDownload={downloadAdditionalInvoicePdf}
       />
 
       {/* ── Additional charge email modal ─────────────────────────────────── */}
@@ -1399,7 +1456,7 @@ function SendButton({
   sent?: boolean;
   onClick: () => void;
   color: 'cyan' | 'emerald' | 'amber' | 'indigo';
-  secondaryAction?: { label: string; onClick: () => void };
+  secondaryAction?: { label: string; icon?: React.ReactNode; onClick: () => void };
 }) {
   const c = SEND_BTN_COLORS[color];
   return (
@@ -1432,8 +1489,9 @@ function SendButton({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); secondaryAction.onClick(); }}
-          className="mt-1 w-full px-2 py-1 text-[10px] font-semibold rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+          className="mt-1 w-full px-2 py-1 text-[10px] font-semibold rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors inline-flex items-center justify-center gap-1"
         >
+          {secondaryAction.icon}
           {secondaryAction.label}
         </button>
       )}
@@ -2341,7 +2399,7 @@ function AdditionalChargesBlock({
   onStartEdit, onCancelEdit,
   onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove, onEditToggleVat,
   onSaveEdit,
-  onDelete, onTogglePaid, onToggleVat, onEmail,
+  onDelete, onTogglePaid, onToggleVat, onEmail, onDownload,
 }: {
   invoices: AdditionalInvoice[];
   showNewForm: boolean;
@@ -2374,6 +2432,7 @@ function AdditionalChargesBlock({
   onTogglePaid: (inv: AdditionalInvoice) => void;
   onToggleVat: (inv: AdditionalInvoice) => void;
   onEmail: (inv: AdditionalInvoice) => void;
+  onDownload: (inv: AdditionalInvoice) => void;
 }) {
   const newSubtotal = listTotal(newItems);
   const newVat = newVatEnabled ? Math.round(newSubtotal * 0.20 * 100) / 100 : 0;
@@ -2425,6 +2484,7 @@ function AdditionalChargesBlock({
             onTogglePaid={() => onTogglePaid(inv)}
             onToggleVat={() => onToggleVat(inv)}
             onEmail={() => onEmail(inv)}
+            onDownload={() => onDownload(inv)}
           />
         ))}
 
@@ -2537,7 +2597,7 @@ function AdditionalChargesBlock({
 function AdditionalInvoiceCard({
   inv, isEditing, editingTitle, editingItems, editingVatEnabled, busy, jobEmail,
   onStartEdit, onCancelEdit, onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove, onEditToggleVat,
-  onSaveEdit, onDelete, onTogglePaid, onToggleVat, onEmail,
+  onSaveEdit, onDelete, onTogglePaid, onToggleVat, onEmail, onDownload,
 }: {
   inv: AdditionalInvoice;
   isEditing: boolean;
@@ -2558,6 +2618,7 @@ function AdditionalInvoiceCard({
   onTogglePaid: () => void;
   onToggleVat: () => void;
   onEmail: () => void;
+  onDownload: () => void;
 }) {
   const isPaid = inv.status === 'paid';
   const isSent = inv.status === 'sent';
@@ -2728,6 +2789,15 @@ function AdditionalInvoiceCard({
           className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-95"
         >
           <Mail className="w-3.5 h-3.5" /> Email
+        </button>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={busy}
+          title="Download PDF to your computer"
+          className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-95"
+        >
+          <Download className="w-3.5 h-3.5" /> Download
         </button>
         <button
           type="button"
