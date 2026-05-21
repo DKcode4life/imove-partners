@@ -70,10 +70,11 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
   if (isNaN(jobId)) return res.status(400).json({ error: 'Invalid job ID' });
 
   const {
-    invoice_type = 'main',           // 'deposit' | 'main'
+    invoice_type = 'main',           // 'deposit' | 'main' | 'additional'
     quote_id,
     notes,
     subtotal = 0,
+    tax_rate,
     tax_amount = 0,
     total = 0,
     due_date,
@@ -102,6 +103,7 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
         invoice_type,
         invoice_number,
         subtotal: parseFloat(subtotal) || 0,
+        tax_rate: tax_rate === undefined || tax_rate === null ? undefined : parseFloat(tax_rate) || 0,
         tax_amount: parseFloat(tax_amount) || 0,
         total: parseFloat(total) || 0,
         due_date: due_date || null,
@@ -371,7 +373,7 @@ router.put('/jobs/:id/invoices/:invoiceId', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Only additional invoices can be edited this way' });
   }
 
-  const { notes, subtotal = 0, total = 0, items = [] } = req.body;
+  const { notes, subtotal = 0, tax_rate = 0, tax_amount = 0, total = 0, items = [] } = req.body;
   if (!items.length) return res.status(400).json({ error: 'At least one line item is required' });
 
   await prisma.invoiceItem.deleteMany({ where: { invoice_id: invoiceId } });
@@ -381,7 +383,8 @@ router.put('/jobs/:id/invoices/:invoiceId', wrap(async (req, res) => {
     data: {
       notes: notes || null,
       subtotal: parseFloat(subtotal) || 0,
-      tax_amount: 0,
+      tax_rate: parseFloat(tax_rate) || 0,
+      tax_amount: parseFloat(tax_amount) || 0,
       total: parseFloat(total) || 0,
       updated_at: new Date(),
       items: {

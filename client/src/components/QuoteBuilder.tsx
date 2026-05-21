@@ -40,6 +40,9 @@ type AdditionalInvoice = {
   invoice_number: string;
   notes: string | null;
   items: Array<{ id: number; description: string; unit_price: number; total: number }>;
+  subtotal: number;
+  tax_rate: number;
+  tax_amount: number;
   total: number;
   status: string;
   sent_at: string | null;
@@ -283,9 +286,11 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   const [showNewChargeForm, setShowNewChargeForm] = useState(false);
   const [newChargeTitle, setNewChargeTitle] = useState('');
   const [newChargeItems, setNewChargeItems] = useState<LineItem[]>([]);
+  const [newChargeVatEnabled, setNewChargeVatEnabled] = useState(false);
   const [editingChargeId, setEditingChargeId] = useState<number | null>(null);
   const [editingChargeTitle, setEditingChargeTitle] = useState('');
   const [editingChargeItems, setEditingChargeItems] = useState<LineItem[]>([]);
+  const [editingChargeVatEnabled, setEditingChargeVatEnabled] = useState(false);
   const [additionalBusy, setAdditionalBusy] = useState<number | 'new' | null>(null);
   const [activeAdditionalModal, setActiveAdditionalModal] = useState<{
     invoiceId: number;
@@ -371,6 +376,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             invoice_number: i.invoice_number,
             notes: i.notes,
             items: i.items || [],
+            subtotal: typeof i.subtotal === 'number' ? i.subtotal : 0,
+            tax_rate: typeof i.tax_rate === 'number' ? i.tax_rate : 0,
+            tax_amount: typeof i.tax_amount === 'number' ? i.tax_amount : 0,
             total: i.total,
             status: i.status,
             sent_at: i.sent_at,
@@ -604,14 +612,18 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     if (!jobId) return;
     const validItems = newChargeItems.filter(i => i.description.trim());
     if (!validItems.length) return;
-    const total = listTotal(validItems);
+    const subtotal = listTotal(validItems);
+    const taxRate = newChargeVatEnabled ? 20 : 0;
+    const taxAmount = newChargeVatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
+    const total = subtotal + taxAmount;
     setAdditionalBusy('new');
     try {
       const res = await api.post(`/crm/jobs/${jobId}/invoices`, {
         invoice_type: 'additional',
         notes: newChargeTitle.trim() || null,
-        subtotal: total,
-        tax_amount: 0,
+        subtotal,
+        tax_rate: taxRate,
+        tax_amount: taxAmount,
         total,
         items: validItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
       });
@@ -621,6 +633,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         invoice_number: inv.invoice_number,
         notes: inv.notes,
         items: inv.items || [],
+        subtotal: typeof inv.subtotal === 'number' ? inv.subtotal : subtotal,
+        tax_rate: typeof inv.tax_rate === 'number' ? inv.tax_rate : taxRate,
+        tax_amount: typeof inv.tax_amount === 'number' ? inv.tax_amount : taxAmount,
         total: inv.total,
         status: inv.status,
         sent_at: inv.sent_at,
@@ -629,6 +644,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
       setShowNewChargeForm(false);
       setNewChargeTitle('');
       setNewChargeItems([]);
+      setNewChargeVatEnabled(false);
     } catch (err: any) {
       setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to create charge' });
     } finally {
@@ -640,12 +656,17 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     if (!jobId) return;
     const validItems = editingChargeItems.filter(i => i.description.trim());
     if (!validItems.length) return;
-    const total = listTotal(validItems);
+    const subtotal = listTotal(validItems);
+    const taxRate = editingChargeVatEnabled ? 20 : 0;
+    const taxAmount = editingChargeVatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
+    const total = subtotal + taxAmount;
     setAdditionalBusy(invoiceId);
     try {
       const res = await api.put(`/crm/jobs/${jobId}/invoices/${invoiceId}`, {
         notes: editingChargeTitle.trim() || null,
-        subtotal: total,
+        subtotal,
+        tax_rate: taxRate,
+        tax_amount: taxAmount,
         total,
         items: validItems.map(i => ({ description: i.description, quantity: 1, unit_price: i.price, total: i.price })),
       });
@@ -655,6 +676,9 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         invoice_number: inv.invoice_number,
         notes: inv.notes,
         items: inv.items || [],
+        subtotal: typeof inv.subtotal === 'number' ? inv.subtotal : subtotal,
+        tax_rate: typeof inv.tax_rate === 'number' ? inv.tax_rate : taxRate,
+        tax_amount: typeof inv.tax_amount === 'number' ? inv.tax_amount : taxAmount,
         total: inv.total,
         status: inv.status,
         sent_at: inv.sent_at,
@@ -676,6 +700,39 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
       setAdditionalInvoices(prev => prev.filter(i => i.id !== invoiceId));
     } catch (err: any) {
       setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to delete charge' });
+    } finally {
+      setAdditionalBusy(null);
+    }
+  }
+
+  async function toggleAdditionalChargeVat(inv: AdditionalInvoice) {
+    if (!jobId) return;
+    const nextVatEnabled = !(inv.tax_amount > 0);
+    const subtotal = inv.items.reduce((s, i) => s + (Number(i.unit_price) || 0), 0);
+    const taxRate = nextVatEnabled ? 20 : 0;
+    const taxAmount = nextVatEnabled ? Math.round(subtotal * 0.20 * 100) / 100 : 0;
+    const total = subtotal + taxAmount;
+    setAdditionalBusy(inv.id);
+    try {
+      const res = await api.put(`/crm/jobs/${jobId}/invoices/${inv.id}`, {
+        notes: inv.notes,
+        subtotal,
+        tax_rate: taxRate,
+        tax_amount: taxAmount,
+        total,
+        items: inv.items.map(i => ({ description: i.description, quantity: 1, unit_price: i.unit_price, total: i.unit_price })),
+      });
+      const updated = res.data;
+      setAdditionalInvoices(prev => prev.map(i => i.id === inv.id ? {
+        ...i,
+        items: updated.items || i.items,
+        subtotal: typeof updated.subtotal === 'number' ? updated.subtotal : subtotal,
+        tax_rate: typeof updated.tax_rate === 'number' ? updated.tax_rate : taxRate,
+        tax_amount: typeof updated.tax_amount === 'number' ? updated.tax_amount : taxAmount,
+        total: updated.total,
+      } : i));
+    } catch (err: any) {
+      setSendingToast({ kind: 'error', msg: err?.response?.data?.error || 'Failed to toggle VAT' });
     } finally {
       setAdditionalBusy(null);
     }
@@ -1245,15 +1302,18 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         showNewForm={showNewChargeForm}
         newTitle={newChargeTitle}
         newItems={newChargeItems}
+        newVatEnabled={newChargeVatEnabled}
         editingId={editingChargeId}
         editingTitle={editingChargeTitle}
         editingItems={editingChargeItems}
+        editingVatEnabled={editingChargeVatEnabled}
         busy={additionalBusy}
         jobEmail={jobInfo?.email || null}
         onShowNewForm={() => {
           setShowNewChargeForm(true);
           setNewChargeTitle('');
           setNewChargeItems([{ id: newId(), description: '', price: 0 }]);
+          setNewChargeVatEnabled(false);
         }}
         onCancelNewForm={() => setShowNewChargeForm(false)}
         onNewTitleChange={setNewChargeTitle}
@@ -1262,11 +1322,13 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         }
         onNewItemAdd={() => setNewChargeItems(prev => [...prev, { id: newId(), description: '', price: 0 }])}
         onNewItemRemove={id => setNewChargeItems(prev => prev.filter(i => i.id !== id))}
+        onNewToggleVat={() => setNewChargeVatEnabled(v => !v)}
         onCreate={createAdditionalCharge}
         onStartEdit={inv => {
           setEditingChargeId(inv.id);
           setEditingChargeTitle(inv.notes || '');
           setEditingChargeItems(inv.items.map(i => ({ id: String(i.id), description: i.description, price: i.unit_price })));
+          setEditingChargeVatEnabled(inv.tax_amount > 0);
         }}
         onCancelEdit={() => setEditingChargeId(null)}
         onEditTitleChange={setEditingChargeTitle}
@@ -1275,9 +1337,11 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         }
         onEditItemAdd={() => setEditingChargeItems(prev => [...prev, { id: newId(), description: '', price: 0 }])}
         onEditItemRemove={id => setEditingChargeItems(prev => prev.filter(i => i.id !== id))}
+        onEditToggleVat={() => setEditingChargeVatEnabled(v => !v)}
         onSaveEdit={updateAdditionalCharge}
         onDelete={deleteAdditionalCharge}
         onTogglePaid={toggleAdditionalChargePaid}
+        onToggleVat={toggleAdditionalChargeVat}
         onEmail={openAdditionalChargeEmail}
       />
 
@@ -2268,24 +2332,26 @@ function ReadPaidRow({
 
 function AdditionalChargesBlock({
   invoices,
-  showNewForm, newTitle, newItems,
-  editingId, editingTitle, editingItems,
+  showNewForm, newTitle, newItems, newVatEnabled,
+  editingId, editingTitle, editingItems, editingVatEnabled,
   busy, jobEmail,
   onShowNewForm, onCancelNewForm,
-  onNewTitleChange, onNewItemUpdate, onNewItemAdd, onNewItemRemove,
+  onNewTitleChange, onNewItemUpdate, onNewItemAdd, onNewItemRemove, onNewToggleVat,
   onCreate,
   onStartEdit, onCancelEdit,
-  onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove,
+  onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove, onEditToggleVat,
   onSaveEdit,
-  onDelete, onTogglePaid, onEmail,
+  onDelete, onTogglePaid, onToggleVat, onEmail,
 }: {
   invoices: AdditionalInvoice[];
   showNewForm: boolean;
   newTitle: string;
   newItems: LineItem[];
+  newVatEnabled: boolean;
   editingId: number | null;
   editingTitle: string;
   editingItems: LineItem[];
+  editingVatEnabled: boolean;
   busy: number | 'new' | null;
   jobEmail: string | null;
   onShowNewForm: () => void;
@@ -2294,6 +2360,7 @@ function AdditionalChargesBlock({
   onNewItemUpdate: (id: string, patch: Partial<LineItem>) => void;
   onNewItemAdd: () => void;
   onNewItemRemove: (id: string) => void;
+  onNewToggleVat: () => void;
   onCreate: () => void;
   onStartEdit: (inv: AdditionalInvoice) => void;
   onCancelEdit: () => void;
@@ -2301,11 +2368,16 @@ function AdditionalChargesBlock({
   onEditItemUpdate: (id: string, patch: Partial<LineItem>) => void;
   onEditItemAdd: () => void;
   onEditItemRemove: (id: string) => void;
+  onEditToggleVat: () => void;
   onSaveEdit: (id: number) => void;
   onDelete: (id: number) => void;
   onTogglePaid: (inv: AdditionalInvoice) => void;
+  onToggleVat: (inv: AdditionalInvoice) => void;
   onEmail: (inv: AdditionalInvoice) => void;
 }) {
+  const newSubtotal = listTotal(newItems);
+  const newVat = newVatEnabled ? Math.round(newSubtotal * 0.20 * 100) / 100 : 0;
+  const newTotal = newSubtotal + newVat;
   return (
     <div className="rounded-xl border border-rose-200/70 bg-white overflow-hidden shadow-sm">
       {/* Header */}
@@ -2338,6 +2410,7 @@ function AdditionalChargesBlock({
             isEditing={editingId === inv.id}
             editingTitle={editingTitle}
             editingItems={editingItems}
+            editingVatEnabled={editingVatEnabled}
             busy={busy === inv.id}
             jobEmail={jobEmail}
             onStartEdit={() => onStartEdit(inv)}
@@ -2346,9 +2419,11 @@ function AdditionalChargesBlock({
             onEditItemUpdate={onEditItemUpdate}
             onEditItemAdd={onEditItemAdd}
             onEditItemRemove={onEditItemRemove}
+            onEditToggleVat={onEditToggleVat}
             onSaveEdit={() => onSaveEdit(inv.id)}
             onDelete={() => onDelete(inv.id)}
             onTogglePaid={() => onTogglePaid(inv)}
+            onToggleVat={() => onToggleVat(inv)}
             onEmail={() => onEmail(inv)}
           />
         ))}
@@ -2394,6 +2469,45 @@ function AdditionalChargesBlock({
               <PlusCircle className="w-4 h-4" /> Add item
             </button>
 
+            {newItems.length > 0 && (
+              <div className="rounded-md bg-white/60 border border-rose-100 px-3 py-2 space-y-1.5">
+                {newVatEnabled ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500">Subtotal</span>
+                      <span className="text-sm tabular-nums text-slate-700">{fmt(newSubtotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500">VAT (20%)</span>
+                      <span className="text-sm tabular-nums text-slate-700">{fmt(newVat)}</span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-rose-100">
+                      <span className="text-sm font-bold text-rose-700">Total (inc. VAT)</span>
+                      <span className="font-bold tabular-nums tracking-tight text-base text-rose-900">{fmt(newTotal)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-rose-700">Total</span>
+                    <span className="font-bold tabular-nums tracking-tight text-base text-rose-900">{fmt(newSubtotal)}</span>
+                  </div>
+                )}
+                <div className="flex justify-end pt-0.5">
+                  <button
+                    type="button"
+                    onClick={onNewToggleVat}
+                    className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
+                      newVatEnabled
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600'
+                    }`}
+                  >
+                    VAT 20%
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 pt-1">
               <button
                 type="button"
@@ -2421,14 +2535,15 @@ function AdditionalChargesBlock({
 }
 
 function AdditionalInvoiceCard({
-  inv, isEditing, editingTitle, editingItems, busy, jobEmail,
-  onStartEdit, onCancelEdit, onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove,
-  onSaveEdit, onDelete, onTogglePaid, onEmail,
+  inv, isEditing, editingTitle, editingItems, editingVatEnabled, busy, jobEmail,
+  onStartEdit, onCancelEdit, onEditTitleChange, onEditItemUpdate, onEditItemAdd, onEditItemRemove, onEditToggleVat,
+  onSaveEdit, onDelete, onTogglePaid, onToggleVat, onEmail,
 }: {
   inv: AdditionalInvoice;
   isEditing: boolean;
   editingTitle: string;
   editingItems: LineItem[];
+  editingVatEnabled: boolean;
   busy: boolean;
   jobEmail: string | null;
   onStartEdit: () => void;
@@ -2437,13 +2552,22 @@ function AdditionalInvoiceCard({
   onEditItemUpdate: (id: string, patch: Partial<LineItem>) => void;
   onEditItemAdd: () => void;
   onEditItemRemove: (id: string) => void;
+  onEditToggleVat: () => void;
   onSaveEdit: () => void;
   onDelete: () => void;
   onTogglePaid: () => void;
+  onToggleVat: () => void;
   onEmail: () => void;
 }) {
   const isPaid = inv.status === 'paid';
   const isSent = inv.status === 'sent';
+  const vatEnabled = inv.tax_amount > 0;
+  const subtotalDisplay = inv.subtotal > 0
+    ? inv.subtotal
+    : inv.items.reduce((s, i) => s + (Number(i.unit_price) || 0), 0);
+  const editSubtotal = listTotal(editingItems);
+  const editVat = editingVatEnabled ? Math.round(editSubtotal * 0.20 * 100) / 100 : 0;
+  const editTotal = editSubtotal + editVat;
 
   const sentLabel = inv.sent_at
     ? new Date(inv.sent_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -2484,9 +2608,22 @@ function AdditionalInvoiceCard({
         </div>
 
         {/* Right: total */}
-        <span className={`text-base font-bold tabular-nums tracking-tight flex-shrink-0 ${
-          isPaid ? 'text-emerald-700' : 'text-slate-900'
-        }`}>{fmt(inv.total)}</span>
+        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+          {vatEnabled ? (
+            <>
+              <span className="text-[11px] text-slate-400 tabular-nums">
+                Subtotal {fmt(subtotalDisplay)} · VAT {fmt(inv.tax_amount)}
+              </span>
+              <span className={`text-base font-bold tabular-nums tracking-tight ${
+                isPaid ? 'text-emerald-700' : 'text-slate-900'
+              }`}>{fmt(inv.total)} <span className="text-[10px] font-medium text-slate-400 ml-0.5">inc. VAT</span></span>
+            </>
+          ) : (
+            <span className={`text-base font-bold tabular-nums tracking-tight ${
+              isPaid ? 'text-emerald-700' : 'text-slate-900'
+            }`}>{fmt(inv.total)}</span>
+          )}
+        </div>
       </div>
 
       {/* Edit form (only visible when editing) */}
@@ -2517,6 +2654,46 @@ function AdditionalInvoiceCard({
           >
             <PlusCircle className="w-4 h-4" /> Add item
           </button>
+
+          {editingItems.length > 0 && (
+            <div className="rounded-md bg-white border border-slate-200 px-3 py-2 space-y-1.5">
+              {editingVatEnabled ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">Subtotal</span>
+                    <span className="text-sm tabular-nums text-slate-700">{fmt(editSubtotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">VAT (20%)</span>
+                    <span className="text-sm tabular-nums text-slate-700">{fmt(editVat)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                    <span className="text-sm font-bold text-rose-700">Total (inc. VAT)</span>
+                    <span className="font-bold tabular-nums tracking-tight text-base text-rose-900">{fmt(editTotal)}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-rose-700">Total</span>
+                  <span className="font-bold tabular-nums tracking-tight text-base text-rose-900">{fmt(editSubtotal)}</span>
+                </div>
+              )}
+              <div className="flex justify-end pt-0.5">
+                <button
+                  type="button"
+                  onClick={onEditToggleVat}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
+                    editingVatEnabled
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-500 border-slate-300 hover:border-blue-400 hover:text-blue-600'
+                  }`}
+                >
+                  VAT 20%
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -2559,6 +2736,19 @@ function AdditionalInvoiceCard({
           className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-95"
         >
           <Pencil className="w-3.5 h-3.5" /> Edit
+        </button>
+        <button
+          type="button"
+          onClick={onToggleVat}
+          disabled={busy || isPaid}
+          title={isPaid ? 'Cannot change VAT on a paid invoice' : (vatEnabled ? 'VAT 20% is on — click to remove' : 'Add VAT 20%')}
+          className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-md border transition-colors active:scale-95 disabled:opacity-50 ${
+            vatEnabled
+              ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-blue-300 hover:text-blue-600'
+          }`}
+        >
+          VAT 20%
         </button>
         <button
           type="button"
