@@ -14,7 +14,7 @@ model User {
   email         String   @unique
   password_hash String
   name          String
-  role          String   // 'admin' | 'partner'
+  role          String // 'admin' | 'partner'
   avatar        String?
   created_at    DateTime @default(now())
 
@@ -161,9 +161,9 @@ model CrmJob {
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt
 
-  lead                Lead?        @relation(fields: [lead_id], references: [id], onDelete: SetNull)
-  customer            CrmCustomer? @relation("customer_jobs", fields: [customer_id], references: [id], onDelete: SetNull)
-  referred_by         CrmCustomer? @relation("referred_jobs", fields: [referred_by_customer_id], references: [id], onDelete: SetNull)
+  lead                Lead?               @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  customer            CrmCustomer?        @relation("customer_jobs", fields: [customer_id], references: [id], onDelete: SetNull)
+  referred_by         CrmCustomer?        @relation("referred_jobs", fields: [referred_by_customer_id], references: [id], onDelete: SetNull)
   activities          CrmActivity[]
   planner_assignments PlannerAssignment[]
   quotes              Quote[]
@@ -210,7 +210,7 @@ model CrmCustomer {
 
 model PlannerAsset {
   id             Int      @id @default(autoincrement())
-  type           String   // 'staff' | 'vehicle'
+  type           String // 'staff' | 'vehicle'
   name           String
   role           String?
   phone          String?
@@ -244,7 +244,7 @@ model PlannerEvent {
   updated_at     DateTime @default(now()) @updatedAt
 
   assignments  PlannerAssignment[]
-  contract     Contract?    @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  contract     Contract?           @relation(fields: [contract_id], references: [id], onDelete: SetNull)
   contract_job ContractJob?
 
   @@map("planner_events")
@@ -272,7 +272,7 @@ model PlannerAssignment {
 model WagePeriod {
   id         Int       @id @default(autoincrement())
   asset_id   Int
-  week_start String    // YYYY-MM-DD (Monday)
+  week_start String // YYYY-MM-DD (Monday)
   expenses   Float     @default(0)
   advances   Float     @default(0)
   notes      String?
@@ -290,23 +290,23 @@ model WagePeriod {
 // ─── New entities ───────────────────────────────────────────────────────────
 
 model Quote {
-  id           Int      @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   job_id       Int
-  quote_number String   @unique
-  quote_type   String   @default("fixed") // estimate | fixed
-  status       String   @default("draft") // draft | sent | accepted | declined | expired
-  subtotal     Float    @default(0)
-  tax_rate     Float    @default(20.0)
-  tax_amount   Float    @default(0)
-  total        Float    @default(0)
-  deposit      Float    @default(0)
+  quote_number String    @unique
+  quote_type   String    @default("fixed") // estimate | fixed
+  status       String    @default("draft") // draft | sent | accepted | declined | expired
+  subtotal     Float     @default(0)
+  tax_rate     Float     @default(20.0)
+  tax_amount   Float     @default(0)
+  total        Float     @default(0)
+  deposit      Float     @default(0)
   valid_until  String?
   notes        String?
   sent_at      DateTime?
   sent_to      String?
   accepted_at  DateTime?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @default(now()) @updatedAt
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
 
   job      CrmJob      @relation(fields: [job_id], references: [id], onDelete: Cascade)
   items    QuoteItem[]
@@ -331,28 +331,35 @@ model QuoteItem {
 }
 
 model Invoice {
-  id             Int       @id @default(autoincrement())
-  job_id         Int
-  quote_id       Int?
-  invoice_number String    @unique
-  invoice_type   String    @default("main") // deposit | main
-  status         String    @default("draft") // draft | sent | paid | overdue | cancelled
-  subtotal       Float     @default(0)
-  tax_rate       Float     @default(20.0)
-  tax_amount     Float     @default(0)
-  total          Float     @default(0)
-  due_date       String?
-  notes          String?
-  sent_at        DateTime?
-  sent_to        String?
-  paid_at        DateTime?
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @default(now()) @updatedAt
+  id                  Int       @id @default(autoincrement())
+  job_id              Int
+  quote_id            Int?
+  invoice_number      String    @unique
+  invoice_type        String    @default("main") // deposit | main
+  status              String    @default("draft") // draft | sent | paid | overdue | cancelled
+  subtotal            Float     @default(0)
+  tax_rate            Float     @default(20.0)
+  tax_amount          Float     @default(0)
+  total               Float     @default(0)
+  due_date            String?
+  notes               String?
+  sent_at             DateTime?
+  sent_to             String?
+  paid_at             DateTime?
+  // Bank account snapshot — captured at save time so historical invoices
+  // remain correct even if the BankAccount row is later edited or deleted.
+  bank_account_id     Int?
+  bank_account_name   String?
+  bank_sort_code      String?
+  bank_account_number String?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @default(now()) @updatedAt
 
-  job      CrmJob        @relation(fields: [job_id], references: [id], onDelete: Cascade)
-  quote    Quote?        @relation(fields: [quote_id], references: [id], onDelete: SetNull)
-  items    InvoiceItem[]
-  payments Payment[]
+  job          CrmJob        @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  quote        Quote?        @relation(fields: [quote_id], references: [id], onDelete: SetNull)
+  bank_account BankAccount?  @relation(fields: [bank_account_id], references: [id], onDelete: SetNull)
+  items        InvoiceItem[]
+  payments     Payment[]
 
   @@map("invoices")
 }
@@ -375,7 +382,7 @@ model Payment {
   id                Int      @id @default(autoincrement())
   invoice_id        Int
   amount            Float
-  method            String   // stripe | bank_transfer | cash | cheque
+  method            String // stripe | bank_transfer | cash | cheque
   stripe_payment_id String?
   reference         String?
   notes             String?
@@ -391,7 +398,7 @@ model Document {
   id          Int      @id @default(autoincrement())
   job_id      Int
   name        String
-  type        String   // quote_pdf | invoice_pdf | survey_report | photo | other
+  type        String // quote_pdf | invoice_pdf | survey_report | photo | other
   storage_key String
   mime_type   String?
   size_bytes  Int?
@@ -403,16 +410,16 @@ model Document {
 }
 
 model CalendarConnection {
-  id               Int      @id @default(autoincrement())
+  id               Int       @id @default(autoincrement())
   user_id          Int
-  provider         String   @default("google")
+  provider         String    @default("google")
   access_token     String?
   refresh_token    String?
   token_expires_at DateTime?
   calendar_id      String?
-  enabled          Boolean  @default(true)
-  created_at       DateTime @default(now())
-  updated_at       DateTime @default(now()) @updatedAt
+  enabled          Boolean   @default(true)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @default(now()) @updatedAt
 
   user   User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
   events CalendarEvent[]
@@ -421,7 +428,7 @@ model CalendarConnection {
 }
 
 model CalendarEvent {
-  id            Int      @id @default(autoincrement())
+  id            Int       @id @default(autoincrement())
   connection_id Int
   job_id        Int?
   external_id   String?
@@ -431,8 +438,8 @@ model CalendarEvent {
   end_time      DateTime
   location      String?
   synced_at     DateTime?
-  created_at    DateTime @default(now())
-  updated_at    DateTime @default(now()) @updatedAt
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
 
   connection CalendarConnection @relation(fields: [connection_id], references: [id], onDelete: Cascade)
   job        CrmJob?            @relation(fields: [job_id], references: [id], onDelete: SetNull)
@@ -446,7 +453,7 @@ model EmailTemplate {
   slug       String   @unique
   subject    String
   body_html  String
-  variables  String?  // JSON array of variable names e.g. ["customer_name", "quote_total"]
+  variables  String? // JSON array of variable names e.g. ["customer_name", "quote_total"]
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
 
@@ -459,7 +466,7 @@ model EmailTemplate {
 model EmailSequence {
   id            Int      @id @default(autoincrement())
   name          String
-  trigger_event String   // quote_sent | invoice_sent | job_booked | job_completed
+  trigger_event String // quote_sent | invoice_sent | job_booked | job_completed
   active        Boolean  @default(true)
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now()) @updatedAt
@@ -485,15 +492,15 @@ model EmailSequenceStep {
 }
 
 model EmailLog {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   job_id      Int?
   to_email    String
   subject     String
   template_id Int?
-  status      String   @default("queued") // queued | sent | failed | bounced
+  status      String    @default("queued") // queued | sent | failed | bounced
   sent_at     DateTime?
   error       String?
-  created_at  DateTime @default(now())
+  created_at  DateTime  @default(now())
 
   template EmailTemplate? @relation(fields: [template_id], references: [id], onDelete: SetNull)
 
@@ -508,7 +515,7 @@ model IntegrationToken {
   refresh_token    String?
   token_expires_at DateTime?
   scopes           String?
-  metadata         String?   // JSON
+  metadata         String? // JSON
   created_at       DateTime  @default(now())
   updated_at       DateTime  @default(now()) @updatedAt
 
@@ -522,7 +529,7 @@ model WebhookEvent {
   id           Int       @id @default(autoincrement())
   provider     String
   event_type   String
-  payload      String    // JSON
+  payload      String // JSON
   status       String    @default("pending") // pending | processed | failed
   processed_at DateTime?
   error        String?
@@ -534,7 +541,7 @@ model WebhookEvent {
 model BackgroundJob {
   id            Int       @id @default(autoincrement())
   type          String
-  payload       String    // JSON
+  payload       String // JSON
   status        String    @default("pending") // pending | running | completed | failed | retrying
   priority      Int       @default(0)
   attempts      Int       @default(0)
@@ -560,6 +567,23 @@ model CompanySetting {
   updated_at DateTime @default(now()) @updatedAt
 
   @@map("company_settings")
+}
+
+model BankAccount {
+  id             Int      @id @default(autoincrement())
+  label          String // friendly name shown in the dropdown — e.g. "iMove Relocations Ltd"
+  account_name   String // bank account holder / company name printed on invoice
+  sort_code      String
+  account_number String
+  is_default     Boolean  @default(false)
+  sort_order     Int      @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  invoices          Invoice[]
+  contract_invoices ContractInvoice[]
+
+  @@map("bank_accounts")
 }
 
 model JobStatus {
@@ -621,31 +645,31 @@ model ContractItem {
   created_at  DateTime @default(now())
   updated_at  DateTime @default(now()) @updatedAt
 
-  contract       Contract           @relation(fields: [contract_id], references: [id], onDelete: Cascade)
-  job_items      ContractJobItem[]
+  contract  Contract          @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  job_items ContractJobItem[]
 
   @@index([contract_id])
   @@map("contract_items")
 }
 
 model ContractJob {
-  id                Int      @id @default(autoincrement())
-  contract_id       Int
-  job_date          String   // YYYY-MM-DD
-  description       String?
-  notes             String?
-  men_needed        Int      @default(0)
-  vans_needed       Int      @default(0)
-  hgv_needed        Int      @default(0)
-  planner_event_id  Int?     @unique
-  invoiced          Boolean  @default(false)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @default(now()) @updatedAt
+  id               Int      @id @default(autoincrement())
+  contract_id      Int
+  job_date         String // YYYY-MM-DD
+  description      String?
+  notes            String?
+  men_needed       Int      @default(0)
+  vans_needed      Int      @default(0)
+  hgv_needed       Int      @default(0)
+  planner_event_id Int?     @unique
+  invoiced         Boolean  @default(false)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
 
-  contract         Contract               @relation(fields: [contract_id], references: [id], onDelete: Cascade)
-  planner_event    PlannerEvent?          @relation(fields: [planner_event_id], references: [id], onDelete: SetNull)
-  items            ContractJobItem[]
-  invoice_items    ContractInvoiceItem[]
+  contract      Contract              @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  planner_event PlannerEvent?         @relation(fields: [planner_event_id], references: [id], onDelete: SetNull)
+  items         ContractJobItem[]
+  invoice_items ContractInvoiceItem[]
 
   @@index([contract_id, job_date])
   @@map("contract_jobs")
@@ -670,46 +694,52 @@ model ContractJobItem {
 }
 
 model ContractInvoice {
-  id                 Int       @id @default(autoincrement())
-  contract_id        Int
-  invoice_number     String    @unique
-  week_start         String    // YYYY-MM-DD (Monday)
-  week_end           String    // YYYY-MM-DD (Sunday)
-  header_description String?
-  status             String    @default("draft") // draft | sent | paid
-  subtotal           Float     @default(0)
-  tax_rate           Float     @default(20.0)
-  tax_amount         Float     @default(0)
-  total              Float     @default(0)
-  notes              String?
-  sent_at            DateTime?
-  sent_to            String?
-  paid_at            DateTime?
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @default(now()) @updatedAt
+  id                  Int       @id @default(autoincrement())
+  contract_id         Int
+  invoice_number      String    @unique
+  week_start          String // YYYY-MM-DD (Monday)
+  week_end            String // YYYY-MM-DD (Sunday)
+  header_description  String?
+  status              String    @default("draft") // draft | sent | paid
+  subtotal            Float     @default(0)
+  tax_rate            Float     @default(20.0)
+  tax_amount          Float     @default(0)
+  total               Float     @default(0)
+  notes               String?
+  sent_at             DateTime?
+  sent_to             String?
+  paid_at             DateTime?
+  // Bank account snapshot — see Invoice model for rationale.
+  bank_account_id     Int?
+  bank_account_name   String?
+  bank_sort_code      String?
+  bank_account_number String?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @default(now()) @updatedAt
 
-  contract Contract              @relation(fields: [contract_id], references: [id], onDelete: Cascade)
-  items    ContractInvoiceItem[]
+  contract     Contract              @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  bank_account BankAccount?          @relation(fields: [bank_account_id], references: [id], onDelete: SetNull)
+  items        ContractInvoiceItem[]
 
   @@index([contract_id, week_start])
   @@map("contract_invoices")
 }
 
 model ContractInvoiceItem {
-  id                          Int     @id @default(autoincrement())
+  id                          Int    @id @default(autoincrement())
   contract_invoice_id         Int
   source_contract_job_id      Int?
   source_contract_job_item_id Int?
-  job_date                    String  // YYYY-MM-DD
+  job_date                    String // YYYY-MM-DD
   description                 String
-  quantity                    Float   @default(1)
-  unit_price                  Float   @default(0)
-  total                       Float   @default(0)
-  sort_order                  Int     @default(0)
+  quantity                    Float  @default(1)
+  unit_price                  Float  @default(0)
+  total                       Float  @default(0)
+  sort_order                  Int    @default(0)
 
-  invoice          ContractInvoice  @relation(fields: [contract_invoice_id], references: [id], onDelete: Cascade)
-  source_job       ContractJob?     @relation(fields: [source_contract_job_id], references: [id], onDelete: SetNull)
-  source_job_item  ContractJobItem? @relation(fields: [source_contract_job_item_id], references: [id], onDelete: SetNull)
+  invoice         ContractInvoice  @relation(fields: [contract_invoice_id], references: [id], onDelete: Cascade)
+  source_job      ContractJob?     @relation(fields: [source_contract_job_id], references: [id], onDelete: SetNull)
+  source_job_item ContractJobItem? @relation(fields: [source_contract_job_item_id], references: [id], onDelete: SetNull)
 
   @@index([contract_invoice_id])
   @@index([source_contract_job_item_id])
@@ -722,7 +752,7 @@ model JobChangeLog {
   id          Int      @id @default(autoincrement())
   job_id      Int
   user_id     Int
-  field_name  String   // e.g. "status", "from_line1", "notes"
+  field_name  String // e.g. "status", "from_line1", "notes"
   old_value   String?
   new_value   String?
   change_type String   @default("update") // "create", "update", "delete"
@@ -741,14 +771,14 @@ model JobChangeLog {
 
 // Partner Portal usage tracking (logins, page views, etc.)
 model PartnerActivityLog {
-  id          Int      @id @default(autoincrement())
-  user_id     Int
-  partner_id  Int?
-  event_type  String   // "login" | "logout" | "page_view"
-  path        String?
-  ip_address  String?
-  user_agent  String?
-  created_at  DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  partner_id Int?
+  event_type String // "login" | "logout" | "page_view"
+  path       String?
+  ip_address String?
+  user_agent String?
+  created_at DateTime @default(now())
 
   @@index([user_id])
   @@index([partner_id])
@@ -759,16 +789,16 @@ model PartnerActivityLog {
 
 // API Keys for external integrations (AI assistants, third-party systems)
 model ApiKey {
-  id          Int       @id @default(autoincrement())
-  name        String                            // e.g. "Claude AI Assistant"
-  key_prefix  String    @unique                 // first 8 chars, shown to user (e.g. "imv_a3f8...")
-  key_hash    String                            // bcrypt hash of full key
-  scopes      String    @default("crm:read,crm:write")
-  is_active   Boolean   @default(true)
+  id           Int       @id @default(autoincrement())
+  name         String // e.g. "Claude AI Assistant"
+  key_prefix   String    @unique // first 8 chars, shown to user (e.g. "imv_a3f8...")
+  key_hash     String // bcrypt hash of full key
+  scopes       String    @default("crm:read,crm:write")
+  is_active    Boolean   @default(true)
   last_used_at DateTime?
   last_used_ip String?
-  created_at  DateTime  @default(now())
-  expires_at  DateTime?
+  created_at   DateTime  @default(now())
+  expires_at   DateTime?
 
   @@map("api_keys")
 }

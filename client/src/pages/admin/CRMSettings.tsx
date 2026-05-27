@@ -585,7 +585,8 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">Loading…</div>;
 
   return (
-    <form onSubmit={handleSave} className="max-w-2xl">
+    <div className="max-w-2xl space-y-6">
+    <form onSubmit={handleSave}>
       <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
         <h2 className="text-sm font-semibold text-slate-700">Company Information</h2>
         <div className="grid grid-cols-2 gap-4">
@@ -644,6 +645,275 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
         </div>
       </div>
     </form>
+
+    <BankAccountsSection showToast={showToast} />
+    </div>
+  );
+}
+
+// ── Bank Accounts section ────────────────────────────────────────────────────
+
+type BankAccount = {
+  id: number;
+  label: string;
+  account_name: string;
+  sort_code: string;
+  account_number: string;
+  is_default: boolean;
+  sort_order: number;
+};
+
+type BankAccountDraft = {
+  label: string;
+  account_name: string;
+  sort_code: string;
+  account_number: string;
+};
+
+const EMPTY_BANK_DRAFT: BankAccountDraft = { label: '', account_name: '', sort_code: '', account_number: '' };
+
+function BankAccountsSection({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [draft, setDraft] = useState<BankAccountDraft>(EMPTY_BANK_DRAFT);
+  const [addOpen, setAddOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.get<BankAccount[]>('/settings/bank-accounts');
+      setAccounts(r.data);
+    } catch {
+      showToast('Failed to load bank accounts', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const startEdit = (acc: BankAccount) => {
+    setEditingId(acc.id);
+    setDraft({
+      label: acc.label,
+      account_name: acc.account_name,
+      sort_code: acc.sort_code,
+      account_number: acc.account_number,
+    });
+    setAddOpen(false);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setDraft(EMPTY_BANK_DRAFT);
+  };
+
+  const validate = (d: BankAccountDraft) =>
+    d.label.trim() && d.account_name.trim() && d.sort_code.trim() && d.account_number.trim();
+
+  const handleCreate = async () => {
+    if (!validate(draft)) { showToast('All fields are required', 'error'); return; }
+    setBusy(true);
+    try {
+      await api.post('/settings/bank-accounts', draft);
+      await load();
+      setDraft(EMPTY_BANK_DRAFT);
+      setAddOpen(false);
+      showToast('Bank account added');
+    } catch {
+      showToast('Failed to add bank account', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const handleUpdate = async (id: number) => {
+    if (!validate(draft)) { showToast('All fields are required', 'error'); return; }
+    setBusy(true);
+    try {
+      await api.put(`/settings/bank-accounts/${id}`, draft);
+      await load();
+      cancelEdit();
+      showToast('Bank account updated');
+    } catch {
+      showToast('Failed to update bank account', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this bank account? Invoices already created using it keep their snapshotted details.')) return;
+    setBusy(true);
+    try {
+      await api.delete(`/settings/bank-accounts/${id}`);
+      await load();
+      showToast('Bank account deleted');
+    } catch {
+      showToast('Failed to delete bank account', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const handleSetDefault = async (id: number) => {
+    setBusy(true);
+    try {
+      await api.patch(`/settings/bank-accounts/${id}/default`);
+      await load();
+      showToast('Default bank account updated');
+    } catch {
+      showToast('Failed to set default', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const setD = (k: keyof BankAccountDraft) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setDraft(d => ({ ...d, [k]: e.target.value }));
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">Bank Accounts</h2>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Add multiple bank accounts for different businesses or contracts. The default is used on every invoice unless you pick another when creating it.
+          </p>
+        </div>
+        {!addOpen && (
+          <button
+            type="button"
+            onClick={() => { setAddOpen(true); setEditingId(null); setDraft(EMPTY_BANK_DRAFT); }}
+            className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg px-2.5 py-1.5"
+          >
+            <Plus className="w-4 h-4" /> Add account
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-slate-400 py-4 text-center">Loading…</div>
+      ) : (
+        <div className="space-y-2">
+          {accounts.length === 0 && !addOpen && (
+            <div className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-lg">
+              No bank accounts yet. Click "Add account" to create your first one.
+            </div>
+          )}
+
+          {accounts.map(acc => (
+            <div key={acc.id} className="border border-slate-200 rounded-lg p-3">
+              {editingId === acc.id ? (
+                <BankAccountEditor
+                  draft={draft}
+                  setD={setD}
+                  busy={busy}
+                  onSave={() => handleUpdate(acc.id)}
+                  onCancel={cancelEdit}
+                />
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium text-slate-800 truncate">{acc.label}</div>
+                      {acc.is_default && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                          Default
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1 grid grid-cols-3 gap-2 tabular-nums">
+                      <div><span className="text-slate-400">Account name:</span> {acc.account_name}</div>
+                      <div><span className="text-slate-400">Sort code:</span> {acc.sort_code}</div>
+                      <div><span className="text-slate-400">Account no.:</span> {acc.account_number}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {!acc.is_default && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetDefault(acc.id)}
+                        disabled={busy}
+                        className="text-xs text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded px-2 py-1"
+                        title="Set as default"
+                      >
+                        Set default
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => startEdit(acc)}
+                      disabled={busy}
+                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                      title="Edit"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(acc.id)}
+                      disabled={busy}
+                      className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {addOpen && (
+            <div className="border border-blue-200 bg-blue-50/30 rounded-lg p-3">
+              <BankAccountEditor
+                draft={draft}
+                setD={setD}
+                busy={busy}
+                onSave={handleCreate}
+                onCancel={() => { setAddOpen(false); setDraft(EMPTY_BANK_DRAFT); }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BankAccountEditor({
+  draft, setD, busy, onSave, onCancel,
+}: {
+  draft: BankAccountDraft;
+  setD: (k: keyof BankAccountDraft) => (e: React.ChangeEvent<HTMLInputElement>) => void;
+  busy: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <label className="block text-[11px] font-medium text-slate-500 mb-0.5">Label</label>
+          <input value={draft.label} onChange={setD('label')} placeholder="iMove Relocations Ltd" className="input-field w-full text-sm" />
+        </div>
+        <div className="col-span-2">
+          <label className="block text-[11px] font-medium text-slate-500 mb-0.5">Account name (printed on invoice)</label>
+          <input value={draft.account_name} onChange={setD('account_name')} placeholder="iMove Relocations Ltd" className="input-field w-full text-sm" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-0.5">Sort code</label>
+          <input value={draft.sort_code} onChange={setD('sort_code')} placeholder="04-00-03" className="input-field w-full text-sm tabular-nums" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-0.5">Account number</label>
+          <input value={draft.account_number} onChange={setD('account_number')} placeholder="66057796" className="input-field w-full text-sm tabular-nums" />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel} disabled={busy} className="text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1">
+          Cancel
+        </button>
+        <button type="button" onClick={onSave} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </div>
   );
 }
 

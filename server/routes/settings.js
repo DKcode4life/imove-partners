@@ -444,4 +444,88 @@ router.put('/planner-day-orders', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Bank Accounts ─────────────────────────────────────────────────────────────
+// Multiple bank accounts can be saved; one is flagged is_default. The selected
+// account is snapshotted onto each invoice at save time so historical PDFs
+// remain stable even if the account is later edited or deleted.
+
+function sanitizeBankAccountBody(body) {
+  const out = {};
+  if (body.label !== undefined)          out.label          = String(body.label || '').trim();
+  if (body.account_name !== undefined)   out.account_name   = String(body.account_name || '').trim();
+  if (body.sort_code !== undefined)      out.sort_code      = String(body.sort_code || '').trim();
+  if (body.account_number !== undefined) out.account_number = String(body.account_number || '').trim();
+  if (body.sort_order !== undefined)     out.sort_order     = Number.isFinite(+body.sort_order) ? +body.sort_order : 0;
+  return out;
+}
+
+router.get('/bank-accounts', wrap(async (_req, res) => {
+  const rows = await prisma.bankAccount.findMany({
+    orderBy: [{ is_default: 'desc' }, { sort_order: 'asc' }, { id: 'asc' }],
+  });
+  res.json(rows);
+}));
+
+router.post('/bank-accounts', wrap(async (req, res) => {
+  const data = sanitizeBankAccountBody(req.body);
+  if (!data.label || !data.account_name || !data.sort_code || !data.account_number) {
+    return res.status(400).json({ error: 'label, account_name, sort_code and account_number are required' });
+  }
+
+  const existingCount = await prisma.bankAccount.count();
+  const isDefault = existingCount === 0 || !!req.body.is_default;
+
+  const created = await prisma.$transaction(async (tx) => {
+    if (isDefault) {
+      await tx.bankAccount.updateMany({ data: { is_default: false }, where: { is_default: true } });
+    }
+    return tx.bankAccount.create({
+      data: { ...data, is_default: isDefault },
+    });
+  });
+  res.status(201).json(created);
+}));
+
+router.put('/bank-accounts/:id', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const data = sanitizeBankAccountBody(req.body);
+  if (!Object.keys(data).length) return res.status(400).json({ error: 'Nothing to update' });
+  const updated = await prisma.bankAccount.update({ where: { id }, data });
+  res.json(updated);
+}));
+
+router.patch('/bank-accounts/:id/default', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const target = await prisma.bankAccount.findUnique({ where: { id } });
+  if (!target) return res.status(404).json({ error: 'Bank account not found' });
+
+  await prisma.$transaction([
+    prisma.bankAccount.updateMany({ data: { is_default: false }, where: { is_default: true } }),
+    prisma.bankAccount.update({ where: { id }, data: { is_default: true } }),
+  ]);
+  res.json({ ok: true });
+}));
+
+router.delete('/bank-accounts/:id', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const existing = await prisma.bankAccount.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Bank account not found' });
+
+  await prisma.bankAccount.delete({ where: { id } });
+
+  // If we just deleted the default, promote the first remaining account.
+  if (existing.is_default) {
+    const next = await prisma.bankAccount.findFirst({
+      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+    });
+    if (next) {
+      await prisma.bankAccount.update({ where: { id: next.id }, data: { is_default: true } });
+    }
+  }
+  res.json({ ok: true });
+}));
+
 module.exports = router;

@@ -15,6 +15,15 @@ const wrap = require('../lib/async-handler');
 const { generateInvoicePDF } = require('../services/pdf');
 const { sendTemplated } = require('../services/email');
 const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
+const { resolveBankSnapshot } = require('../lib/bank-account-snapshot');
+
+function bankFieldsForPdf(invoice) {
+  return {
+    bank_account_name:   invoice.bank_account_name   || null,
+    bank_sort_code:      invoice.bank_sort_code      || null,
+    bank_account_number: invoice.bank_account_number || null,
+  };
+}
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -79,6 +88,7 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
     total = 0,
     due_date,
     items = [],
+    bank_account_id,
   } = req.body;
 
   if (!['deposit', 'main', 'additional'].includes(invoice_type)) {
@@ -90,6 +100,8 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
 
   const job = await prisma.crmJob.findUnique({ where: { id: jobId } });
   if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const bankSnapshot = await resolveBankSnapshot(prisma, bank_account_id);
 
   // Generate the reference number + create the invoice in a single retrying
   // pass. The invoice_number is *always* server-generated (DEP-##### or
@@ -108,6 +120,7 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
         total: parseFloat(total) || 0,
         due_date: due_date || null,
         notes: notes || null,
+        ...bankSnapshot,
         items: {
           create: items.map((item, idx) => ({
             description: item.description || '',
@@ -174,6 +187,7 @@ router.get('/jobs/:id/invoices/:invoiceId/pdf', wrap(async (req, res) => {
     deposit_paid: depositPaid,
     balance: invoice.total - depositPaid,
     notes: invoice.notes,
+    ...bankFieldsForPdf(invoice),
   });
 
   res.setHeader('Content-Type', pdf.mimeType);
@@ -229,6 +243,7 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
       deposit_paid: depositPaid,
       balance,
       notes: invoice.notes,
+      ...bankFieldsForPdf(invoice),
     });
     pdfAttachment = { filename: pdf.filename, content: pdf.buffer, contentType: pdf.mimeType };
   }
@@ -373,10 +388,16 @@ router.put('/jobs/:id/invoices/:invoiceId', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Only additional invoices can be edited this way' });
   }
 
-  const { notes, subtotal = 0, tax_rate = 0, tax_amount = 0, total = 0, items = [] } = req.body;
+  const { notes, subtotal = 0, tax_rate = 0, tax_amount = 0, total = 0, items = [], bank_account_id } = req.body;
   if (!items.length) return res.status(400).json({ error: 'At least one line item is required' });
 
   await prisma.invoiceItem.deleteMany({ where: { invoice_id: invoiceId } });
+
+  // Re-snapshot bank details on save so changing the selector updates the PDF.
+  // Only re-snapshot if the client sent a bank_account_id field (undefined = leave alone).
+  const bankPatch = bank_account_id === undefined
+    ? {}
+    : await resolveBankSnapshot(prisma, bank_account_id);
 
   const updated = await prisma.invoice.update({
     where: { id: invoiceId },
@@ -387,6 +408,7 @@ router.put('/jobs/:id/invoices/:invoiceId', wrap(async (req, res) => {
       tax_amount: parseFloat(tax_amount) || 0,
       total: parseFloat(total) || 0,
       updated_at: new Date(),
+      ...bankPatch,
       items: {
         create: items.map((item, idx) => ({
           description: item.description || '',

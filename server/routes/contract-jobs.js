@@ -19,6 +19,7 @@ const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
 const { generateContractInvoicePDF } = require('../services/pdf');
 const { send: sendEmail } = require('../services/email');
 const { reconcileDraftInvoice, syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
+const { resolveBankSnapshot } = require('../lib/bank-account-snapshot');
 
 router.use(authenticate, requireAdmin);
 
@@ -402,6 +403,7 @@ router.post('/contractors/:cid/invoices/auto', wrap(async (req, res) => {
   const totals = recalc(lines, tax_rate);
 
   const earliestDate = jobs[0]?.job_date || start;
+  const bankSnapshot = await resolveBankSnapshot(prisma, req.body?.bank_account_id);
 
   const created = await nextReferenceNumberWithRetry(prisma, 'contract', (invoice_number) =>
     prisma.contractInvoice.create({
@@ -413,6 +415,7 @@ router.post('/contractors/:cid/invoices/auto', wrap(async (req, res) => {
         header_description: defaultHeader(earliestDate),
         tax_rate: num(tax_rate, 20),
         ...totals,
+        ...bankSnapshot,
         items: { create: lines },
       },
       include: {
@@ -436,8 +439,14 @@ router.put('/invoices/:id', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Paid invoices are locked' });
   }
 
-  const { header_description, notes, tax_rate, items, status } = req.body;
+  const { header_description, notes, tax_rate, items, status, bank_account_id } = req.body;
   const isDraft = existing.status === 'draft' && (status === undefined || status === 'draft');
+
+  // Re-snapshot bank details if the client sent a bank_account_id field.
+  // undefined = leave existing snapshot alone.
+  const bankPatch = bank_account_id === undefined
+    ? {}
+    : await resolveBankSnapshot(prisma, bank_account_id);
 
   // Invoice-level metadata first (always safe to update on non-paid invoices).
   await prisma.contractInvoice.update({
@@ -447,6 +456,7 @@ router.put('/invoices/:id', wrap(async (req, res) => {
       ...(notes !== undefined ? { notes: notes || null } : {}),
       ...(tax_rate !== undefined ? { tax_rate: num(tax_rate, existing.tax_rate) } : {}),
       ...(status !== undefined ? { status: String(status) } : {}),
+      ...bankPatch,
     },
   });
 
@@ -659,6 +669,9 @@ async function buildInvoicePdfData(invoiceId) {
     tax_amount: inv.tax_amount,
     total: inv.total,
     created_at: inv.created_at,
+    bank_account_name:   inv.bank_account_name   || null,
+    bank_sort_code:      inv.bank_sort_code      || null,
+    bank_account_number: inv.bank_account_number || null,
   };
 }
 

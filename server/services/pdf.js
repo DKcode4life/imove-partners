@@ -385,7 +385,7 @@ function drawReceiptBlock(doc, y, data) {
   return y;
 }
 
-function drawBankBox(doc, y, reference) {
+function drawBankBox(doc, y, reference, bank) {
   // Ensure space; new page if needed
   if (y > 690) {
     doc.addPage();
@@ -401,10 +401,16 @@ function drawBankBox(doc, y, reference) {
   doc.fillColor(C.dark).font(F.bold).fontSize(11)
      .text('Payment — Bank Transfer', LEFT + 14, y + 10);
 
+  // Prefer snapshot fields from the invoice; fall back to COMPANY constants
+  // so older invoices (and any not yet tied to a BankAccount) still render.
+  const accountName   = bank?.account_name   || COMPANY.name;
+  const sortCode      = bank?.sort_code      || COMPANY.sortCode;
+  const accountNumber = bank?.account_number || COMPANY.accountNumber;
+
   const cells = [
-    ['Account name',    COMPANY.name],
-    ['Sort code',       COMPANY.sortCode],
-    ['Account number',  COMPANY.accountNumber],
+    ['Account name',    accountName],
+    ['Sort code',       sortCode],
+    ['Account number',  accountNumber],
     ['Reference',       reference || '—'],
   ];
   const cellW = CONTENT_W / 4;
@@ -734,7 +740,11 @@ async function renderDocument(data) {
 
   // Bank details for invoices
   if (config.showBank) {
-    y = drawBankBox(doc, y, data.doc_number);
+    y = drawBankBox(doc, y, data.doc_number, {
+      account_name:   data.bank_account_name,
+      sort_code:      data.bank_sort_code,
+      account_number: data.bank_account_number,
+    });
   }
 
   // Closing + signature
@@ -847,6 +857,9 @@ async function generateInvoicePDF(data) {
     payment_method: data.payment_method,
     payment_date: data.payment_date,
     notes: data.notes,
+    bank_account_name:   data.bank_account_name,
+    bank_sort_code:      data.bank_sort_code,
+    bank_account_number: data.bank_account_number,
   });
 }
 
@@ -922,7 +935,11 @@ async function generateContractInvoicePDF(data) {
   }
 
   // Bank details (same as customer invoice)
-  y = drawBankBox(doc, y, data.invoice_number);
+  y = drawBankBox(doc, y, data.invoice_number, {
+    account_name:   data.bank_account_name,
+    sort_code:      data.bank_sort_code,
+    account_number: data.bank_account_number,
+  });
 
   // Closing + signature
   y = drawClosing(doc, y, 'invoice');

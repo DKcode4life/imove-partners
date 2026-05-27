@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import Modal from '../../components/Modal';
+import BankAccountSelect from '../../components/BankAccountSelect';
 import api from '../../lib/api';
 import type { Contract } from '../../types';
 
@@ -37,6 +38,10 @@ interface ContractInvoice {
   sent_at: string | null;
   sent_to: string | null;
   paid_at: string | null;
+  bank_account_id: number | null;
+  bank_account_name: string | null;
+  bank_sort_code: string | null;
+  bank_account_number: string | null;
   items: InvoiceItem[];
   contract: Contract;
 }
@@ -71,6 +76,7 @@ export default function CRMContractInvoice() {
   const [notes, setNotes] = useState('');
   const [taxRate, setTaxRate] = useState(20);
   const [items, setItems] = useState<InvoiceItem[]>([]);
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
@@ -88,6 +94,7 @@ export default function CRMContractInvoice() {
     setNotes(r.data.notes || '');
     setTaxRate(r.data.tax_rate);
     setItems(r.data.items.map(i => ({ ...i })));
+    setBankAccountId(r.data.bank_account_id ?? null);
     setEmailTo(r.data.contract.email || '');
     setLoading(false);
     setDirty(false);
@@ -138,6 +145,7 @@ export default function CRMContractInvoice() {
         header_description: headerDescription,
         notes,
         tax_rate: Number(taxRate),
+        bank_account_id: bankAccountId,
         items: items.map(i => ({
           id: i.id,
           source_contract_job_id: i.source_contract_job_id,
@@ -276,16 +284,33 @@ export default function CRMContractInvoice() {
       </div>
 
       {/* Header description */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-5">
-        <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Opening Description</label>
-        <textarea
-          value={headerDescription}
-          onChange={e => { setHeaderDescription(e.target.value); setDirty(true); }}
-          disabled={isLocked}
-          rows={2}
-          placeholder="e.g. We commenced work on Monday 18th May 2026."
-          className="input-field w-full resize-none"
-        />
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-5 space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Opening Description</label>
+          <textarea
+            value={headerDescription}
+            onChange={e => { setHeaderDescription(e.target.value); setDirty(true); }}
+            disabled={isLocked}
+            rows={2}
+            placeholder="e.g. We commenced work on Monday 18th May 2026."
+            className="input-field w-full resize-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Bank Account</label>
+          <div className="max-w-md">
+            <BankAccountSelect
+              value={bankAccountId}
+              onChange={id => { setBankAccountId(id); setDirty(true); }}
+              disabled={isLocked}
+            />
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">
+            {invoice.bank_account_name
+              ? <>Currently snapshotted on this invoice: <strong>{invoice.bank_account_name}</strong> · {invoice.bank_sort_code} · {invoice.bank_account_number}</>
+              : 'Leave on default to use the company default. The selected account is snapshotted onto the invoice when you save.'}
+          </p>
+        </div>
       </div>
 
       {/* Items, grouped by day */}
