@@ -353,7 +353,7 @@ export default function CreateContractJobModal({ contract, editJob, onClose, onS
                       </td>
                       <td className="px-3 py-2">
                         <input
-                          type="number" step="1" min="0"
+                          type="number" step="any" min="0"
                           value={line.quantity}
                           onChange={e => {
                             const q = parseFloat(e.target.value) || 0;

@@ -335,7 +335,7 @@ export default function CRMContractInvoice() {
                     </td>
                     <td className="px-4 py-2">
                       <input
-                        type="number" step="1" min="0"
+                        type="number" step="any" min="0"
                         value={item.quantity}
                         onChange={e => updateLine(idx, { quantity: parseFloat(e.target.value) || 0 })}
                         disabled={isLocked}
