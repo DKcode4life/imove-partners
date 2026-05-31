@@ -379,6 +379,10 @@ export interface PlannerAsset {
   capacity_notes?: string;
   availability: string;
   is_lorry?: boolean;
+  // Per-staff wage rates (staff only); null when falling back to company defaults.
+  driver_daily_rate?: number | null;
+  porter_daily_rate?: number | null;
+  lux_hourly_rate?: number | null;
   notes?: string;
   sort_order: number;
   created_at: string;

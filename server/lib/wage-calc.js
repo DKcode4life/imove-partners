@@ -6,14 +6,21 @@
  *   - GET /api/wages/week             (weekly rollup on the Wages page)
  *
  * Rules (in order):
- *   1. Lux Move: if the linked contract is_lux AND both start_time and
- *      finish_time are set → hours = (finish − start), wage = hours ×
- *      luxHourlyRate. mode='lux'. If only one of the times is set the row
- *      hasn't been fully filled in yet — falls through to daily.
- *   2. Otherwise → total = assignment.daily_rate ?? roleDefault(asset.role),
- *      mode='daily'.
- *   3. Lorry bonus: if the assigned vehicle is_lorry AND the assignment is a
- *      driver → add lorryBonus.
+ *   1. Manual override: if assignment.wage_override is set, total = override
+ *      flat. mode='override'. Lorry bonus is NOT added on top — the user
+ *      typed the final number they want paid.
+ *   2. Lux Move: if the linked contract is_lux AND both start_time and
+ *      finish_time are set → hours = (finish − start), wage = hours × rate.
+ *      Rate is asset.lux_hourly_rate (per-staff) when set, otherwise the
+ *      global luxHourlyRate company setting. mode='lux'. If only one of the
+ *      times is set the row hasn't been fully filled in yet — falls through
+ *      to daily.
+ *   3. Otherwise → daily. Per-assignment daily_rate wins; if absent we use
+ *      the per-staff rate that matches the effective role on the day
+ *      (asset.driver_daily_rate / asset.porter_daily_rate). Falls back to
+ *      ROLE_DEFAULT_RATE for that role when the staff member's rate is null.
+ *   4. Lorry bonus: if the assigned vehicle is_lorry AND the assignment is a
+ *      driver → add lorryBonus (skipped when override is set, per rule 1).
  */
 
 const ROLE_DEFAULT_RATE = {
@@ -24,6 +31,19 @@ const ROLE_DEFAULT_RATE = {
 function roleDefault(role) {
   if (!role) return 0;
   return ROLE_DEFAULT_RATE[String(role).toLowerCase()] ?? 0;
+}
+
+/**
+ * Pick the per-staff daily rate field that matches the role being worked.
+ * Returns null when there's no matching per-staff rate (caller falls back
+ * to ROLE_DEFAULT_RATE).
+ */
+function assetRateForRole(asset, role) {
+  if (!asset) return null;
+  const r = String(role || '').toLowerCase();
+  if (r === 'driver') return asset.driver_daily_rate ?? null;
+  if (r === 'porter') return asset.porter_daily_rate ?? null;
+  return null;
 }
 
 /**
@@ -63,24 +83,45 @@ function deriveHours(start, finish) {
  * @param {number}   input.lorryBonus    — global setting £ flat
  * @returns {{ mode:'lux'|'daily', daily:number, lux:number, bonus:number, hours:number|null, total:number }}
  */
-function computeAssignmentWage({ assignment, asset, vehicle, contract, luxHourlyRate, lorryBonus }) {
+function computeAssignmentWage({ assignment, asset, vehicle, contract, event, luxHourlyRate, lorryBonus }) {
   const a = assignment || {};
   const isLuxContract = !!(contract && contract.is_lux);
-  const hours = isLuxContract ? deriveHours(a.start_time, a.finish_time) : null;
-  const assignedRole = String(a.assigned_role || asset?.role || '').toLowerCase();
+  // Start time for Lux hour-calc falls back to the event's scheduled start so
+  // the user only has to type the finish time on the Staff View row. (The
+  // start_time input is pre-populated with event_time visually but isn't always
+  // persisted to the assignment — falling back here makes the wage compute
+  // regardless of that.)
+  const effectiveStart = a.start_time || event?.event_time || null;
+  const hours = isLuxContract ? deriveHours(effectiveStart, a.finish_time) : null;
+  // Effective role on the day = assigned_role (per-assignment) ?? asset.role (staff default).
+  // Drives both per-staff rate selection and the lorry bonus check.
+  const effectiveRole = String(a.assigned_role || asset?.role || '').toLowerCase();
+
+  // Manual override short-circuits everything else.
+  if (a.wage_override != null) {
+    const total = +Number(a.wage_override).toFixed(2);
+    return { mode: 'override', daily: 0, lux: 0, bonus: 0, hours, total };
+  }
 
   let daily = 0;
   let lux = 0;
   let mode;
   if (isLuxContract && hours != null) {
-    lux = hours * Number(luxHourlyRate || 0);
+    const perStaffLux = asset?.lux_hourly_rate;
+    const rate = perStaffLux != null ? Number(perStaffLux) : Number(luxHourlyRate || 0);
+    lux = hours * rate;
     mode = 'lux';
   } else {
-    daily = a.daily_rate != null ? Number(a.daily_rate) : roleDefault(asset?.role);
+    if (a.daily_rate != null) {
+      daily = Number(a.daily_rate);
+    } else {
+      const perStaff = assetRateForRole(asset, effectiveRole);
+      daily = perStaff != null ? Number(perStaff) : roleDefault(effectiveRole);
+    }
     mode = 'daily';
   }
 
-  const bonus = (vehicle && vehicle.is_lorry && assignedRole === 'driver')
+  const bonus = (vehicle && vehicle.is_lorry && effectiveRole === 'driver')
     ? Number(lorryBonus || 0)
     : 0;
 
@@ -88,4 +129,4 @@ function computeAssignmentWage({ assignment, asset, vehicle, contract, luxHourly
   return { mode, daily, lux, bonus, hours, total };
 }
 
-module.exports = { computeAssignmentWage, roleDefault, ROLE_DEFAULT_RATE, deriveHours };
+module.exports = { computeAssignmentWage, roleDefault, ROLE_DEFAULT_RATE, deriveHours, assetRateForRole };

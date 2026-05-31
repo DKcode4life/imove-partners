@@ -57,9 +57,15 @@ router.get('/week', wrap(async (req, res) => {
         id: true, asset_id: true, assigned_date: true, daily_rate: true,
         assigned_role: true, job_id: true, event_id: true,
         start_time: true, finish_time: true, vehicle_asset_id: true,
-        asset: { select: { id: true, name: true, role: true } },
+        wage_override: true,
+        asset: {
+          select: {
+            id: true, name: true, role: true,
+            driver_daily_rate: true, porter_daily_rate: true, lux_hourly_rate: true,
+          },
+        },
         job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true } },
-        event: { select: { event_date: true, contract: { select: { id: true, is_lux: true } } } },
+        event: { select: { event_date: true, event_time: true, contract: { select: { id: true, is_lux: true } } } },
       },
       orderBy: { assigned_date: 'asc' },
     }),
@@ -114,6 +120,7 @@ router.get('/week', wrap(async (req, res) => {
       asset: a.asset,
       vehicle: vehicleById.get(a.vehicle_asset_id) || null,
       contract: a.event?.contract || null,
+      event: a.event || null,
       luxHourlyRate: settings.luxHourlyRate,
       lorryBonus: settings.lorryBonus,
     });

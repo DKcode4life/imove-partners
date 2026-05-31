@@ -570,6 +570,10 @@ async function initDatabase() {
     `ALTER TABLE crm_jobs ADD COLUMN parking_notes_to TEXT`,
     `ALTER TABLE crm_jobs ADD COLUMN alt_email TEXT`,
     `ALTER TABLE planner_assets ADD COLUMN sort_order INTEGER DEFAULT 0`,
+    `ALTER TABLE planner_assignments ADD COLUMN wage_override REAL`,
+    `ALTER TABLE planner_assets ADD COLUMN driver_daily_rate REAL`,
+    `ALTER TABLE planner_assets ADD COLUMN porter_daily_rate REAL`,
+    `ALTER TABLE planner_assets ADD COLUMN lux_hourly_rate REAL`,
   ];
   for (const m of migrations) {
     try { sqlDb.run(m); } catch (_) { /* column already exists — safe to ignore */ }

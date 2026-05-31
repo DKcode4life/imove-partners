@@ -1223,8 +1223,17 @@ function JobSettingsTab({ showToast }: { showToast: (m: string, t?: 'success' | 
 
 interface StaffForm {
   name: string; role: string; phone: string; email: string; notes: string;
+  // Per-staff wage rates — stored as strings so the input can be cleared.
+  // Empty string sent to API as null → wage-calc falls back to company defaults
+  // (driver £150, porter £125, global Lux hourly rate).
+  driver_daily_rate: string;
+  porter_daily_rate: string;
+  lux_hourly_rate: string;
 }
-const EMPTY_STAFF: StaffForm = { name: '', role: '', phone: '', email: '', notes: '' };
+const EMPTY_STAFF: StaffForm = {
+  name: '', role: '', phone: '', email: '', notes: '',
+  driver_daily_rate: '', porter_daily_rate: '', lux_hourly_rate: '',
+};
 
 function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
   const { user } = useAuth();
@@ -1285,7 +1294,13 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const openAdd = () => { setEditTarget(null); setForm(EMPTY_STAFF); setFormError(''); setModalOpen(true); };
   const openEdit = (s: PlannerAsset) => {
     setEditTarget(s);
-    setForm({ name: s.name, role: s.role || '', phone: s.phone || '', email: s.email || '', notes: s.notes || '' });
+    setForm({
+      name: s.name, role: s.role || '', phone: s.phone || '',
+      email: s.email || '', notes: s.notes || '',
+      driver_daily_rate: s.driver_daily_rate == null ? '' : String(s.driver_daily_rate),
+      porter_daily_rate: s.porter_daily_rate == null ? '' : String(s.porter_daily_rate),
+      lux_hourly_rate:   s.lux_hourly_rate   == null ? '' : String(s.lux_hourly_rate),
+    });
     setFormError(''); setModalOpen(true);
   };
 
@@ -1503,6 +1518,45 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
               <label className="block text-xs font-medium text-slate-500 mb-1">Email</label>
               <input type="email" value={form.email} onChange={setF('email')} placeholder="name@email.com" className="input-field w-full" />
             </div>
+
+            <div className="col-span-2 border-t border-slate-100 pt-4 -mb-1">
+              <h3 className="text-xs font-semibold text-slate-600">Wage Rates</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Used by the planner Staff View and the Wages page. Leave blank to fall back to the company defaults
+                (Driver £150 · Porter £125 · global Lux hourly rate from Company Details).
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Driver Daily Rate (£)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.driver_daily_rate}
+                onChange={setF('driver_daily_rate')}
+                placeholder="e.g. 150.00"
+                className="input-field w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Porter Daily Rate (£)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.porter_daily_rate}
+                onChange={setF('porter_daily_rate')}
+                placeholder="e.g. 125.00"
+                className="input-field w-full"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Lux Move Hourly Rate (£)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.lux_hourly_rate}
+                onChange={setF('lux_hourly_rate')}
+                placeholder="e.g. 15.00"
+                className="input-field w-full"
+              />
+            </div>
+
             <div className="col-span-2">
               <label className="block text-xs font-medium text-slate-500 mb-1">Notes</label>
               <textarea value={form.notes} onChange={setF('notes')} rows={2} placeholder="Any notes…" className="input-field w-full resize-none" />

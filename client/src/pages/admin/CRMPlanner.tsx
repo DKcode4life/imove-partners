@@ -85,7 +85,6 @@ function MobileAssignZone({
   allVehicles,
   onAdd,
   onRemove,
-  onUpdateRate,
   onUpdateVehicle,
 }: {
   label: string;
@@ -98,7 +97,6 @@ function MobileAssignZone({
   allVehicles?: PlannerAsset[];
   onAdd: (assetId: number) => void;
   onRemove: (id: number) => void;
-  onUpdateRate?: (id: number, rate: number) => void;
   onUpdateVehicle?: (id: number, vid: number | null, rateOverride?: number) => void;
 }) {
   const [selectedId, setSelectedId] = useState('');
@@ -117,22 +115,6 @@ function MobileAssignZone({
           >
             <Users className="w-3 h-3 flex-shrink-0 opacity-60" />
             <span className={`font-semibold flex-1 min-w-0 truncate ${colorClass.text}`}>{a.asset_name}</span>
-
-            {/* Daily rate (staff only) */}
-            {onUpdateRate && (
-              <span className="flex items-center gap-0.5 flex-shrink-0">
-                <MobileRateInput a={a} onUpdateRate={onUpdateRate} />
-                {a.daily_rate !== 0 && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onUpdateRate(a.id, 0); }}
-                    title="Set wage to £0"
-                    className="inline-flex items-center justify-center w-4 h-4 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                )}
-              </span>
-            )}
 
             {/* Vehicle picker (drivers only) — lists ALL vehicles, not job-bound */}
             {onUpdateVehicle && allVehicles && allVehicles.length > 0 && (
@@ -203,37 +185,6 @@ function MobileAssignZone({
         <p className="text-[10px] text-slate-400 italic">None available</p>
       )}
     </div>
-  );
-}
-
-function MobileRateInput({ a, onUpdateRate }: { a: PlannerAssignment; onUpdateRate: (id: number, rate: number) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal]         = useState('');
-  function commit() {
-    const n = parseFloat(val);
-    if (!isNaN(n) && n >= 0) onUpdateRate(a.id, n);
-    setEditing(false);
-  }
-  if (editing) return (
-    <span className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
-      <span className="text-[10px] text-slate-400">£</span>
-      <input
-        type="number" min="0" step="5" autoFocus value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-        className="w-10 text-[10px] border-b border-indigo-300 bg-transparent outline-none text-slate-700"
-      />
-      <span className="text-[10px] text-slate-400">/day</span>
-    </span>
-  );
-  return (
-    <button
-      onClick={e => { e.stopPropagation(); setVal(String(a.daily_rate ?? '')); setEditing(true); }}
-      className="flex-shrink-0 text-[10px] font-semibold bg-white/80 border border-slate-200/60 rounded px-1.5 py-0.5 text-slate-600 tabular-nums"
-    >
-      {a.daily_rate != null ? `£${a.daily_rate}/d` : '+rate'}
-    </button>
   );
 }
 
@@ -627,6 +578,8 @@ function AssignmentChip({
     <span
       data-assignment-chip
       data-drag-assignment={onDragStart ? String(a.id) : undefined}
+      data-asset-id={String(a.asset_id)}
+      data-assigned-date={a.assigned_date}
       onContextMenu={e => e.preventDefault()}
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
@@ -662,7 +615,6 @@ function StaffAssignmentRow({
   a,
   allVehicles,
   onRemove,
-  onUpdateRate,
   onUpdateVehicle,
   onDragStart,
   onDragEnd,
@@ -673,25 +625,18 @@ function StaffAssignmentRow({
   // onto jobs separately.
   allVehicles: PlannerAsset[];
   onRemove: () => void;
-  onUpdateRate: (rate: number) => void;
   onUpdateVehicle: (vehicleAssetId: number | null, rateOverride?: number) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }) {
-  const [editingRate, setEditingRate] = useState(false);
-  const [rateInput, setRateInput] = useState('');
   const isDriver = (a.assigned_role ?? a.asset_role) === 'driver';
-
-  function commitRate() {
-    const n = parseFloat(rateInput);
-    if (!isNaN(n) && n >= 0) onUpdateRate(n);
-    setEditingRate(false);
-  }
 
   return (
     <div
       data-assignment-chip
       data-drag-assignment={onDragStart ? String(a.id) : undefined}
+      data-asset-id={String(a.asset_id)}
+      data-assigned-date={a.assigned_date}
       onContextMenu={e => e.preventDefault()}
       draggable={!!onDragStart}
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
@@ -701,41 +646,6 @@ function StaffAssignmentRow({
       <GripVertical className="w-3 h-3 text-indigo-300 flex-shrink-0" />
       <Users className="w-3 h-3 text-indigo-500 flex-shrink-0" />
       <span className="font-semibold text-indigo-800 flex-1 min-w-0 truncate tracking-tight">{a.asset_name}</span>
-
-      {/* Daily rate badge / editor */}
-      {editingRate ? (
-        <span className="flex items-center gap-0.5 flex-shrink-0">
-          <span className="text-[10px] text-slate-400">£</span>
-          <input
-            type="number" min="0" step="5" autoFocus
-            value={rateInput}
-            onChange={e => setRateInput(e.target.value)}
-            onBlur={commitRate}
-            onKeyDown={e => { if (e.key === 'Enter') commitRate(); if (e.key === 'Escape') setEditingRate(false); }}
-            className="w-10 text-[10px] border-b border-indigo-300 bg-transparent outline-none text-slate-700"
-          />
-          <span className="text-[10px] text-slate-400">/day</span>
-        </span>
-      ) : (
-        <span className="flex items-center gap-0.5 flex-shrink-0">
-          <button
-            onClick={e => { e.stopPropagation(); setRateInput(String(a.daily_rate ?? '')); setEditingRate(true); }}
-            title="Click to edit daily rate"
-            className="text-[10px] font-semibold bg-white border border-indigo-200/60 shadow-sm rounded-md px-1.5 py-0.5 text-slate-700 hover:border-indigo-400 hover:text-indigo-700 hover:shadow transition-all tabular-nums"
-          >
-            {a.daily_rate != null ? `£${a.daily_rate}/day` : <span className="text-slate-400 italic font-normal">+rate</span>}
-          </button>
-          {a.daily_rate !== 0 && (
-            <button
-              onClick={e => { e.stopPropagation(); onUpdateRate(0); }}
-              title="Set wage to £0"
-              className="inline-flex items-center justify-center w-4 h-4 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-            >
-              <X className="w-2.5 h-2.5" />
-            </button>
-          )}
-        </span>
-      )}
 
       {/* Vehicle dropdown for drivers — lists ALL registered vehicles */}
       {isDriver && allVehicles.length > 0 && (
@@ -984,7 +894,6 @@ function JobCard({
                 allVehicles={allVehicles}
                 onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'driver'); }}
                 onRemove={onRemoveAssignment}
-                onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
                 onUpdateVehicle={(id, vid, rateOverride) => onUpdateAssignment(id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
               />
               <MobileAssignZone
@@ -997,7 +906,6 @@ function JobCard({
                 )}
                 onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'porter'); }}
                 onRemove={onRemoveAssignment}
-                onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
               />
               {/* Vehicles zone removed — vehicles are now picked from the per-driver dropdown */}
             </div>
@@ -1009,7 +917,6 @@ function JobCard({
               <div>
                 <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
                   <Users className="w-3 h-3 text-indigo-500" />Drivers
-                  <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£150/day</span>
                 </p>
                 <div
                   data-drop-zone="driver"
@@ -1028,7 +935,6 @@ function JobCard({
                       key={a.id} a={a}
                       allVehicles={allVehicles}
                       onRemove={() => onRemoveAssignment(a.id)}
-                      onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
                       onUpdateVehicle={(vid, rateOverride) => onUpdateAssignment(a.id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
                       onDragStart={() => onAssignmentDragStart(a)}
                       onDragEnd={onAssignmentDragEnd}
@@ -1047,7 +953,6 @@ function JobCard({
               <div>
                 <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
                   <Users className="w-3 h-3 text-violet-500" />Porters
-                  <span className="font-medium normal-case text-slate-400 ml-0.5 tabular-nums">£125/day</span>
                 </p>
                 <div
                   data-drop-zone="porter"
@@ -1066,7 +971,6 @@ function JobCard({
                       key={a.id} a={a}
                       allVehicles={allVehicles}
                       onRemove={() => onRemoveAssignment(a.id)}
-                      onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
                       onUpdateVehicle={(vid, rateOverride) => onUpdateAssignment(a.id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
                       onDragStart={() => onAssignmentDragStart(a)}
                       onDragEnd={onAssignmentDragEnd}
@@ -1172,6 +1076,9 @@ function WeeklyView({
   navigate,
   allAssets,
   onAssign,
+  highlightAssetId,
+  highlightDate,
+  onHighlightConsumed,
 }: {
   weekDates: string[];
   items: PlannerCalendarItem[];
@@ -1204,8 +1111,51 @@ function WeeklyView({
   navigate: (path: string) => void;
   allAssets: PlannerAsset[];
   onAssign: (item: PlannerCalendarItem, asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
+  highlightAssetId: number | null;
+  highlightDate: string | null;
+  onHighlightConsumed: () => void;
 }) {
   const isMobile = useIsMobile();
+
+  // Deep-link flash: when arriving from the Wages page with ?highlight=<assetId>,
+  // briefly pulse every chip belonging to that staff member so the user can see
+  // where they're assigned without scanning the grid by hand.
+  useEffect(() => {
+    if (highlightAssetId == null) return;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let touched: HTMLElement[] = [];
+    // Defer one frame so freshly-rendered chips are in the DOM.
+    const raf = requestAnimationFrame(() => {
+      // Narrow to the exact (staff, day) cell when a date is provided so we
+      // don't pulse every day this person worked.
+      const selector = highlightDate
+        ? `[data-asset-id="${highlightAssetId}"][data-assigned-date="${highlightDate}"]`
+        : `[data-asset-id="${highlightAssetId}"]`;
+      const targets = Array.from(document.querySelectorAll<HTMLElement>(selector));
+      if (targets.length === 0) {
+        onHighlightConsumed();
+        return;
+      }
+      touched = targets;
+      targets.forEach(el => {
+        el.classList.remove('planner-flash');
+        // Restart the animation by forcing reflow.
+        void el.offsetWidth;
+        el.classList.add('planner-flash');
+      });
+      targets[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 3 pulses × 0.55s ≈ 1.7s — strip the class so re-triggers work.
+      timeoutId = setTimeout(() => {
+        targets.forEach(el => el.classList.remove('planner-flash'));
+        onHighlightConsumed();
+      }, 1900);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timeoutId) clearTimeout(timeoutId);
+      touched.forEach(el => el.classList.remove('planner-flash'));
+    };
+  }, [highlightAssetId, highlightDate, onHighlightConsumed]);
   const itemsByDate: Record<string, PlannerCalendarItem[]> = {};
   for (const item of items) {
     if (!item.date) continue;
@@ -1807,6 +1757,19 @@ export default function CRMPlanner() {
     const d = searchParams.get('date');
     return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + 'T00:00:00') : new Date();
   })();
+  // Deep-link from the Wages page: when present, flash that staff member's
+  // chip on the specific day so the user can spot them immediately.
+  const initialHighlightAssetId = (() => {
+    const h = searchParams.get('highlight');
+    const n = h ? parseInt(h, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  })();
+  const initialHighlightDate = (() => {
+    const d = searchParams.get('date');
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  })();
+  const [highlightAssetId, setHighlightAssetId] = useState<number | null>(initialHighlightAssetId);
+  const [highlightDate, setHighlightDate] = useState<string | null>(initialHighlightDate);
 
   const [view,        setView]        = useState<'month' | 'week' | 'staff'>(initialView);
   const [currentDate, setCurrentDate] = useState(initialDate);
@@ -2346,6 +2309,9 @@ export default function CRMPlanner() {
             navigate={navigate}
             allAssets={assets}
             onAssign={handleAssign}
+            highlightAssetId={highlightAssetId}
+            highlightDate={highlightDate}
+            onHighlightConsumed={() => { setHighlightAssetId(null); setHighlightDate(null); }}
           />
         )}
       </div>

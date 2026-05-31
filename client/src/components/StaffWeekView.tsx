@@ -47,10 +47,14 @@ export interface StaffWeekRow {
   start_time: string | null;
   finish_time: string | null;
   daily_rate: number | null;
+  wage_override: number | null;
   wage_total: number;
-  wage_mode: 'lux' | 'daily';
+  wage_mode: 'lux' | 'daily' | 'override';
   wage_bonus: number;
   wage_hours: number | null;
+  // Effective Lux £/hr for this row (per-staff override or company default) —
+  // used for the live wage preview while the user types start/finish times.
+  lux_hourly_rate: number;
 }
 
 interface StaffDayBucket {
@@ -112,6 +116,30 @@ const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function fmtMoney(n: number) {
   return `£${(Number(n) || 0).toFixed(2)}`;
+}
+
+// Parse a #rgb / #rrggbb hex string into its components. Returns null for
+// anything we can't read (e.g. an already-rgb() string) so callers can fall back.
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  let h = (hex || '').replace('#', '').trim();
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  if (h.length !== 6) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if ([r, g, b].some(n => Number.isNaN(n))) return null;
+  return { r, g, b };
+}
+
+// Faded "watermark" fill for a by-job group, in the job's own color. Kept light
+// enough that the dark row text stays readable, with a gentle top→bottom fade so
+// each group reads as a single tinted block — making the boundary between two
+// adjacent jobs obvious. Falls back to the old neutral wash for non-hex colors.
+function groupTintBg(color: string): string {
+  const rgb = hexToRgb(color);
+  if (!rgb) return 'linear-gradient(to bottom, rgba(248,250,252,0.4), #fff)';
+  const { r, g, b } = rgb;
+  return `linear-gradient(to bottom, rgba(${r},${g},${b},0.16), rgba(${r},${g},${b},0.06))`;
 }
 
 // Column-template strings — switched per-day depending on whether Finish is shown.
@@ -362,8 +390,8 @@ function StaffDayColumn({
           return (
             <div
               key={gi}
-              className="relative rounded-xl ring-1 ring-slate-200/50 bg-gradient-to-b from-slate-50/40 to-white overflow-hidden"
-              style={{ boxShadow: `inset 3px 0 0 0 ${g.effectiveColor}` }}
+              className="relative rounded-xl ring-1 ring-slate-200/50 overflow-hidden"
+              style={{ boxShadow: `inset 3px 0 0 0 ${g.effectiveColor}`, background: groupTintBg(g.effectiveColor) }}
             >
               {/* Clickable color accent — wider hit area than the visible stripe */}
               {key && g.source && g.sourceId != null && (
@@ -634,19 +662,25 @@ function AssignmentGridRow({
   const [startTime, setStartTime] = useState(row.start_time || '');
   const [finishTime, setFinishTime] = useState(row.finish_time || '');
   const [saving, setSaving] = useState(false);
+  const [editingWage, setEditingWage] = useState(false);
+  const [wageInput, setWageInput] = useState('');
 
   useEffect(() => {
     setStartTime(row.start_time || '');
     setFinishTime(row.finish_time || '');
   }, [row.start_time, row.finish_time]);
 
-  // Live wage preview while editing. For Lux jobs, recompute from start/finish
-  // so the user sees the wage track their typing without waiting for the
-  // server round-trip.
+  // Live wage preview while editing times. A manual override always wins;
+  // otherwise for Lux jobs recompute from start/finish so the user sees the
+  // wage track their typing without waiting for the server round-trip.
   const previewWage = useMemo(() => {
+    if (row.wage_override != null) return row.wage_override;
     if (row.is_lux_job && startTime && finishTime) {
       const h = deriveHoursClient(startTime, finishTime);
-      if (h != null) return h * luxRate + row.wage_bonus;
+      // Per-row rate (per-staff override) beats the global company rate so the
+      // preview matches what the server will compute on save.
+      const rate = row.lux_hourly_rate ?? luxRate;
+      if (h != null) return h * rate + row.wage_bonus;
     }
     return row.wage_total;
   }, [row, startTime, finishTime, luxRate]);
@@ -671,6 +705,20 @@ function AssignmentGridRow({
     } finally {
       setSaving(false);
     }
+  }
+
+  function commitWage() {
+    setEditingWage(false);
+    const raw = wageInput.trim();
+    // Empty input clears the override and restores the calculated wage.
+    if (raw === '') {
+      if (row.wage_override != null) patch({ wage_override: null });
+      return;
+    }
+    const n = parseFloat(raw);
+    if (!isFinite(n) || n < 0) return;
+    if (row.wage_override != null && +n.toFixed(2) === +row.wage_override.toFixed(2)) return;
+    patch({ wage_override: n });
   }
 
   // This row is a drag source for its own job (so the user can grab the
@@ -752,13 +800,57 @@ function AssignmentGridRow({
         />
       )}
       <span className="justify-self-end inline-flex items-center gap-1 tabular-nums">
-        <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${
-          row.is_lux_job
-            ? 'text-blue-700 bg-blue-50 ring-1 ring-blue-100'
-            : 'text-slate-700 bg-slate-100/70'
-        }`}>
-          {saving ? '…' : fmtMoney(previewWage)}
-        </span>
+        {editingWage ? (
+          <span className="inline-flex items-center gap-0.5">
+            <span className="text-[10px] text-slate-400">£</span>
+            <input
+              type="number"
+              min="0"
+              step="5"
+              autoFocus
+              value={wageInput}
+              onChange={e => setWageInput(e.target.value)}
+              onBlur={commitWage}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitWage();
+                if (e.key === 'Escape') setEditingWage(false);
+              }}
+              placeholder="auto"
+              className="w-14 text-[11px] font-semibold bg-white ring-1 ring-blue-300 rounded-md px-1.5 py-0.5 outline-none text-slate-800 text-right tabular-nums"
+            />
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setWageInput(row.wage_override != null ? String(row.wage_override) : '');
+              setEditingWage(true);
+            }}
+            title={row.wage_override != null
+              ? `Manual override — click to edit (clear to restore ${row.is_lux_job ? 'hours × rate' : 'daily rate'})`
+              : 'Click to set a manual wage'}
+            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors ${
+              row.wage_override != null
+                ? 'text-amber-800 bg-amber-50 ring-1 ring-amber-200 hover:ring-amber-300'
+                : row.is_lux_job
+                  ? 'text-blue-700 bg-blue-50 ring-1 ring-blue-100 hover:ring-blue-300'
+                  : 'text-slate-700 bg-slate-100/70 ring-1 ring-transparent hover:ring-slate-300'
+            }`}
+          >
+            {saving ? '…' : fmtMoney(previewWage)}
+          </button>
+        )}
+        {row.wage_override != null && !editingWage && (
+          <button
+            type="button"
+            onClick={() => patch({ wage_override: null })}
+            disabled={saving}
+            title="Clear manual wage and restore calculated amount"
+            className="inline-flex items-center justify-center w-4 h-4 rounded-full text-amber-500 hover:text-white hover:bg-amber-500 transition-colors"
+          >
+            <X className="w-2.5 h-2.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={unassign}

@@ -12,6 +12,17 @@ function cleanColor(v) {
   return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toUpperCase() : null;
 }
 
+// Per-staff wage rate fields on PlannerAsset.
+// '', null, undefined → null (clears the rate so wage-calc falls back to the
+// company-wide ROLE_DEFAULT_RATE / global lux_hourly_rate). Negative values
+// are rejected at the route level.
+function parseRate(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return undefined; // sentinel: invalid
+  return n;
+}
+
 async function loadCategoryColors() {
   const row = await prisma.companySetting.findUnique({ where: { key: 'planner_category_colors' } });
   let saved = {};
@@ -78,8 +89,21 @@ router.get('/assets', wrap(async (req, res) => {
 }));
 
 router.post('/assets', wrap(async (req, res) => {
-  const { type, name, role, phone, email, make_model, registration, capacity_notes, availability, is_lorry, notes } = req.body;
+  const {
+    type, name, role, phone, email, make_model, registration, capacity_notes,
+    availability, is_lorry, notes,
+    driver_daily_rate, porter_daily_rate, lux_hourly_rate,
+  } = req.body;
   if (!type || !name) return res.status(400).json({ error: 'type and name are required' });
+
+  // Per-staff wage rates only apply to staff assets. Vehicles always get null.
+  const isStaff = type === 'staff';
+  const driverRate = isStaff ? parseRate(driver_daily_rate) : null;
+  const porterRate = isStaff ? parseRate(porter_daily_rate) : null;
+  const luxRate    = isStaff ? parseRate(lux_hourly_rate)   : null;
+  if (driverRate === undefined || porterRate === undefined || luxRate === undefined) {
+    return res.status(400).json({ error: 'Wage rates must be a number ≥ 0' });
+  }
 
   const maxRow = await prisma.plannerAsset.aggregate({ _max: { sort_order: true } });
   const sortOrder = (maxRow._max.sort_order ?? 0) + 1;
@@ -90,6 +114,9 @@ router.post('/assets', wrap(async (req, res) => {
       email: email || null, make_model: make_model || null, registration: registration || null,
       capacity_notes: capacity_notes || null, availability: availability || 'available',
       is_lorry: type === 'vehicle' ? !!is_lorry : false,
+      driver_daily_rate: driverRate,
+      porter_daily_rate: porterRate,
+      lux_hourly_rate: luxRate,
       notes: notes || null, sort_order: sortOrder,
     },
   });
@@ -110,23 +137,40 @@ router.put('/assets/reorder', wrap(async (req, res) => {
 
 router.put('/assets/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, role, phone, email, make_model, registration, capacity_notes, availability, is_lorry, notes } = req.body;
+  const {
+    name, role, phone, email, make_model, registration, capacity_notes,
+    availability, is_lorry, notes,
+    driver_daily_rate, porter_daily_rate, lux_hourly_rate,
+  } = req.body;
 
   const asset = await prisma.plannerAsset.findUnique({ where: { id } });
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
 
-  const updated = await prisma.plannerAsset.update({
-    where: { id },
-    data: {
-      name: name?.trim() ?? asset.name,
-      role: role || null, phone: phone || null, email: email || null,
-      make_model: make_model || null, registration: registration || null,
-      capacity_notes: capacity_notes || null,
-      availability: availability ?? asset.availability,
-      is_lorry: is_lorry === undefined ? asset.is_lorry : (asset.type === 'vehicle' ? !!is_lorry : false),
-      notes: notes || null,
-    },
-  });
+  // Wage rates: only applied to staff assets and only when the key is present
+  // on the request (so untouched fields stay at their current value).
+  const data = {
+    name: name?.trim() ?? asset.name,
+    role: role || null, phone: phone || null, email: email || null,
+    make_model: make_model || null, registration: registration || null,
+    capacity_notes: capacity_notes || null,
+    availability: availability ?? asset.availability,
+    is_lorry: is_lorry === undefined ? asset.is_lorry : (asset.type === 'vehicle' ? !!is_lorry : false),
+    notes: notes || null,
+  };
+  if (asset.type === 'staff') {
+    for (const [key, raw] of [
+      ['driver_daily_rate', driver_daily_rate],
+      ['porter_daily_rate', porter_daily_rate],
+      ['lux_hourly_rate',   lux_hourly_rate],
+    ]) {
+      if (raw === undefined) continue;
+      const v = parseRate(raw);
+      if (v === undefined) return res.status(400).json({ error: `${key} must be a number ≥ 0` });
+      data[key] = v;
+    }
+  }
+
+  const updated = await prisma.plannerAsset.update({ where: { id }, data });
   res.json(updated);
 }));
 
@@ -236,7 +280,7 @@ router.patch('/items/color', wrap(async (req, res) => {
 const ASSIGNMENT_SELECT = {
   id: true, asset_id: true, job_id: true, event_id: true,
   assigned_date: true, assigned_role: true, daily_rate: true, vehicle_asset_id: true,
-  start_time: true, finish_time: true,
+  start_time: true, finish_time: true, wage_override: true,
   notes: true, created_at: true,
   asset: { select: { name: true, type: true, role: true } },
 };
@@ -247,6 +291,7 @@ function flattenAssignment(a) {
     assigned_date: a.assigned_date, assigned_role: a.assigned_role,
     daily_rate: a.daily_rate, vehicle_asset_id: a.vehicle_asset_id,
     start_time: a.start_time, finish_time: a.finish_time,
+    wage_override: a.wage_override,
     notes: a.notes, created_at: a.created_at,
     asset_name: a.asset.name, asset_type: a.asset.type, asset_role: a.asset.role,
   };
@@ -313,6 +358,16 @@ router.patch('/assignments/:id', wrap(async (req, res) => {
   if ('finish_time' in req.body) {
     const v = String(req.body.finish_time || '').trim();
     data.finish_time = v || null;
+  }
+  if ('wage_override' in req.body) {
+    const raw = req.body.wage_override;
+    if (raw === null || raw === '' || raw === undefined) {
+      data.wage_override = null;
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Invalid wage_override' });
+      data.wage_override = n;
+    }
   }
   // Reassign to a different staff member (used by Staff View drag-and-drop
   // between rows). Guards against creating duplicates for (asset, date, job/event).
@@ -582,7 +637,13 @@ router.get('/staff-week', wrap(async (req, res) => {
         id: true, asset_id: true, assigned_date: true, daily_rate: true,
         assigned_role: true, job_id: true, event_id: true,
         start_time: true, finish_time: true, vehicle_asset_id: true,
-        asset: { select: { id: true, name: true, role: true } },
+        wage_override: true,
+        asset: {
+          select: {
+            id: true, name: true, role: true,
+            driver_daily_rate: true, porter_daily_rate: true, lux_hourly_rate: true,
+          },
+        },
         job: {
           select: {
             id: true, full_name: true, status: true,
@@ -648,9 +709,16 @@ router.get('/staff-week', wrap(async (req, res) => {
       asset: a.asset,
       vehicle,
       contract,
+      event: a.event || null,
       luxHourlyRate: settings.luxHourlyRate,
       lorryBonus: settings.lorryBonus,
     });
+    // Resolved Lux £/hr the client should use for the live preview while the
+    // user types start/finish times — per-staff override beats the company-wide
+    // default. Matches the server-side wage-calc resolution exactly.
+    const luxRate = a.asset?.lux_hourly_rate != null
+      ? Number(a.asset.lux_hourly_rate)
+      : Number(settings.luxHourlyRate || 0);
     // Pick label/category off whichever side is set (job or event)
     let job_label = null, job_category = null, source = null, source_id = null, plannerColor = null;
     if (a.job) {
@@ -686,10 +754,15 @@ router.get('/staff-week', wrap(async (req, res) => {
       start_time: a.start_time || a.event?.event_time || null,
       finish_time: a.finish_time,
       daily_rate: a.daily_rate,
+      wage_override: a.wage_override,
       wage_total: wage.total,
       wage_mode: wage.mode,
       wage_bonus: wage.bonus,
       wage_hours: wage.hours,
+      // Effective Lux £/hr for this row — used by the client live preview when
+      // the user types start/finish times so the previewed wage matches what
+      // the server will save.
+      lux_hourly_rate: luxRate,
     };
   }
 

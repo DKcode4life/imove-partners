@@ -222,6 +222,12 @@ model PlannerAsset {
   capacity_notes String?
   availability   String   @default("available")
   is_lorry       Boolean  @default(false) // vehicles only — flags HGV/lorry; driver assigned to one earns the lorry-driving bonus
+  // Per-staff wage rates (staff assets only). Used by wage-calc as the default
+  // for daily / lux earnings — falls back to the company-wide ROLE_DEFAULT_RATE
+  // (driver £150 / porter £125) and global lux_hourly_rate when null.
+  driver_daily_rate Float?
+  porter_daily_rate Float?
+  lux_hourly_rate   Float?
   notes          String?
   sort_order     Int      @default(0)
   created_at     DateTime @default(now())
@@ -266,6 +272,7 @@ model PlannerAssignment {
   vehicle_asset_id Int?
   start_time       String? // "HH:MM" per-assignment start, editable on Staff View grid
   finish_time      String? // "HH:MM" per-assignment finish — shown on Lux days; drives Lux wage calc together with start_time
+  wage_override    Float? // manual wage from Staff View — replaces both Lux (hours×rate) and daily-rate calc; lorry bonus is NOT added on top
   notes            String?
   created_at       DateTime @default(now())
 
