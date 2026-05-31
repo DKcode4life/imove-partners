@@ -378,6 +378,7 @@ export interface PlannerAsset {
   registration?: string;
   capacity_notes?: string;
   availability: string;
+  is_lorry?: boolean;
   notes?: string;
   sort_order: number;
   created_at: string;
@@ -441,6 +442,10 @@ export interface PlannerCalendarItem {
   contract_id?: number | null;
   contract_name?: string | null;
   assignments?: PlannerAssignment[];
+  // Server-resolved color: per-item override → contract → category → fallback.
+  effective_color?: string;
+  // Raw per-item override (hex or null). When null, the card inherits its color.
+  planner_color?: string | null;
 }
 
 export const PLANNER_CATEGORIES = [
@@ -458,6 +463,9 @@ export interface CompanySettings {
   company_address: string;
   company_registration: string;
   zoom_meeting_link: string;
+  // Wage-rule globals consumed by server/lib/wage-calc.js
+  lux_hourly_rate: string;
+  lorry_driving_bonus: string;
 }
 
 export interface JobStatusSetting {
@@ -492,6 +500,8 @@ export interface Contract {
   address: string | null;
   description: string | null;
   payment_terms: string | null;
+  is_lux: boolean;
+  color: string | null;
   created_at: string;
   updated_at: string;
 }

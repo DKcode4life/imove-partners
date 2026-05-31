@@ -198,6 +198,8 @@ const COMPANY_KEYS = [
   'company_name', 'company_email', 'company_phone',
   'company_website', 'company_address', 'company_registration',
   'zoom_meeting_link',
+  // Wage-rule globals used by server/lib/wage-calc.js
+  'lux_hourly_rate', 'lorry_driving_bonus',
 ];
 
 router.get('/company', wrap(async (_req, res) => {
@@ -443,6 +445,43 @@ router.put('/planner-day-orders', wrap(async (req, res) => {
   });
   res.json({ ok: true });
 }));
+
+// ── Planner category colors ──────────────────────────────────────────────────
+// Stored as a single JSON blob: { [category: string]: '#hex' }. Server-side
+// resolver in server/lib/planner-color.js merges saved values over defaults so
+// a partial map is fine (missing categories use the hardcoded fallback).
+
+const { withDefaults, CONFIGURABLE_CATEGORIES } = require('../lib/planner-color');
+
+router.get('/planner-colors', wrap(async (_req, res) => {
+  const row = await prisma.companySetting.findUnique({ where: { key: 'planner_category_colors' } });
+  const saved = row?.value ? safeJson(row.value) : {};
+  res.json({
+    categories: CONFIGURABLE_CATEGORIES,
+    colors: withDefaults(saved),
+  });
+}));
+
+router.put('/planner-colors', wrap(async (req, res) => {
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Expected object mapping category → hex' });
+  }
+  // Only persist hex values for known categories. Anything else is dropped.
+  const clean = {};
+  for (const cat of CONFIGURABLE_CATEGORIES) {
+    const v = req.body[cat];
+    if (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) clean[cat] = v.toUpperCase();
+  }
+  const value = JSON.stringify(clean);
+  await prisma.companySetting.upsert({
+    where:  { key: 'planner_category_colors' },
+    update: { value },
+    create: { key: 'planner_category_colors', value },
+  });
+  res.json({ ok: true, colors: withDefaults(clean) });
+}));
+
+function safeJson(s) { try { return JSON.parse(s); } catch { return {}; } }
 
 // ── Bank Accounts ─────────────────────────────────────────────────────────────
 // Multiple bank accounts can be saved; one is flagged is_default. The selected

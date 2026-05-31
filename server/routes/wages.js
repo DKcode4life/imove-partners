@@ -3,6 +3,19 @@ const router = express.Router();
 const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
+const { computeAssignmentWage } = require('../lib/wage-calc');
+
+async function loadWageSettings() {
+  const rows = await prisma.companySetting.findMany({
+    where: { key: { in: ['lux_hourly_rate', 'lorry_driving_bonus'] } },
+  });
+  const get = (k) => {
+    const r = rows.find(x => x.key === k);
+    const n = parseFloat(r?.value);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return { luxHourlyRate: get('lux_hourly_rate'), lorryBonus: get('lorry_driving_bonus') };
+}
 
 router.use(authenticate, requireAdmin);
 
@@ -34,7 +47,7 @@ router.get('/week', wrap(async (req, res) => {
   const dates = weekDates(start);
   const endDate = dates[dates.length - 1];
 
-  const [assignments, periods] = await Promise.all([
+  const [assignments, periods, settings] = await Promise.all([
     prisma.plannerAssignment.findMany({
       where: {
         assigned_date: { gte: start, lte: endDate },
@@ -43,14 +56,26 @@ router.get('/week', wrap(async (req, res) => {
       select: {
         id: true, asset_id: true, assigned_date: true, daily_rate: true,
         assigned_role: true, job_id: true, event_id: true,
+        start_time: true, finish_time: true, vehicle_asset_id: true,
         asset: { select: { id: true, name: true, role: true } },
         job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true } },
-        event: { select: { event_date: true } },
+        event: { select: { event_date: true, contract: { select: { id: true, is_lux: true } } } },
       },
       orderBy: { assigned_date: 'asc' },
     }),
     prisma.wagePeriod.findMany({ where: { week_start: start } }),
+    loadWageSettings(),
   ]);
+
+  // Look up vehicle assets referenced by these assignments in one query.
+  const vehicleIds = [...new Set(assignments.map(a => a.vehicle_asset_id).filter(Boolean))];
+  const vehicles = vehicleIds.length
+    ? await prisma.plannerAsset.findMany({
+        where: { id: { in: vehicleIds } },
+        select: { id: true, is_lorry: true },
+      })
+    : [];
+  const vehicleById = new Map(vehicles.map(v => [v.id, v]));
 
   const periodByAsset = new Map(periods.map(p => [p.asset_id, p]));
   const staffMap = new Map();
@@ -84,7 +109,15 @@ router.get('/week', wrap(async (req, res) => {
       });
     }
     const entry = staffMap.get(id);
-    const rate = a.daily_rate ?? 0;
+    const wage = computeAssignmentWage({
+      assignment: a,
+      asset: a.asset,
+      vehicle: vehicleById.get(a.vehicle_asset_id) || null,
+      contract: a.event?.contract || null,
+      luxHourlyRate: settings.luxHourlyRate,
+      lorryBonus: settings.lorryBonus,
+    });
+    const rate = wage.total;
     const role = a.assigned_role || a.asset.role;
     // Aggregate (in case the same person has two assignments on the same day)
     const prev = entry.days[a.assigned_date];

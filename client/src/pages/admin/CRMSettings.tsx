@@ -559,6 +559,7 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
     company_name: '', company_email: '', company_phone: '',
     company_website: '', company_address: '', company_registration: '',
     zoom_meeting_link: '',
+    lux_hourly_rate: '', lorry_driving_bonus: '',
   };
   const [form, setForm] = useState<CompanySettings>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -638,6 +639,35 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
           </div>
         </div>
 
+        <div className="border-t border-slate-100 pt-5 space-y-3">
+          <h2 className="text-sm font-semibold text-slate-700">Wage Rules</h2>
+          <p className="text-[11px] text-slate-400">
+            Used by the planner Staff View and the weekly Wages page when a job is on a Lux Move contract or a driver is on a lorry-flagged vehicle.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Lux Hourly Rate (£)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.lux_hourly_rate}
+                onChange={setF('lux_hourly_rate')}
+                placeholder="e.g. 15.00"
+                className="input-field w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Lorry Driving Bonus (£)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.lorry_driving_bonus}
+                onChange={setF('lorry_driving_bonus')}
+                placeholder="e.g. 25.00"
+                className="input-field w-full"
+              />
+            </div>
+          </div>
+        </div>
+
         <div className="pt-1 flex justify-end">
           <button type="submit" disabled={saving} className="btn-primary">
             {saving ? 'Saving…' : 'Save Changes'}
@@ -647,6 +677,88 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
     </form>
 
     <BankAccountsSection showToast={showToast} />
+    <PlannerColorsSection showToast={showToast} />
+    </div>
+  );
+}
+
+// ── Planner Colors section ───────────────────────────────────────────────────
+// Lets the user set default colors per job category (Removal Job, Quick Job,
+// Survey, etc.). The picked colors flow through the planner via the server's
+// resolveItemColor helper — contract.color and per-card overrides still take
+// priority over these defaults.
+
+type PlannerColorsPayload = {
+  categories: string[];
+  colors: Record<string, string>;
+};
+
+function PlannerColorsSection({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [payload, setPayload] = useState<PlannerColorsPayload | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<PlannerColorsPayload>('/settings/planner-colors')
+      .then(r => {
+        setPayload(r.data);
+        setDraft({ ...r.data.colors });
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const dirty = payload && JSON.stringify(draft) !== JSON.stringify(payload.colors);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const r = await api.put<{ ok: boolean; colors: Record<string, string> }>('/settings/planner-colors', draft);
+      setPayload(p => p ? { ...p, colors: r.data.colors } : p);
+      setDraft({ ...r.data.colors });
+      showToast('Planner colors saved');
+    } catch {
+      showToast('Failed to save planner colors', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function setColor(category: string, hex: string) {
+    setDraft(d => ({ ...d, [category]: hex }));
+  }
+
+  if (loading) return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-400">Loading planner colors…</div>
+  );
+  if (!payload) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-700">Planner Colors</h2>
+        <p className="text-[11px] text-slate-400 mt-0.5">
+          Default color per job category, shown on planner cards. Contracts can override these per company; individual cards can be re-coloured from the planner.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {payload.categories.map(cat => (
+          <div key={cat} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg ring-1 ring-slate-200/60 bg-slate-50/40">
+            <span className="text-xs font-medium text-slate-700 truncate">{cat}</span>
+            <ColorSwatch color={draft[cat] || payload.colors[cat]} onChange={hex => setColor(cat, hex)} />
+          </div>
+        ))}
+      </div>
+      <div className="pt-1 flex justify-end">
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty || saving}
+          className="btn-primary disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save Colors'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1847,11 +1959,15 @@ interface ContractForm {
   company_name: string; contact_name: string; email: string;
   office_number: string; direct_line: string; address: string;
   description: string; payment_terms: string;
+  is_lux: boolean;
+  color: string | null;
 }
 const EMPTY_CONTRACT: ContractForm = {
   company_name: '', contact_name: '', email: '',
   office_number: '', direct_line: '', address: '',
   description: '', payment_terms: '',
+  is_lux: false,
+  color: null,
 };
 
 function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
@@ -1884,6 +2000,8 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
       email: c.email || '', office_number: c.office_number || '',
       direct_line: c.direct_line || '', address: c.address || '',
       description: c.description || '', payment_terms: c.payment_terms || '',
+      is_lux: !!c.is_lux,
+      color: c.color || null,
     });
     setFormError(''); setModalOpen(true);
   };
@@ -2111,6 +2229,46 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
               placeholder="Where they're based, how we handle them, key contacts, special requirements…"
               className="input-field w-full resize-none"
             />
+          </div>
+
+          {/* Lux Move flag — drives planner Staff View wage calc */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.is_lux}
+                onChange={e => setForm(f => ({ ...f, is_lux: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-300"
+              />
+              <span>This is a Lux Move contract</span>
+            </label>
+            <p className="text-[11px] text-slate-400 mt-1 ml-6">
+              Jobs under this contract bill staff at the Lux Hourly Rate (configured under Company Details → Wage Rules) instead of the daily rate.
+            </p>
+          </div>
+
+          {/* Per-contract planner color — overrides the category default for every job under this contract */}
+          <div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-700">Planner color</span>
+              <ColorSwatch
+                color={form.color || '#94a3b8'}
+                onChange={hex => setForm(f => ({ ...f, color: hex }))}
+              />
+              {form.color && (
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, color: null }))}
+                  className="text-[11px] text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded px-1.5 py-0.5"
+                  title="Use category default instead"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Optional. When set, every planner card under this contract uses this color (overrides category default; per-card overrides still apply).
+            </p>
           </div>
 
           <div className="flex gap-3 justify-end pt-1">

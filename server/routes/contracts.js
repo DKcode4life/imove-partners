@@ -11,8 +11,13 @@ router.get('/', wrap(async (_req, res) => {
   res.json(rows);
 }));
 
+function cleanColor(v) {
+  if (typeof v !== 'string') return null;
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toUpperCase() : null;
+}
+
 router.post('/', wrap(async (req, res) => {
-  const { company_name, contact_name, email, office_number, direct_line, address, description, payment_terms } = req.body;
+  const { company_name, contact_name, email, office_number, direct_line, address, description, payment_terms, is_lux, color } = req.body;
   if (!company_name?.trim()) return res.status(400).json({ error: 'Company name is required' });
   const row = await prisma.contract.create({
     data: {
@@ -24,6 +29,8 @@ router.post('/', wrap(async (req, res) => {
       address: address?.trim() || null,
       description: description?.trim() || null,
       payment_terms: payment_terms?.trim() || null,
+      is_lux: !!is_lux,
+      color: cleanColor(color),
     },
   });
   res.status(201).json(row);
@@ -31,8 +38,10 @@ router.post('/', wrap(async (req, res) => {
 
 router.put('/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { company_name, contact_name, email, office_number, direct_line, address, description, payment_terms } = req.body;
+  const { company_name, contact_name, email, office_number, direct_line, address, description, payment_terms, is_lux, color } = req.body;
   if (!company_name?.trim()) return res.status(400).json({ error: 'Company name is required' });
+  const existing = await prisma.contract.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Contract not found' });
   const updated = await prisma.contract.update({
     where: { id },
     data: {
@@ -44,6 +53,8 @@ router.put('/:id', wrap(async (req, res) => {
       address: address?.trim() || null,
       description: description?.trim() || null,
       payment_terms: payment_terms?.trim() || null,
+      is_lux: is_lux === undefined ? existing.is_lux : !!is_lux,
+      color: color === undefined ? existing.color : cleanColor(color),
     },
   });
   res.json(updated);

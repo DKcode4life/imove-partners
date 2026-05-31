@@ -157,6 +157,8 @@ model CrmJob {
   quote_state             Json?
   // FurnitureCovers per-job custom edits (CoverItem[])
   covers_state            Json?
+  // Per-job planner color override (hex); beats category default
+  planner_color           String?
   // Timestamps
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt
@@ -219,12 +221,14 @@ model PlannerAsset {
   registration   String?
   capacity_notes String?
   availability   String   @default("available")
+  is_lorry       Boolean  @default(false) // vehicles only — flags HGV/lorry; driver assigned to one earns the lorry-driving bonus
   notes          String?
   sort_order     Int      @default(0)
   created_at     DateTime @default(now())
 
   assignments  PlannerAssignment[]
   wage_periods WagePeriod[]
+  time_off     StaffTimeOff[]
 
   @@map("planner_assets")
 }
@@ -240,6 +244,7 @@ model PlannerEvent {
   event_time     String?
   notes          String?
   contract_id    Int?
+  planner_color  String?  // per-event color override (hex), beats contract + category defaults
   created_at     DateTime @default(now())
   updated_at     DateTime @default(now()) @updatedAt
 
@@ -259,6 +264,8 @@ model PlannerAssignment {
   assigned_role    String?
   daily_rate       Float?
   vehicle_asset_id Int?
+  start_time       String? // "HH:MM" per-assignment start, editable on Staff View grid
+  finish_time      String? // "HH:MM" per-assignment finish — shown on Lux days; drives Lux wage calc together with start_time
   notes            String?
   created_at       DateTime @default(now())
 
@@ -267,6 +274,20 @@ model PlannerAssignment {
   event PlannerEvent? @relation(fields: [event_id], references: [id], onDelete: Cascade)
 
   @@map("planner_assignments")
+}
+
+model StaffTimeOff {
+  id         Int      @id @default(autoincrement())
+  asset_id   Int
+  date       String // YYYY-MM-DD
+  reason     String?
+  created_at DateTime @default(now())
+
+  asset PlannerAsset @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  @@unique([asset_id, date])
+  @@index([date])
+  @@map("staff_time_off")
 }
 
 model WagePeriod {
@@ -624,6 +645,8 @@ model Contract {
   address       String?
   description   String?
   payment_terms String?
+  is_lux        Boolean  @default(false) // flags Lux Move contracts so planner assignments use hourly Lux rate instead of daily
+  color         String?  // hex color used by the planner for this contract's jobs; overrides category color
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now()) @updatedAt
 

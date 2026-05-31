@@ -4,6 +4,32 @@ const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
+const { computeAssignmentWage } = require('../lib/wage-calc');
+const { resolveItemColor, withDefaults } = require('../lib/planner-color');
+
+function cleanColor(v) {
+  if (typeof v !== 'string') return null;
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toUpperCase() : null;
+}
+
+async function loadCategoryColors() {
+  const row = await prisma.companySetting.findUnique({ where: { key: 'planner_category_colors' } });
+  let saved = {};
+  if (row?.value) { try { saved = JSON.parse(row.value); } catch { saved = {}; } }
+  return withDefaults(saved);
+}
+
+async function loadWageSettings() {
+  const rows = await prisma.companySetting.findMany({
+    where: { key: { in: ['lux_hourly_rate', 'lorry_driving_bonus'] } },
+  });
+  const get = (k) => {
+    const r = rows.find(x => x.key === k);
+    const n = parseFloat(r?.value);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return { luxHourlyRate: get('lux_hourly_rate'), lorryBonus: get('lorry_driving_bonus') };
+}
 
 /**
  * If a PlannerEvent is linked to a ContractJob (via ContractJob.planner_event_id),
@@ -52,7 +78,7 @@ router.get('/assets', wrap(async (req, res) => {
 }));
 
 router.post('/assets', wrap(async (req, res) => {
-  const { type, name, role, phone, email, make_model, registration, capacity_notes, availability, notes } = req.body;
+  const { type, name, role, phone, email, make_model, registration, capacity_notes, availability, is_lorry, notes } = req.body;
   if (!type || !name) return res.status(400).json({ error: 'type and name are required' });
 
   const maxRow = await prisma.plannerAsset.aggregate({ _max: { sort_order: true } });
@@ -63,6 +89,7 @@ router.post('/assets', wrap(async (req, res) => {
       type, name: name.trim(), role: role || null, phone: phone || null,
       email: email || null, make_model: make_model || null, registration: registration || null,
       capacity_notes: capacity_notes || null, availability: availability || 'available',
+      is_lorry: type === 'vehicle' ? !!is_lorry : false,
       notes: notes || null, sort_order: sortOrder,
     },
   });
@@ -83,7 +110,7 @@ router.put('/assets/reorder', wrap(async (req, res) => {
 
 router.put('/assets/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, role, phone, email, make_model, registration, capacity_notes, availability, notes } = req.body;
+  const { name, role, phone, email, make_model, registration, capacity_notes, availability, is_lorry, notes } = req.body;
 
   const asset = await prisma.plannerAsset.findUnique({ where: { id } });
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
@@ -96,6 +123,7 @@ router.put('/assets/:id', wrap(async (req, res) => {
       make_model: make_model || null, registration: registration || null,
       capacity_notes: capacity_notes || null,
       availability: availability ?? asset.availability,
+      is_lorry: is_lorry === undefined ? asset.is_lorry : (asset.type === 'vehicle' ? !!is_lorry : false),
       notes: notes || null,
     },
   });
@@ -126,7 +154,7 @@ router.get('/events', wrap(async (req, res) => {
 }));
 
 router.post('/events', wrap(async (req, res) => {
-  const { title, category, customer_name, contact_number, address, event_date, event_time, notes, contract_id } = req.body;
+  const { title, category, customer_name, contact_number, address, event_date, event_time, notes, contract_id, planner_color } = req.body;
   if (!title || !event_date) return res.status(400).json({ error: 'title and event_date are required' });
 
   const ev = await prisma.plannerEvent.create({
@@ -135,6 +163,7 @@ router.post('/events', wrap(async (req, res) => {
       customer_name: customer_name || null, contact_number: contact_number || null,
       address: address || null, event_date, event_time: event_time || null, notes: notes || null,
       contract_id: contract_id ? parseInt(contract_id, 10) : null,
+      planner_color: cleanColor(planner_color),
     },
     include: { contract: { select: { id: true, company_name: true } } },
   });
@@ -143,7 +172,7 @@ router.post('/events', wrap(async (req, res) => {
 
 router.put('/events/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { title, category, customer_name, contact_number, address, event_date, event_time, notes, contract_id } = req.body;
+  const { title, category, customer_name, contact_number, address, event_date, event_time, notes, contract_id, planner_color } = req.body;
 
   const ev = await prisma.plannerEvent.findUnique({ where: { id } });
   if (!ev) return res.status(404).json({ error: 'Event not found' });
@@ -157,6 +186,7 @@ router.put('/events/:id', wrap(async (req, res) => {
       address: address || null, event_date: event_date ?? ev.event_date,
       event_time: event_time || null, notes: notes || null,
       contract_id: contract_id !== undefined ? (contract_id ? parseInt(contract_id, 10) : null) : ev.contract_id,
+      planner_color: planner_color === undefined ? ev.planner_color : cleanColor(planner_color),
     },
     include: { contract: { select: { id: true, company_name: true } } },
   });
@@ -176,11 +206,38 @@ router.delete('/events/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Per-item planner color ──────────────────────────────────────────────────
+// Used by the click-the-accent-stripe popover in Weekly / Staff View.
+// Body: { source: 'job' | 'event', id: number, color: '#hex' | null }.
+// null clears the override so the item falls back to contract/category color.
+
+router.patch('/items/color', wrap(async (req, res) => {
+  const { source, id, color } = req.body || {};
+  const itemId = parseInt(id, 10);
+  if (!['job', 'event'].includes(source) || !Number.isFinite(itemId)) {
+    return res.status(400).json({ error: "source ('job'|'event') and id are required" });
+  }
+  const value = color === null ? null : cleanColor(color);
+
+  if (source === 'job') {
+    const existing = await prisma.crmJob.findUnique({ where: { id: itemId }, select: { id: true } });
+    if (!existing) return res.status(404).json({ error: 'Job not found' });
+    await prisma.crmJob.update({ where: { id: itemId }, data: { planner_color: value } });
+  } else {
+    const existing = await prisma.plannerEvent.findUnique({ where: { id: itemId }, select: { id: true } });
+    if (!existing) return res.status(404).json({ error: 'Event not found' });
+    await prisma.plannerEvent.update({ where: { id: itemId }, data: { planner_color: value } });
+  }
+  res.json({ ok: true, color: value });
+}));
+
 // ── Assignments ──────────────────────────────────────────────────────────────
 
 const ASSIGNMENT_SELECT = {
   id: true, asset_id: true, job_id: true, event_id: true,
-  assigned_date: true, assigned_role: true, daily_rate: true, vehicle_asset_id: true, notes: true, created_at: true,
+  assigned_date: true, assigned_role: true, daily_rate: true, vehicle_asset_id: true,
+  start_time: true, finish_time: true,
+  notes: true, created_at: true,
   asset: { select: { name: true, type: true, role: true } },
 };
 
@@ -189,6 +246,7 @@ function flattenAssignment(a) {
     id: a.id, asset_id: a.asset_id, job_id: a.job_id, event_id: a.event_id,
     assigned_date: a.assigned_date, assigned_role: a.assigned_role,
     daily_rate: a.daily_rate, vehicle_asset_id: a.vehicle_asset_id,
+    start_time: a.start_time, finish_time: a.finish_time,
     notes: a.notes, created_at: a.created_at,
     asset_name: a.asset.name, asset_type: a.asset.type, asset_role: a.asset.role,
   };
@@ -245,7 +303,30 @@ router.patch('/assignments/:id', wrap(async (req, res) => {
   const data = {};
   if ('assigned_role' in req.body) data.assigned_role = req.body.assigned_role || null;
   if ('daily_rate' in req.body) data.daily_rate = req.body.daily_rate == null ? null : Number(req.body.daily_rate);
-  if ('vehicle_asset_id' in req.body) data.vehicle_asset_id = req.body.vehicle_asset_id == null ? null : Number(req.body.vehicle_asset_id);
+  if ('vehicle_asset_id' in req.body) {
+    data.vehicle_asset_id = req.body.vehicle_asset_id == null ? null : Number(req.body.vehicle_asset_id);
+  }
+  if ('start_time' in req.body) {
+    const v = String(req.body.start_time || '').trim();
+    data.start_time = v || null;
+  }
+  if ('finish_time' in req.body) {
+    const v = String(req.body.finish_time || '').trim();
+    data.finish_time = v || null;
+  }
+  // Reassign to a different staff member (used by Staff View drag-and-drop
+  // between rows). Guards against creating duplicates for (asset, date, job/event).
+  if ('asset_id' in req.body) {
+    const nextAssetId = Number(req.body.asset_id);
+    if (!Number.isFinite(nextAssetId)) return res.status(400).json({ error: 'Invalid asset_id' });
+    if (nextAssetId !== a.asset_id) {
+      const dupWhere = { asset_id: nextAssetId, assigned_date: a.assigned_date };
+      if (a.job_id) dupWhere.job_id = a.job_id; else dupWhere.event_id = a.event_id;
+      const existing = await prisma.plannerAssignment.findFirst({ where: dupWhere });
+      if (existing) return res.status(409).json({ error: 'Target staff is already on this job', id: existing.id });
+      data.asset_id = nextAssetId;
+    }
+  }
 
   const updated = await prisma.plannerAssignment.update({ where: { id }, data, select: ASSIGNMENT_SELECT });
   res.json(flattenAssignment(updated));
@@ -271,7 +352,7 @@ router.get('/calendar', wrap(async (req, res) => {
   const lastDay = new Date(y, m, 0).getDate();
   const endDate = `${y}-${String(m).padStart(2, '0')}-${lastDay}`;
 
-  const [jobs, events] = await Promise.all([
+  const [jobs, events, categoryColors] = await Promise.all([
     prisma.crmJob.findMany({
       where: {
         status: { not: 'Lost / Cancelled' },
@@ -284,13 +365,15 @@ router.get('/calendar', wrap(async (req, res) => {
         id: true, full_name: true, status: true, phone: true,
         confirmed_move_date: true, preferred_move_date: true,
         from_postcode: true, to_postcode: true, from_line1: true, to_line1: true,
+        planner_color: true,
       },
     }),
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: startDate, lte: endDate } },
       orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
-      include: { contract: { select: { id: true, company_name: true } } },
+      include: { contract: { select: { id: true, company_name: true, color: true } } },
     }),
+    loadCategoryColors(),
   ]);
 
   const items = [
@@ -299,12 +382,24 @@ router.get('/calendar', wrap(async (req, res) => {
       date: isoDate(j.confirmed_move_date || j.preferred_move_date),
       phone: j.phone, from_postcode: j.from_postcode, to_postcode: j.to_postcode,
       from_line1: j.from_line1, to_line1: j.to_line1, status: j.status,
+      planner_color: j.planner_color,
+      effective_color: resolveItemColor(
+        { source: 'job', planner_color: j.planner_color },
+        null,
+        { categoryColors }
+      ),
     })),
     ...events.map(e => ({
       source: 'event', id: e.id, title: e.title, category: e.category,
       date: isoDate(e.event_date), time: e.event_time,
       address: e.address, phone: e.contact_number, customer_name: e.customer_name,
       contract_id: e.contract_id, contract_name: e.contract?.company_name || null,
+      planner_color: e.planner_color,
+      effective_color: resolveItemColor(
+        { source: 'event', category: e.category, planner_color: e.planner_color },
+        e.contract,
+        { categoryColors }
+      ),
     })),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
@@ -320,7 +415,7 @@ router.get('/week', wrap(async (req, res) => {
   const dates = weekDates(start);
   const endDate = dates[dates.length - 1];
 
-  const [jobs, events, assignmentsRaw] = await Promise.all([
+  const [jobs, events, assignmentsRaw, categoryColors] = await Promise.all([
     prisma.crmJob.findMany({
       where: {
         status: { not: 'Lost / Cancelled' },
@@ -335,17 +430,19 @@ router.get('/week', wrap(async (req, res) => {
         from_line1: true, from_city: true, from_postcode: true,
         to_line1: true, to_city: true, to_postcode: true,
         bedrooms: true, internal_notes: true, packing_required: true, storage_required: true,
+        planner_color: true,
       },
     }),
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: start, lte: endDate } },
       orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
-      include: { contract: { select: { id: true, company_name: true } } },
+      include: { contract: { select: { id: true, company_name: true, color: true } } },
     }),
     prisma.plannerAssignment.findMany({
       where: { assigned_date: { gte: start, lte: endDate } },
       select: ASSIGNMENT_SELECT,
     }),
+    loadCategoryColors(),
   ]);
 
   const assignments = assignmentsRaw.map(flattenAssignment);
@@ -372,6 +469,12 @@ router.get('/week', wrap(async (req, res) => {
       bedrooms: j.bedrooms, status: j.status, internal_notes: j.internal_notes,
       packing_required: j.packing_required, storage_required: j.storage_required,
       assignments: assignmentsByJob[j.id] || [],
+      planner_color: j.planner_color,
+      effective_color: resolveItemColor(
+        { source: 'job', planner_color: j.planner_color },
+        null,
+        { categoryColors }
+      ),
     })),
     ...events.map(e => ({
       source: 'event', id: e.id, title: e.title, category: e.category,
@@ -379,6 +482,12 @@ router.get('/week', wrap(async (req, res) => {
       address: e.address, phone: e.contact_number, customer_name: e.customer_name,
       notes: e.notes, assignments: assignmentsByEvent[e.id] || [],
       contract_id: e.contract_id, contract_name: e.contract?.company_name || null,
+      planner_color: e.planner_color,
+      effective_color: resolveItemColor(
+        { source: 'event', category: e.category, planner_color: e.planner_color },
+        e.contract,
+        { categoryColors }
+      ),
     })),
   ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
@@ -418,6 +527,293 @@ router.patch('/reschedule', wrap(async (req, res) => {
   }
 
   res.status(400).json({ error: 'source must be job or event' });
+}));
+
+// ── Staff Time Off ───────────────────────────────────────────────────────────
+
+router.post('/time-off', wrap(async (req, res) => {
+  const { asset_id, date, reason } = req.body;
+  if (!asset_id || !date) return res.status(400).json({ error: 'asset_id and date are required' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+
+  // Upsert by (asset_id, date) — flipping a day off is idempotent.
+  const row = await prisma.staffTimeOff.upsert({
+    where: { asset_id_date: { asset_id: Number(asset_id), date } },
+    create: { asset_id: Number(asset_id), date, reason: reason || null },
+    update: { reason: reason || null },
+  });
+  res.status(201).json(row);
+}));
+
+router.delete('/time-off', wrap(async (req, res) => {
+  const { asset_id, date } = req.body;
+  if (!asset_id || !date) return res.status(400).json({ error: 'asset_id and date are required' });
+  await prisma.staffTimeOff.deleteMany({ where: { asset_id: Number(asset_id), date } });
+  res.json({ ok: true });
+}));
+
+// ── Staff-centric week view (powers the Staff View grid) ─────────────────────
+
+router.get('/staff-week', wrap(async (req, res) => {
+  const { start } = req.query;
+  if (!start || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+    return res.status(400).json({ error: 'start is required (YYYY-MM-DD)' });
+  }
+
+  const dates = weekDates(start);
+  const endDate = dates[dates.length - 1];
+
+  const [staffAssets, vehicleAssets, assignments, timeOffRows, settings, jobsForWeek, eventsForWeek, categoryColors] = await Promise.all([
+    prisma.plannerAsset.findMany({
+      where: { type: 'staff' },
+      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.plannerAsset.findMany({
+      where: { type: 'vehicle' },
+      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true, registration: true, is_lorry: true, availability: true },
+    }),
+    prisma.plannerAssignment.findMany({
+      where: {
+        assigned_date: { gte: start, lte: endDate },
+        asset: { type: 'staff' },
+      },
+      select: {
+        id: true, asset_id: true, assigned_date: true, daily_rate: true,
+        assigned_role: true, job_id: true, event_id: true,
+        start_time: true, finish_time: true, vehicle_asset_id: true,
+        asset: { select: { id: true, name: true, role: true } },
+        job: {
+          select: {
+            id: true, full_name: true, status: true,
+            confirmed_move_date: true, preferred_move_date: true,
+            planner_color: true,
+          },
+        },
+        event: {
+          select: {
+            id: true, title: true, category: true, event_date: true, event_time: true,
+            planner_color: true,
+            contract: { select: { id: true, company_name: true, is_lux: true, color: true } },
+            contract_job: { select: { men_needed: true, vans_needed: true, hgv_needed: true } },
+          },
+        },
+      },
+      orderBy: [{ assigned_date: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.staffTimeOff.findMany({
+      where: { date: { gte: start, lte: endDate } },
+    }),
+    loadWageSettings(),
+    // Customer (removal) jobs scheduled this week — used to populate the
+    // top-of-column "Jobs" list in the Staff View. Mirrors the filter used
+    // by GET /planner/week so the two views show the same set.
+    prisma.crmJob.findMany({
+      where: {
+        status: { not: 'Lost / Cancelled' },
+        OR: [
+          { confirmed_move_date: { gte: start, lte: endDate } },
+          { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: start, lte: endDate } }] },
+        ],
+      },
+      select: {
+        id: true, full_name: true, status: true,
+        confirmed_move_date: true, preferred_move_date: true,
+        planner_color: true,
+      },
+    }),
+    prisma.plannerEvent.findMany({
+      where: { event_date: { gte: start, lte: endDate } },
+      orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
+      select: {
+        id: true, title: true, category: true, event_date: true, event_time: true,
+        planner_color: true,
+        contract: { select: { id: true, company_name: true, is_lux: true, color: true } },
+        contract_job: { select: { men_needed: true, vans_needed: true, hgv_needed: true } },
+      },
+    }),
+    loadCategoryColors(),
+  ]);
+
+  const vehicleById = new Map(vehicleAssets.map(v => [v.id, v]));
+  const timeOffKey = (asset_id, date) => `${asset_id}|${date}`;
+  const timeOffMap = new Map(timeOffRows.map(t => [timeOffKey(t.asset_id, t.date), t]));
+
+  // Group assignments by staff → date
+  function buildAssignmentRow(a) {
+    const vehicle = a.vehicle_asset_id ? vehicleById.get(a.vehicle_asset_id) : null;
+    const contract = a.event?.contract || null;
+    const wage = computeAssignmentWage({
+      assignment: a,
+      asset: a.asset,
+      vehicle,
+      contract,
+      luxHourlyRate: settings.luxHourlyRate,
+      lorryBonus: settings.lorryBonus,
+    });
+    // Pick label/category off whichever side is set (job or event)
+    let job_label = null, job_category = null, source = null, source_id = null, plannerColor = null;
+    if (a.job) {
+      source = 'job'; source_id = a.job.id;
+      job_label = a.job.full_name;
+      job_category = a.job.status;
+      plannerColor = a.job.planner_color;
+    } else if (a.event) {
+      source = 'event'; source_id = a.event.id;
+      job_label = a.event.title;
+      job_category = a.event.category;
+      plannerColor = a.event.planner_color;
+    }
+    const effective_color = resolveItemColor(
+      { source, category: job_category, planner_color: plannerColor },
+      contract,
+      { categoryColors }
+    );
+    return {
+      assignment_id: a.id,
+      source, source_id,
+      job_id: a.job_id, event_id: a.event_id,
+      job_label, job_category,
+      planner_color: plannerColor,
+      effective_color,
+      contract_id: contract?.id || null,
+      contract_name: contract?.company_name || null,
+      is_lux_job: !!contract?.is_lux,
+      vehicle_asset_id: a.vehicle_asset_id,
+      vehicle_label: vehicle ? vehicle.name : null,
+      vehicle_is_lorry: !!vehicle?.is_lorry,
+      assigned_role: a.assigned_role || a.asset.role,
+      start_time: a.start_time || a.event?.event_time || null,
+      finish_time: a.finish_time,
+      daily_rate: a.daily_rate,
+      wage_total: wage.total,
+      wage_mode: wage.mode,
+      wage_bonus: wage.bonus,
+      wage_hours: wage.hours,
+    };
+  }
+
+  // ── Build per-day "Jobs" lists for the top of each column ────────────────
+  // For each day, list every CrmJob + PlannerEvent scheduled on that date,
+  // plus needed staff/van counts (from ContractJob backing the event, when
+  // present) and the number of staff currently assigned (computed from the
+  // assignments query above).
+  const assignedCountByJobDateKey = new Map(); // key = `${source}|${id}|${date}` → number
+  function incAssigned(source, id, date) {
+    const k = `${source}|${id}|${date}`;
+    assignedCountByJobDateKey.set(k, (assignedCountByJobDateKey.get(k) || 0) + 1);
+  }
+  for (const a of assignments) {
+    if (a.job_id) incAssigned('job', a.job_id, a.assigned_date);
+    else if (a.event_id) incAssigned('event', a.event_id, a.assigned_date);
+  }
+
+  function jobsForDate(date) {
+    const list = [];
+    for (const j of jobsForWeek) {
+      const d = String(j.confirmed_move_date || j.preferred_move_date || '').slice(0, 10);
+      if (d !== date) continue;
+      list.push({
+        source: 'job', id: j.id,
+        label: j.full_name,
+        category: j.status,
+        contract_name: null,
+        is_lux: false,
+        men_needed: null, vans_needed: null, hgv_needed: null,
+        assigned_count: assignedCountByJobDateKey.get(`job|${j.id}|${date}`) || 0,
+        time: null,
+        planner_color: j.planner_color,
+        effective_color: resolveItemColor(
+          { source: 'job', planner_color: j.planner_color },
+          null,
+          { categoryColors }
+        ),
+      });
+    }
+    for (const e of eventsForWeek) {
+      const d = String(e.event_date).slice(0, 10);
+      if (d !== date) continue;
+      const cj = e.contract_job;
+      list.push({
+        source: 'event', id: e.id,
+        label: e.title,
+        category: e.category,
+        contract_name: e.contract?.company_name || null,
+        is_lux: !!e.contract?.is_lux,
+        planner_color: e.planner_color,
+        effective_color: resolveItemColor(
+          { source: 'event', category: e.category, planner_color: e.planner_color },
+          e.contract,
+          { categoryColors }
+        ),
+        men_needed: cj?.men_needed ?? null,
+        vans_needed: cj?.vans_needed ?? null,
+        hgv_needed: cj?.hgv_needed ?? null,
+        assigned_count: assignedCountByJobDateKey.get(`event|${e.id}|${date}`) || 0,
+        time: e.event_time || null,
+      });
+    }
+    return list;
+  }
+
+  const day_jobs = {};
+  const has_lux = {};
+  for (const d of dates) {
+    const list = jobsForDate(d);
+    day_jobs[d] = list;
+    has_lux[d] = list.some(j => j.is_lux);
+  }
+
+  const staff = staffAssets.map(s => {
+    const days = {};
+    for (const d of dates) days[d] = { rows: [], day_off: null };
+    for (const a of assignments) {
+      if (a.asset_id !== s.id) continue;
+      const bucket = days[a.assigned_date];
+      if (!bucket) continue;
+      // Skip orphan assignments where the underlying job/event no longer matches this date.
+      if (a.job) {
+        const jobDate = String(a.job.confirmed_move_date || a.job.preferred_move_date || '').slice(0, 10);
+        if (jobDate !== a.assigned_date) continue;
+        if (a.job.status === 'Lost / Cancelled') continue;
+      } else if (a.event) {
+        if (String(a.event.event_date).slice(0, 10) !== a.assigned_date) continue;
+      } else {
+        continue;
+      }
+      bucket.rows.push(buildAssignmentRow(a));
+    }
+    for (const d of dates) {
+      const off = timeOffMap.get(timeOffKey(s.id, d));
+      if (off) days[d].day_off = { id: off.id, reason: off.reason };
+    }
+    return {
+      asset_id: s.id,
+      name: s.name,
+      role: s.role,
+      availability: s.availability,
+      days,
+    };
+  });
+
+  res.json({
+    dates,
+    staff,
+    day_jobs,
+    has_lux,
+    vehicles: vehicleAssets.map(v => ({
+      id: v.id,
+      // Display nickname only in Staff View dropdown — registration is
+      // omitted at the user's request (cleaner option list).
+      label: v.name,
+      is_lorry: !!v.is_lorry,
+      availability: v.availability,
+    })),
+    settings: {
+      lux_hourly_rate: settings.luxHourlyRate,
+      lorry_driving_bonus: settings.lorryBonus,
+    },
+  });
 }));
 
 module.exports = router;

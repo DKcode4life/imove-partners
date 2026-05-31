@@ -6,56 +6,17 @@ import {
 } from 'lucide-react';
 import CRMSidebar from '../../components/CRMSidebar';
 import Modal from '../../components/Modal';
+import StaffWeekView from '../../components/StaffWeekView';
+import ColorPickerPopover from '../../components/ColorPickerPopover';
 import api from '../../lib/api';
 import type { PlannerAsset, PlannerCalendarItem, PlannerAssignment, PlannerEvent } from '../../types';
 import { PLANNER_CATEGORIES } from '../../types';
+import { catColor } from '../../lib/planner-colors';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  'Loading':         { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
-  'Moving':          { bg: 'bg-indigo-100',  text: 'text-indigo-700',  dot: '#6366F1' },
-  'Unloading':       { bg: 'bg-sky-100',     text: 'text-sky-700',     dot: '#0EA5E9' },
-  'Packing':         { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
-  'Box Drop off':    { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  'Box Collection':  { bg: 'bg-orange-100',  text: 'text-orange-700',  dot: '#F97316' },
-  'Survey':          { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
-  'Sundry':          { bg: 'bg-slate-100',   text: 'text-slate-600',   dot: '#94A3B8' },
-  'Quick Job':       { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
-  'Contract Job':    { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700', dot: '#C026D3' },
-  // legacy aliases kept for existing records
-  'Move':             { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
-  'Packing Box':      { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#8B5CF6' },
-  'Drop-off':         { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  'Box Drop-off':     { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  // Old CRM status names (pre-migration, kept for any surviving records)
-  'Survey Booked':    { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
-  'Survey Completed': { bg: 'bg-teal-100',    text: 'text-teal-700',    dot: '#0D9488' },
-  'Awaiting Quote':   { bg: 'bg-yellow-100',  text: 'text-yellow-800',  dot: '#EAB308' },
-  'In Progress':      { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: '#10B981' },
-  'Booked Move':      { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#22C55E' },
-  'Job Completed':    { bg: 'bg-slate-100',   text: 'text-slate-500',   dot: '#94A3B8' },
-  // Current CRM status names
-  'New Lead':               { bg: 'bg-blue-100',    text: 'text-blue-700',    dot: '#3B82F6' },
-  'Called V/M':             { bg: 'bg-violet-100',  text: 'text-violet-700',  dot: '#8B5CF6' },
-  'Contacted':              { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: '#7C3AED' },
-  'Survey Physical':        { bg: 'bg-cyan-100',    text: 'text-cyan-700',    dot: '#06B6D4' },
-  'Survey Video':           { bg: 'bg-teal-100',    text: 'text-teal-700',    dot: '#0D9488' },
-  'Quote Sent':             { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: '#F59E0B' },
-  'Quote Chased':           { bg: 'bg-orange-100',  text: 'text-orange-700',  dot: '#F97316' },
-  'Most Likely':            { bg: 'bg-yellow-100',  text: 'text-yellow-800',  dot: '#EAB308' },
-  'Quote Accepted':         { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: '#10B981' },
-  'Confirmed No Date':      { bg: 'bg-green-100',   text: 'text-green-700',   dot: '#059669' },
-  'Confirmed Deposit':      { bg: 'bg-lime-100',    text: 'text-lime-700',    dot: '#65A30D' },
-  'Confirmed Paid':         { bg: 'bg-green-100',   text: 'text-green-800',   dot: '#15803D' },
-  'Completed':              { bg: 'bg-slate-100',   text: 'text-slate-500',   dot: '#94A3B8' },
-  'Archived / Review Done': { bg: 'bg-gray-100',    text: 'text-gray-600',    dot: '#6B7280' },
-  'Lost / Cancelled':       { bg: 'bg-red-100',     text: 'text-red-700',     dot: '#EF4444' },
-};
-
-function catColor(cat: string) {
-  return CATEGORY_COLORS[cat] ?? { bg: 'bg-slate-100', text: 'text-slate-600', dot: '#94A3B8' };
-}
+// CATEGORY_COLORS / catColor live in client/src/lib/planner-colors.ts so the
+// Staff View can reuse the same scheme.
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -121,8 +82,7 @@ function MobileAssignZone({
   colorClass,
   assignments,
   availableAssets,
-  vehicleAssignments,
-  pickedVehicleIds,
+  allVehicles,
   onAdd,
   onRemove,
   onUpdateRate,
@@ -132,15 +92,16 @@ function MobileAssignZone({
   colorClass: { border: string; bg: string; text: string; btnBg: string };
   assignments: PlannerAssignment[];
   availableAssets: PlannerAsset[];
-  vehicleAssignments?: PlannerAssignment[];
-  pickedVehicleIds?: Set<number>;
+  // Global list of vehicle assets — used to populate the driver chip's van
+  // dropdown. Vehicles are no longer dragged onto jobs; the dropdown lists
+  // every recorded vehicle so any one can be picked per driver.
+  allVehicles?: PlannerAsset[];
   onAdd: (assetId: number) => void;
   onRemove: (id: number) => void;
   onUpdateRate?: (id: number, rate: number) => void;
   onUpdateVehicle?: (id: number, vid: number | null, rateOverride?: number) => void;
 }) {
   const [selectedId, setSelectedId] = useState('');
-  const isVehicle = !onUpdateRate;
 
   return (
     <div>
@@ -149,18 +110,12 @@ function MobileAssignZone({
       </p>
       <div className="space-y-1 mb-2">
         {assignments.map(a => {
-          const unassignedVehicle = isVehicle && pickedVehicleIds && !pickedVehicleIds.has(a.asset_id);
           return (
           <div
             key={a.id}
-            title={unassignedVehicle ? 'Not allocated to a driver' : undefined}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${
-              unassignedVehicle
-                ? 'bg-red-50 border-red-200/70 text-red-600/80'
-                : `${colorClass.bg} ${colorClass.border}`
-            }`}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${colorClass.bg} ${colorClass.border}`}
           >
-            {!isVehicle ? <Users className="w-3 h-3 flex-shrink-0 opacity-60" /> : <Truck className="w-3 h-3 flex-shrink-0 opacity-60" />}
+            <Users className="w-3 h-3 flex-shrink-0 opacity-60" />
             <span className={`font-semibold flex-1 min-w-0 truncate ${colorClass.text}`}>{a.asset_name}</span>
 
             {/* Daily rate (staff only) */}
@@ -179,20 +134,20 @@ function MobileAssignZone({
               </span>
             )}
 
-            {/* Vehicle picker (drivers only) */}
-            {onUpdateVehicle && vehicleAssignments && vehicleAssignments.length > 0 && (
+            {/* Vehicle picker (drivers only) — lists ALL vehicles, not job-bound */}
+            {onUpdateVehicle && allVehicles && allVehicles.length > 0 && (
               <select
                 value={a.vehicle_asset_id != null ? String(a.vehicle_asset_id) : ''}
                 onChange={e => {
                   e.stopPropagation();
                   const vid = e.target.value ? Number(e.target.value) : null;
-                  const v = vid != null ? vehicleAssignments.find(x => x.asset_id === vid) : null;
+                  const v = vid != null ? allVehicles.find(x => x.id === vid) : null;
                   // Lorry bonus: +£30 on top of the £150 driver default. Only auto-adjust
-                  // when the current rate is a default (null/150/180).
+                  // when the current rate is a default (null/150/180); custom edits stay.
                   const cur = a.daily_rate;
                   const isDefaultRate = cur == null || cur === 150 || cur === 180;
                   const rateOverride = isDefaultRate
-                    ? (v && /lorry/i.test(v.asset_name) ? 180 : 150)
+                    ? (v && v.is_lorry ? 180 : 150)
                     : undefined;
                   onUpdateVehicle(a.id, vid, rateOverride);
                 }}
@@ -200,8 +155,8 @@ function MobileAssignZone({
                 className="flex-shrink-0 text-[10px] border border-slate-200 rounded bg-white text-slate-600 py-0.5 px-1 max-w-[76px]"
               >
                 <option value="">No van</option>
-                {vehicleAssignments.map(v => (
-                  <option key={v.asset_id} value={String(v.asset_id)}>{v.asset_name}</option>
+                {allVehicles.map(v => (
+                  <option key={v.id} value={String(v.id)}>{v.name}</option>
                 ))}
               </select>
             )}
@@ -547,7 +502,10 @@ function AssetPanel({
   const drivers    = assets.filter(a => a.type === 'staff' && a.role === 'driver');
   const porters    = assets.filter(a => a.type === 'staff' && a.role === 'porter');
   const otherStaff = assets.filter(a => a.type === 'staff' && a.role !== 'driver' && a.role !== 'porter');
-  const vehicles   = assets.filter(a => a.type === 'vehicle');
+  // Vehicles are no longer dragged onto jobs — they're picked from the
+  // per-driver dropdown in each job card. The Vehicles sidebar group has
+  // been removed; vehicle assets still exist (for that dropdown) and can be
+  // managed via "Add asset".
 
   const toggle = (k: string) => setCollapsed(p => ({ ...p, [k]: !p[k] }));
 
@@ -625,7 +583,6 @@ function AssetPanel({
         <Group title="Drivers"  items={drivers}    groupKey="drivers"  icon={<Users className="w-3 h-3" />} />
         <Group title="Porters"  items={porters}    groupKey="porters"  icon={<Users className="w-3 h-3" />} />
         {otherStaff.length > 0 && <Group title="Staff" items={otherStaff} groupKey="staff" icon={<Users className="w-3 h-3" />} />}
-        <Group title="Vehicles" items={vehicles}   groupKey="vehicles" icon={<Truck className="w-3 h-3" />} />
       </div>
       <div className="px-3 py-3 border-t border-slate-200 space-y-1.5">
         {reorderMode && (
@@ -703,7 +660,7 @@ function AssignmentChip({
 
 function StaffAssignmentRow({
   a,
-  vehicleAssignments,
+  allVehicles,
   onRemove,
   onUpdateRate,
   onUpdateVehicle,
@@ -711,7 +668,10 @@ function StaffAssignmentRow({
   onDragEnd,
 }: {
   a: PlannerAssignment;
-  vehicleAssignments: PlannerAssignment[];
+  // Global list of vehicle assets (PlannerAsset rows where type='vehicle').
+  // Drivers pick any vehicle from this list; vehicles are no longer dragged
+  // onto jobs separately.
+  allVehicles: PlannerAsset[];
   onRemove: () => void;
   onUpdateRate: (rate: number) => void;
   onUpdateVehicle: (vehicleAssetId: number | null, rateOverride?: number) => void;
@@ -777,20 +737,20 @@ function StaffAssignmentRow({
         </span>
       )}
 
-      {/* Vehicle dropdown for drivers */}
-      {isDriver && vehicleAssignments.length > 0 && (
+      {/* Vehicle dropdown for drivers — lists ALL registered vehicles */}
+      {isDriver && allVehicles.length > 0 && (
         <select
           value={a.vehicle_asset_id != null ? String(a.vehicle_asset_id) : ''}
           onChange={e => {
             e.stopPropagation();
             const vid = e.target.value ? Number(e.target.value) : null;
-            const v = vid != null ? vehicleAssignments.find(x => x.asset_id === vid) : null;
+            const v = vid != null ? allVehicles.find(x => x.id === vid) : null;
             // Lorry bonus: +£30 on top of the £150 driver default. Only auto-adjust
-            // when the current rate is a default (null/150/180); custom edits are preserved.
+            // when the current rate is a default (null/150/180); custom edits stay.
             const cur = a.daily_rate;
             const isDefaultRate = cur == null || cur === 150 || cur === 180;
             const rateOverride = isDefaultRate
-              ? (v && /lorry/i.test(v.asset_name) ? 180 : 150)
+              ? (v && v.is_lorry ? 180 : 150)
               : undefined;
             onUpdateVehicle(vid, rateOverride);
           }}
@@ -798,12 +758,12 @@ function StaffAssignmentRow({
           className="flex-shrink-0 text-[10px] border border-slate-200 rounded bg-white text-slate-600 py-0.5 px-1 max-w-[76px] hover:border-indigo-300 focus:outline-none focus:border-indigo-300"
         >
           <option value="">No van</option>
-          {vehicleAssignments.map(v => (
-            <option key={v.asset_id} value={String(v.asset_id)}>{v.asset_name}</option>
+          {allVehicles.map(v => (
+            <option key={v.id} value={String(v.id)}>{v.name}</option>
           ))}
         </select>
       )}
-      {isDriver && vehicleAssignments.length === 0 && (
+      {isDriver && allVehicles.length === 0 && (
         <span className="flex-shrink-0 text-[10px] text-slate-300 italic">no vans</span>
       )}
 
@@ -827,7 +787,6 @@ function JobCard({
   onDropStaff,
   onDropDriver,
   onDropPorter,
-  onDropVehicle,
   onRemoveAssignment,
   onAssignmentDragStart,
   onAssignmentDragEnd,
@@ -839,6 +798,7 @@ function JobCard({
   onDeleteEvent,
   onDuplicate,
   onConvertToJob,
+  onItemColorChange,
   navigate,
   allAssets,
   onAssign,
@@ -853,7 +813,6 @@ function JobCard({
   onDropStaff: () => void;
   onDropDriver: () => void;
   onDropPorter: () => void;
-  onDropVehicle: () => void;
   onRemoveAssignment: (id: number) => void;
   onAssignmentDragStart: (a: PlannerAssignment) => void;
   onAssignmentDragEnd: () => void;
@@ -865,23 +824,29 @@ function JobCard({
   onDeleteEvent?: () => void;
   onDuplicate: () => void;
   onConvertToJob?: () => void;
+  // Sets per-item planner_color override. Pass null to clear.
+  onItemColorChange: (color: string | null) => void;
   navigate: (path: string) => void;
   allAssets: PlannerAsset[];
   onAssign: (asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
 }) {
   const isMobile = useIsMobile();
+  // Server-resolved color (override → contract → category → fallback). Fall
+  // back to local CATEGORY_COLORS for pre-existing data that hasn't been
+  // re-fetched yet.
+  const effectiveDotColor = item.effective_color || catColor(item.category).dot;
   const c = catColor(item.category);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const accentRef = useRef<HTMLDivElement>(null);
+  const [accentRect, setAccentRect] = useState<DOMRect | null>(null);
   const isSurveyEvent = item.source === 'event' && item.category === 'Survey';
   const staffAssignments   = (item.assignments || []).filter(a => a.asset_type === 'staff');
-  const vehicleAssignments = (item.assignments || []).filter(a => a.asset_type === 'vehicle');
   const driverAssignments  = staffAssignments.filter(a => (a.assigned_role ?? a.asset_role) === 'driver');
   const porterAssignments  = staffAssignments.filter(a => (a.assigned_role ?? a.asset_role) !== 'driver');
-  // Vehicles picked up by a driver — anything else gets the "unassigned" treatment.
-  const pickedVehicleIds = new Set<number>(
-    driverAssignments
-      .filter(a => a.vehicle_asset_id != null)
-      .map(a => a.vehicle_asset_id as number)
-  );
+  // Global vehicle list — populates the per-driver van dropdown. Vehicles are
+  // no longer dragged onto jobs as their own assignments, so the dropdown
+  // sources from the master asset list.
+  const allVehicles = allAssets.filter(a => a.type === 'vehicle');
 
   return (
     <div
@@ -901,10 +866,33 @@ function JobCard({
           : 'border-slate-200/70 shadow-[0_1px_2px_0_rgba(15,23,42,0.04)] hover:border-slate-300 hover:shadow-[0_6px_16px_-6px_rgba(15,23,42,0.18),0_2px_4px_-2px_rgba(15,23,42,0.06)] hover:-translate-y-px'
       }`}
     >
-      {/* Top category accent stripe */}
+      {/* Top accent stripe — click to recolor this card */}
       <div
-        className="absolute top-0 left-0 right-0 h-[3px]"
-        style={{ background: `linear-gradient(90deg, ${c.dot}, ${c.dot}cc 60%, ${c.dot}55)` }}
+        ref={accentRef}
+        role="button"
+        tabIndex={0}
+        onClick={e => {
+          e.stopPropagation();
+          if (accentRef.current) setAccentRect(accentRef.current.getBoundingClientRect());
+          setColorPickerOpen(true);
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (accentRef.current) setAccentRect(accentRef.current.getBoundingClientRect());
+            setColorPickerOpen(true);
+          }
+        }}
+        title="Click to change this card's color"
+        className="absolute top-0 left-0 right-0 h-[6px] cursor-pointer hover:h-[8px] transition-all"
+        style={{ background: `linear-gradient(90deg, ${effectiveDotColor}, ${effectiveDotColor}cc 60%, ${effectiveDotColor}55)` }}
+      />
+      <ColorPickerPopover
+        open={colorPickerOpen}
+        anchorRect={accentRect}
+        currentColor={item.planner_color ?? null}
+        onPick={color => onItemColorChange(color)}
+        onClose={() => setColorPickerOpen(false)}
       />
 
       {/* Header (always visible) */}
@@ -914,7 +902,7 @@ function JobCard({
       >
         <span
           className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ring-2 ring-white shadow-[0_0_0_1px_rgba(15,23,42,0.06)]"
-          style={{ background: c.dot, boxShadow: `0 0 0 1px rgba(15,23,42,0.06), 0 0 8px ${c.dot}55` }}
+          style={{ background: effectiveDotColor, boxShadow: `0 0 0 1px rgba(15,23,42,0.06), 0 0 8px ${effectiveDotColor}55` }}
         />
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-semibold text-slate-900 truncate tracking-tight leading-snug">{item.title}</p>
@@ -923,27 +911,25 @@ function JobCard({
             {item.time && (
               <span className="text-[10px] font-medium text-slate-500 tabular-nums tracking-tight">{item.time}</span>
             )}
-            {(staffAssignments.length + vehicleAssignments.length) > 0 && (
+            {staffAssignments.length > 0 && (
               <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100/80 rounded-full px-1.5 py-0.5 tabular-nums">
                 <Users className="w-2.5 h-2.5" />{staffAssignments.length}
-                <span className="text-slate-300">·</span>
-                <Truck className="w-2.5 h-2.5" />{vehicleAssignments.length}
               </span>
             )}
           </div>
         </div>
       </button>
 
-      {/* Mini drop targets shown on collapsed card when a drag is in flight */}
+      {/* Mini drop target shown on collapsed card when a staff drag is in flight */}
       {hasActiveDrag && !isExpanded && (
-        <div className="flex gap-1.5 px-2.5 pb-2.5">
+        <div className="px-2.5 pb-2.5">
           <div
             data-drop-zone="staff"
             data-drop-card-key={cardKey}
             onDragOver={e => { e.preventDefault(); onDragOver('staff'); }}
             onDragLeave={onDragLeave}
             onDrop={e => { e.preventDefault(); onDropStaff(); }}
-            className={`flex-1 h-8 rounded-lg border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-semibold transition-all duration-150 ${
+            className={`h-8 rounded-lg border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-semibold transition-all duration-150 ${
               dragOverZone === `${cardKey}|staff`
                 ? 'border-indigo-400 bg-gradient-to-br from-indigo-50 to-indigo-100/70 text-indigo-700 ring-2 ring-indigo-200/60 scale-[1.02]'
                 : 'border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/40'
@@ -951,21 +937,6 @@ function JobCard({
           >
             <Users className="w-3 h-3" />
             {dragOverZone === `${cardKey}|staff` ? 'Drop here' : 'Staff'}
-          </div>
-          <div
-            data-drop-zone="vehicle"
-            data-drop-card-key={cardKey}
-            onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
-            onDragLeave={onDragLeave}
-            onDrop={e => { e.preventDefault(); onDropVehicle(); }}
-            className={`flex-1 h-8 rounded-lg border-2 border-dashed flex items-center justify-center gap-1 text-[10px] font-semibold transition-all duration-150 ${
-              dragOverZone === `${cardKey}|vehicle`
-                ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-teal-100/70 text-teal-700 ring-2 ring-teal-200/60 scale-[1.02]'
-                : 'border-slate-200 text-slate-400 hover:border-teal-300 hover:text-teal-500 hover:bg-teal-50/40'
-            }`}
-          >
-            <Truck className="w-3 h-3" />
-            {dragOverZone === `${cardKey}|vehicle` ? 'Drop here' : 'Van'}
           </div>
         </div>
       )}
@@ -1010,7 +981,7 @@ function JobCard({
                   a.type === 'staff' && a.role === 'driver' && a.availability === 'available' &&
                   !(item.assignments || []).some(x => x.asset_id === a.id)
                 )}
-                vehicleAssignments={vehicleAssignments}
+                allVehicles={allVehicles}
                 onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'driver'); }}
                 onRemove={onRemoveAssignment}
                 onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
@@ -1028,18 +999,7 @@ function JobCard({
                 onRemove={onRemoveAssignment}
                 onUpdateRate={(id, rate) => onUpdateAssignment(id, { daily_rate: rate })}
               />
-              <MobileAssignZone
-                label="Vehicles"
-                colorClass={{ border: 'border-teal-200/70', bg: 'bg-teal-50', text: 'text-teal-700', btnBg: 'bg-teal-600' }}
-                assignments={vehicleAssignments}
-                availableAssets={allAssets.filter(a =>
-                  a.type === 'vehicle' && a.availability === 'available' &&
-                  !(item.assignments || []).some(x => x.asset_id === a.id)
-                )}
-                pickedVehicleIds={pickedVehicleIds}
-                onAdd={id => { const a = allAssets.find(x => x.id === id); if (a) onAssign(a, 'vehicle'); }}
-                onRemove={onRemoveAssignment}
-              />
+              {/* Vehicles zone removed — vehicles are now picked from the per-driver dropdown */}
             </div>
           ) : (
             <>
@@ -1066,7 +1026,7 @@ function JobCard({
                   {driverAssignments.map(a => (
                     <StaffAssignmentRow
                       key={a.id} a={a}
-                      vehicleAssignments={vehicleAssignments}
+                      allVehicles={allVehicles}
                       onRemove={() => onRemoveAssignment(a.id)}
                       onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
                       onUpdateVehicle={(vid, rateOverride) => onUpdateAssignment(a.id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
@@ -1104,7 +1064,7 @@ function JobCard({
                   {porterAssignments.map(a => (
                     <StaffAssignmentRow
                       key={a.id} a={a}
-                      vehicleAssignments={vehicleAssignments}
+                      allVehicles={allVehicles}
                       onRemove={() => onRemoveAssignment(a.id)}
                       onUpdateRate={rate => onUpdateAssignment(a.id, { daily_rate: rate })}
                       onUpdateVehicle={(vid, rateOverride) => onUpdateAssignment(a.id, rateOverride !== undefined ? { vehicle_asset_id: vid, daily_rate: rateOverride } : { vehicle_asset_id: vid })}
@@ -1121,40 +1081,6 @@ function JobCard({
                 </div>
               </div>
 
-              {/* Vehicle drop zone */}
-              <div>
-                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                  <Truck className="w-3 h-3 text-teal-500" />Vehicles
-                </p>
-                <div
-                  data-drop-zone="vehicle"
-                  data-drop-card-key={cardKey}
-                  onDragOver={e => { e.preventDefault(); onDragOver('vehicle'); }}
-                  onDragLeave={onDragLeave}
-                  onDrop={e => { e.preventDefault(); onDropVehicle(); }}
-                  className={`min-h-[40px] rounded-xl border-2 border-dashed p-1.5 flex flex-wrap gap-1 transition-all duration-150 ${
-                    dragOverZone === `${cardKey}|vehicle`
-                      ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-teal-100/60 ring-2 ring-teal-200/50'
-                      : 'border-slate-200/80 bg-gradient-to-br from-slate-50 to-slate-100/30'
-                  }`}
-                >
-                  {vehicleAssignments.map(a => (
-                    <AssignmentChip
-                      key={a.id} a={a}
-                      onRemove={() => onRemoveAssignment(a.id)}
-                      onDragStart={() => onAssignmentDragStart(a)}
-                      onDragEnd={onAssignmentDragEnd}
-                      unassigned={!pickedVehicleIds.has(a.asset_id)}
-                    />
-                  ))}
-                  {vehicleAssignments.length === 0 && dragOverZone !== `${cardKey}|vehicle` && (
-                    <span className="text-[10px] text-slate-400 self-center ml-1 italic">Drop vehicles here</span>
-                  )}
-                  {dragOverZone === `${cardKey}|vehicle` && (
-                    <span className="text-[10px] text-teal-600 font-semibold self-center ml-1">Release to assign</span>
-                  )}
-                </div>
-              </div>
             </>
           )}
 
@@ -1242,6 +1168,7 @@ function WeeklyView({
   onDeleteEvent,
   onDuplicate,
   onConvertToJob,
+  onItemColorChange,
   navigate,
   allAssets,
   onAssign,
@@ -1273,6 +1200,7 @@ function WeeklyView({
   onDeleteEvent: (item: PlannerCalendarItem) => void;
   onDuplicate: (item: PlannerCalendarItem) => void;
   onConvertToJob: (item: PlannerCalendarItem) => void;
+  onItemColorChange: (item: PlannerCalendarItem, color: string | null) => void;
   navigate: (path: string) => void;
   allAssets: PlannerAsset[];
   onAssign: (item: PlannerCalendarItem, asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
@@ -1483,7 +1411,6 @@ function WeeklyView({
                           onDropStaff={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'staff'); setDragOverZone(null); }}
                           onDropDriver={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'driver'); setDragOverZone(null); }}
                           onDropPorter={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'porter'); setDragOverZone(null); }}
-                          onDropVehicle={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'vehicle'); setDragOverZone(null); }}
                           onRemoveAssignment={onRemoveAssignment}
                           onAssignmentDragStart={setDraggingAssignment}
                           onAssignmentDragEnd={() => setDraggingAssignment(null)}
@@ -1495,6 +1422,7 @@ function WeeklyView({
                           onDeleteEvent={item.source === 'event' ? () => onDeleteEvent(item) : undefined}
                           onDuplicate={() => onDuplicate(item)}
                           onConvertToJob={item.source === 'event' && item.category === 'Survey' ? () => onConvertToJob(item) : undefined}
+                          onItemColorChange={color => onItemColorChange(item, color)}
                           navigate={navigate}
                           allAssets={allAssets}
                           onAssign={(asset, zone) => onAssign(item, asset, zone)}
@@ -1657,6 +1585,7 @@ const EMPTY_ASSET = {
   type: 'staff' as 'staff' | 'vehicle',
   name: '', role: 'driver', phone: '',
   make_model: '', registration: '', capacity_notes: '',
+  is_lorry: false,
   availability: 'available', notes: '',
 };
 
@@ -1684,6 +1613,7 @@ function AssetFormModal({
           make_model: initial.make_model || '',
           registration: initial.registration || '',
           capacity_notes: initial.capacity_notes || '',
+          is_lorry: !!initial.is_lorry,
           availability: initial.availability,
           notes: initial.notes || '',
         });
@@ -1694,7 +1624,9 @@ function AssetFormModal({
     }
   }, [open, initial, defaultType]);
 
-  const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
+  // Generic typed setter — supports string and boolean fields on the form.
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
+    setForm(p => ({ ...p, [k]: v }));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1709,6 +1641,7 @@ function AssetFormModal({
         make_model: form.type === 'vehicle' ? (form.make_model || null) : null,
         registration: form.type === 'vehicle' ? (form.registration || null) : null,
         capacity_notes: form.type === 'vehicle' ? (form.capacity_notes || null) : null,
+        is_lorry: form.type === 'vehicle' ? !!form.is_lorry : false,
         availability: form.availability,
         notes: form.notes || null,
       };
@@ -1784,6 +1717,17 @@ function AssetFormModal({
                 <label className="block text-xs font-medium text-slate-600 mb-1">Capacity / Notes</label>
                 <input className="input" placeholder="e.g. Long-wheelbase, 15 cubic metres" value={form.capacity_notes} onChange={e => set('capacity_notes', e.target.value)} />
               </div>
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.is_lorry}
+                    onChange={e => set('is_lorry', e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300"
+                  />
+                  <span>HGV / lorry — driver assigned to this vehicle earns the lorry driving bonus</span>
+                </label>
+              </div>
             </>
           )}
 
@@ -1853,13 +1797,18 @@ export default function CRMPlanner() {
 
   // Honour ?view=week and ?date=YYYY-MM-DD on first mount so other pages can
   // deep-link to a specific week (e.g. clicking a wage cell on the Wages page).
-  const initialView: 'month' | 'week' = searchParams.get('view') === 'week' ? 'week' : 'month';
+  const initialView: 'month' | 'week' | 'staff' = (() => {
+    const v = searchParams.get('view');
+    if (v === 'week') return 'week';
+    if (v === 'staff') return 'staff';
+    return 'month';
+  })();
   const initialDate = (() => {
     const d = searchParams.get('date');
     return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + 'T00:00:00') : new Date();
   })();
 
-  const [view,        setView]        = useState<'month' | 'week'>(initialView);
+  const [view,        setView]        = useState<'month' | 'week' | 'staff'>(initialView);
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [items,       setItems]       = useState<PlannerCalendarItem[]>([]);
   const [assets,      setAssets]      = useState<PlannerAsset[]>([]);
@@ -1914,7 +1863,7 @@ export default function CRMPlanner() {
         setItems(r.data);
         setAssignments([]);
         setWeekDates([]);
-      } else {
+      } else if (view === 'week') {
         const ws = getWeekStart(currentDate);
         const start = toISO(ws);
         const r = await api.get(`/planner/week?start=${start}`);
@@ -1928,6 +1877,9 @@ export default function CRMPlanner() {
           r.data.items.map((i: PlannerCalendarItem) => `${i.source}-${i.id}-${i.date}`)
         );
         setExpandedKeys(allKeys);
+      } else {
+        // staff view — child fetches its own data from /planner/staff-week
+        setItems([]); setAssignments([]); setWeekDates([]);
       }
     } catch {
       showToast('Failed to load planner data', 'error');
@@ -1943,6 +1895,7 @@ export default function CRMPlanner() {
   function prevPeriod() {
     setCurrentDate(d => {
       const nd = new Date(d);
+      // week + staff views step 7 days; month steps a month.
       if (view === 'month') { nd.setMonth(nd.getMonth() - 1); }
       else { nd.setDate(nd.getDate() - 7); }
       return nd;
@@ -2161,6 +2114,17 @@ export default function CRMPlanner() {
     }
   }
 
+  // Persist the per-card color override. `color === null` clears it so the
+  // card falls back to contract / category color.
+  async function handleUpdateItemColor(item: PlannerCalendarItem, color: string | null) {
+    try {
+      await api.patch('/planner/items/color', { source: item.source, id: item.id, color });
+      await loadData();
+    } catch {
+      showToast('Failed to update color', 'error');
+    }
+  }
+
   // ── Asset CRUD ────────────────────────────────────────────────────────────
 
   function openAddAsset() {
@@ -2312,6 +2276,13 @@ export default function CRMPlanner() {
             >
               Week
             </button>
+            <button
+              onClick={() => { setView('staff'); setExpandedKeys(new Set()); }}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === 'staff' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              title="Per-staff weekly grid — see who works where, who's free, who's off"
+            >
+              Staff
+            </button>
           </div>
 
           {/* Add quick job */}
@@ -2340,6 +2311,8 @@ export default function CRMPlanner() {
             }}
             onAddQuickJob={date => { setQuickJobDate(date || toISO(new Date())); setShowQuickJob(true); }}
           />
+        ) : view === 'staff' ? (
+          <StaffWeekView weekStart={toISO(getWeekStart(currentDate))} />
         ) : (
           <WeeklyView
             weekDates={weekDates}
@@ -2369,6 +2342,7 @@ export default function CRMPlanner() {
             onDeleteEvent={handleDeleteEvent}
             onDuplicate={handleDuplicate}
             onConvertToJob={handleConvertToJob}
+            onItemColorChange={handleUpdateItemColor}
             navigate={navigate}
             allAssets={assets}
             onAssign={handleAssign}
