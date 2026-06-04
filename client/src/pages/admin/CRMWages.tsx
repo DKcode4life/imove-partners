@@ -305,8 +305,8 @@ export default function CRMWages() {
                               {cell ? (
                                 <button
                                   type="button"
-                                  onClick={() => navigate(`/admin/crm/planner?view=week&date=${d}&highlight=${row.asset_id}`)}
-                                  title="Open this day in the weekly planner"
+                                  onClick={() => navigate(`/admin/crm/planner?view=staff&date=${d}&highlight=${row.asset_id}`)}
+                                  title="Open this day in the staff planner"
                                   className="inline-flex flex-col items-center px-2 py-1 rounded hover:bg-emerald-50 hover:ring-1 hover:ring-emerald-200 transition-colors cursor-pointer"
                                 >
                                   <span className="text-sm font-semibold text-slate-800 tabular-nums group-hover:text-emerald-700">

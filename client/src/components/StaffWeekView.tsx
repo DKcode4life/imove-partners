@@ -5,22 +5,25 @@
  *   1. "Jobs" tray at the top — every CrmJob and PlannerEvent scheduled that
  *      day. Each card shows needed staff/vans (when available) and how many
  *      are already assigned. Cards are draggable onto staff rows below.
- *   2. Assignment rows grouped by job. Each row shows
- *      Staff · Job · VH · Start [· Finish] · Wage. Finish only appears when
- *      the day has at least one Lux job (server-provided `has_lux[date]`).
+ *   2. Assignment rows grouped by job. The job description shows once in the
+ *      group header; each row shows Staff · Vehicle · Start · Finish · Hours ·
+ *      Wage. Finish + Hours appear on every job (not just Lux) so overtime can
+ *      be reconciled by total hours worked. Picking a vehicle promotes the row
+ *      to driver wage (a lorry adds the lorry bonus); clearing it reverts to
+ *      porter.
  *   3. Available staff (no assignment, no time off).
  *   4. Day-off staff (red rows).
  *
  * Drag sources:
  *   - Top-tray job card: payload {kind:'job', source, id}
- *   - An assigned-row's job label: payload {kind:'assignment', assignment_id}
+ *   - An assigned-row's staff name: payload {kind:'assignment', assignment_id}
  *
  * Drop target = any staff row for that date. The handler decides:
  *   - kind=job → POST /planner/assignments (create)
  *   - kind=assignment → PATCH /planner/assignments/:id { asset_id } (reassign)
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { Loader2, Users, Truck, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { Loader2, Users, Truck, X, Plus, Check, UserPlus } from 'lucide-react';
 import api from '../lib/api';
 import { catColor } from '../lib/planner-colors';
 import ColorPickerPopover from './ColorPickerPopover';
@@ -142,18 +145,78 @@ function groupTintBg(color: string): string {
   return `linear-gradient(to bottom, rgba(${r},${g},${b},0.16), rgba(${r},${g},${b},0.06))`;
 }
 
-// Column-template strings — switched per-day depending on whether Finish is shown.
-// Job column is widened (1.4 → 2.0) so longer descriptions fit.
-// Vehicle column widened so longer nicknames stay readable in the dropdown.
-const COLS_NO_FINISH = '1.5fr 1.8fr 1.4fr 0.7fr 0.9fr';
-const COLS_WITH_FINISH = '1.5fr 1.8fr 1.4fr 0.7fr 0.7fr 0.9fr';
+// Single column template shared by the header AND every data row so the titles
+// line up exactly over their columns. Columns:
+//   Staff · Vehicle · Start · Finish · Hours · Wage
+//
+// Start/Finish/Hours are FIXED-width px tracks, not fractions. The time inputs
+// have their native picker indicator hidden (see the input className), so they
+// only need room for the plain "HH:MM" text — ~58px renders it in full with no
+// clipping. Fixed widths also mean these columns are identical on every row, so
+// the grid never goes out of alignment.
+//
+// The flexible text columns (Staff, Vehicle, Wage) are minmax(0, …fr) — the 0
+// lower bound lets them truncate instead of pushing neighbours. Dropping the
+// clock icon freed ~44px which goes to Vehicle, so the selected van is legible
+// at a glance; Wage is a wide flex track so its right-aligned amount keeps clear
+// whitespace from the Hours column.
+const COLS =
+  'minmax(0,1.55fr) minmax(0,1.3fr) 58px 58px 44px minmax(0,1.2fr)';
+
+// True on touch-first devices (phones, tablets) where HTML5 drag-and-drop is
+// unavailable or unreliable. We key off the pointer media query rather than
+// screen width so a large tablet still gets the tap-to-assign flow while a small
+// desktop window keeps drag-and-drop. Reacts live if the primary pointer changes
+// (e.g. a 2-in-1 docking/undocking).
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(pointer: coarse)').matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const onChange = (e: MediaQueryListEvent) => setCoarse(e.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+  return coarse;
+}
+
+// Format derived hours for the Hours column. Null/zero render as a dash.
+function fmtHours(h: number | null): string {
+  if (h == null || h <= 0) return '—';
+  return `${h % 1 === 0 ? h.toFixed(0) : h.toFixed(2).replace(/0$/, '')}h`;
+}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StaffWeekView({ weekStart }: { weekStart: string }) {
+export default function StaffWeekView({
+  weekStart,
+  highlightAssetId = null,
+  highlightDate = null,
+  onHighlightConsumed,
+  onAddJob,
+  reloadKey,
+}: {
+  weekStart: string;
+  // Deep-link from the Wages page: flash this staff member's name on the given
+  // day's column so the user can spot exactly where that wage was earned.
+  highlightAssetId?: number | null;
+  highlightDate?: string | null;
+  onHighlightConsumed?: () => void;
+  // Open the quick-job modal pre-filled with a day's date. Wired to the same
+  // QuickJobModal the rest of the planner uses; the per-day "+" button calls it.
+  onAddJob?: (date: string) => void;
+  // Bumped by the parent after a quick job is saved so the grid refetches and
+  // shows the new job without a manual reload.
+  reloadKey?: number;
+}) {
   const [data, setData] = useState<StaffWeekPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const touch = useCoarsePointer();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,7 +231,43 @@ export default function StaffWeekView({ weekStart }: { weekStart: string }) {
     }
   }, [weekStart]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, reloadKey]);
+
+  // Deep-link flash: once the grid is rendered, pulse the staff member's name
+  // in the target day's column three times and scroll it into view. The name
+  // cells carry data-staff-asset-id / data-staff-date so we can target the
+  // exact (person, day) regardless of which bucket they fall in (assigned,
+  // available, or day-off).
+  useEffect(() => {
+    if (highlightAssetId == null || !highlightDate || !data) return;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let target: HTMLElement | null = null;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-staff-asset-id="${highlightAssetId}"][data-staff-date="${highlightDate}"]`,
+      );
+      if (!el) {
+        onHighlightConsumed?.();
+        return;
+      }
+      target = el;
+      el.classList.remove('planner-flash');
+      // Force reflow so re-triggering the animation always restarts it.
+      void el.offsetWidth;
+      el.classList.add('planner-flash');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      // 3 pulses × 0.55s ≈ 1.7s — strip the class afterwards so it can re-fire.
+      timeoutId = setTimeout(() => {
+        el.classList.remove('planner-flash');
+        onHighlightConsumed?.();
+      }, 1900);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timeoutId) clearTimeout(timeoutId);
+      if (target) target.classList.remove('planner-flash');
+    };
+  }, [highlightAssetId, highlightDate, data, onHighlightConsumed]);
 
   if (loading) {
     return (
@@ -184,8 +283,17 @@ export default function StaffWeekView({ weekStart }: { weekStart: string }) {
   return (
     <div className="flex-1 overflow-auto bg-gradient-to-b from-slate-50 to-slate-100/40">
       <div
-        className="grid h-full p-2 gap-2"
-        style={{ gridTemplateColumns: `repeat(${data.dates.length}, minmax(420px, 1fr))` }}
+        className="grid h-full p-2 gap-2 items-start"
+        style={{
+          // Per-day track sizing: a day with jobs gets a full, flexible column
+          // (wide enough for the Staff·Vehicle·Start·Finish·Hours·Wage grid); a
+          // day with no jobs collapses to a thin rail that only needs room for a
+          // staff name + the OFF toggle. Mixing a fixed-thin track with the
+          // flexible ones means the populated days absorb the freed width.
+          gridTemplateColumns: data.dates
+            .map(d => ((data.day_jobs[d]?.length ?? 0) > 0 ? 'minmax(460px,1fr)' : 'minmax(150px,180px)'))
+            .join(' '),
+        }}
       >
         {data.dates.map((date, i) => (
           <StaffDayColumn
@@ -198,6 +306,8 @@ export default function StaffWeekView({ weekStart }: { weekStart: string }) {
             vehicles={data.vehicles}
             onChange={load}
             luxRate={data.settings.lux_hourly_rate}
+            onAddJob={onAddJob}
+            touch={touch}
           />
         ))}
       </div>
@@ -208,7 +318,7 @@ export default function StaffWeekView({ weekStart }: { weekStart: string }) {
 // ── Single day column ────────────────────────────────────────────────────────
 
 function StaffDayColumn({
-  date, dayName, staff, day_jobs, has_lux, vehicles, onChange, luxRate,
+  date, dayName, staff, day_jobs, has_lux, vehicles, onChange, luxRate, onAddJob, touch,
 }: {
   date: string;
   dayName: string;
@@ -218,7 +328,13 @@ function StaffDayColumn({
   vehicles: VehicleOption[];
   onChange: () => void;
   luxRate: number;
+  onAddJob?: (date: string) => void;
+  // Touch device → show the tap-to-assign button + sheet instead of relying on
+  // drag-and-drop, which doesn't work on phones/tablets.
+  touch: boolean;
 }) {
+  // Which job's staff-picker sheet is open (touch only). Null = closed.
+  const [assignJob, setAssignJob] = useState<DayJob | null>(null);
   const dt = new Date(date + 'T00:00:00');
   const dayNum = dt.getDate();
   const monthShort = dt.toLocaleDateString('en-GB', { month: 'short' });
@@ -289,27 +405,30 @@ function StaffDayColumn({
     }
   }
 
-  const cols = has_lux ? COLS_WITH_FINISH : COLS_NO_FINISH;
+  const cols = COLS;
+
+  // A day with no jobs collapses to a thin rail: no Jobs tray, no column-title
+  // band, and the staff rows render in a compact name + toggle layout. The
+  // moment a job lands on the day it expands back to the full grid.
+  const collapsed = day_jobs.length === 0;
 
   // Centralized drop handler so all staff rows route through one place.
   // Reads the JSON payload off the dataTransfer and dispatches to the right
   // API call. Errors bubble up via the parent's onChange refetch.
   //
-  // `staffRole` is required for new assignments so the Weekly View can
-  // route the staff member into the right zone (driver vs porter) and the
-  // wage default matches what Weekly View would have applied if the assignment
-  // had been created there.
-  async function dropOnStaff(assetId: number, staffRole: string | null, payload: DragPayload) {
+  // New assignments always start as a PORTER (porter wage) regardless of the
+  // staff member's default role. The Staff View workflow is: assign → porter,
+  // then pick a vehicle on the row to promote them to driver (and a lorry adds
+  // the lorry bonus). daily_rate is left null so the server derives the wage
+  // from the role (per-staff porter rate, else the porter default).
+  async function dropOnStaff(assetId: number, _staffRole: string | null, payload: DragPayload) {
     try {
       if (payload.kind === 'job') {
-        const role = String(staffRole || '').toLowerCase();
-        const assigned_role = role === 'driver' || role === 'porter' ? role : null;
-        const daily_rate = role === 'driver' ? 150 : role === 'porter' ? 125 : null;
         await api.post('/planner/assignments', {
           asset_id: assetId,
           assigned_date: date,
-          assigned_role,
-          daily_rate,
+          assigned_role: 'porter',
+          daily_rate: null,
           [payload.source === 'job' ? 'job_id' : 'event_id']: payload.id,
         });
       } else {
@@ -338,24 +457,40 @@ function StaffDayColumn({
           <span className={`text-sm font-bold tabular-nums ${isToday ? 'text-indigo-700' : 'text-slate-800'}`}>{dayNum}</span>
           <span className="text-[11px] font-medium text-slate-400">{monthShort}</span>
         </div>
-        {has_lux && (
-          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.08em] text-blue-700 bg-blue-50 ring-1 ring-blue-200/70 rounded-full px-1.5 py-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            Lux
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {has_lux && (
+            <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.08em] text-blue-700 bg-blue-50 ring-1 ring-blue-200/70 rounded-full px-1.5 py-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+              Lux
+            </span>
+          )}
+          {onAddJob && (
+            <button
+              type="button"
+              onClick={() => onAddJob(date)}
+              title={`Add a job on ${dayName} ${dayNum} ${monthShort}`}
+              aria-label="Add job on this day"
+              className={`inline-flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
+                isToday
+                  ? 'text-indigo-500 hover:text-white hover:bg-indigo-500'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-600'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Jobs tray — compact title chip + draggable job cards */}
-      <div className="px-2 pt-2 pb-1.5 space-y-1">
-        <div className="flex items-center gap-1.5 px-1">
-          <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Jobs</span>
-          <span className="text-[10px] font-semibold text-slate-500 tabular-nums">{day_jobs.length}</span>
-        </div>
-        {day_jobs.length === 0 ? (
-          <div className="text-[11px] text-slate-400 italic px-1 py-0.5">No jobs scheduled</div>
-        ) : (
-          day_jobs.map(j => (
+      {/* Jobs tray — compact title chip + draggable job cards. Hidden entirely
+          on a collapsed (no-jobs) day; the day-header "+" is the add path. */}
+      {!collapsed && (
+        <div className="px-2 pt-2 pb-1.5 space-y-1">
+          <div className="flex items-center gap-1.5 px-1">
+            <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Jobs</span>
+            <span className="text-[10px] font-semibold text-slate-500 tabular-nums">{day_jobs.length}</span>
+          </div>
+          {day_jobs.map(j => (
             <JobTrayCard
               key={`${j.source}-${j.id}`}
               job={j}
@@ -364,25 +499,29 @@ function StaffDayColumn({
                 setColorCurrent(current);
                 setOpenColorKey(`${j.source}|${j.id}`);
               }}
+              onAssign={touch ? () => setAssignJob(j) : undefined}
             />
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {/* Column header — soft chip-style band */}
-      <div
-        className="grid text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400 px-3 py-1.5 mt-1"
-        style={{ gridTemplateColumns: cols }}
-      >
-        <span>Staff</span>
-        <span>Job</span>
-        <span>Vehicle</span>
-        <span>Start</span>
-        {has_lux && <span>Finish</span>}
-        <span className="text-right">Wage</span>
-      </div>
+      {/* Column header — soft chip-style band. Skipped when collapsed: with no
+          jobs there are no Vehicle/Start/Finish/Hours/Wage cells to label. */}
+      {!collapsed && (
+        <div
+          className="grid items-center gap-1 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400 px-5 py-1.5 mt-1"
+          style={{ gridTemplateColumns: cols }}
+        >
+          <span className="truncate">Staff</span>
+          <span className="truncate">Vehicle</span>
+          <span className="truncate">Start</span>
+          <span className="truncate">Finish</span>
+          <span className="truncate">Hours</span>
+          <span className="truncate text-right">Wage</span>
+        </div>
+      )}
 
-      <div className="px-2 pb-2 space-y-2">
+      <div className={`px-2 pb-2 space-y-2 ${collapsed ? 'pt-2' : ''}`}>
         {/* By-job groups — each group is its own subtle card with the item's
             effective color as a left accent. Click the accent to recolor. */}
         {byJob.map((g, gi) => {
@@ -413,15 +552,29 @@ function StaffDayColumn({
               <div className="flex items-center gap-1.5 pl-3 pr-2.5 py-1.5">
                 {g.isLux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" title="Lux Move" />}
                 <span className="text-[11px] font-semibold text-slate-700 truncate">{g.label}</span>
+                {touch && g.source && g.sourceId != null && (() => {
+                  const gj = day_jobs.find(j => j.source === g.source && j.id === g.sourceId);
+                  return gj ? (
+                    <button
+                      type="button"
+                      onClick={() => setAssignJob(gj)}
+                      className="ml-auto flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 bg-blue-50 ring-1 ring-blue-200/70 rounded-full px-2 py-0.5 active:bg-blue-100"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      Staff
+                    </button>
+                  ) : null;
+                })()}
               </div>
               {g.rows.map(({ staff, row }) => (
                 <AssignmentGridRow
                   key={row.assignment_id}
                   staffName={staff.name}
+                  staffAssetId={staff.asset_id}
+                  date={date}
                   staffRole={row.assigned_role || staff.role}
                   row={row}
                   cols={cols}
-                  hasFinish={has_lux}
                   vehicles={vehicles}
                   onChange={onChange}
                   luxRate={luxRate}
@@ -456,7 +609,7 @@ function StaffDayColumn({
                   staff={s}
                   date={date}
                   cols={cols}
-                  hasFinish={has_lux}
+                  collapsed={collapsed}
                   onChange={onChange}
                   onDropOnRow={p => dropOnStaff(s.asset_id, s.role, p)}
                 />
@@ -487,7 +640,7 @@ function StaffDayColumn({
                 date={date}
                 reason={reason}
                 cols={cols}
-                hasFinish={has_lux}
+                collapsed={collapsed}
                 onChange={onChange}
               />
             ))}
@@ -515,6 +668,17 @@ function StaffDayColumn({
           />
         );
       })()}
+
+      {/* Touch-only staff picker: tap names to assign/unassign instantly */}
+      {assignJob && (
+        <MobileAssignSheet
+          job={assignJob}
+          date={date}
+          staff={staff}
+          onChange={onChange}
+          onClose={() => setAssignJob(null)}
+        />
+      )}
     </div>
   );
 }
@@ -522,10 +686,13 @@ function StaffDayColumn({
 // ── Top-of-column draggable job card ─────────────────────────────────────────
 
 function JobTrayCard({
-  job, onOpenColor,
+  job, onOpenColor, onAssign,
 }: {
   job: DayJob;
   onOpenColor: (anchor: DOMRect, currentPlannerColor: string | null) => void;
+  // Provided only on touch devices — renders an "Assign Staff" button that opens
+  // the tap-to-pick sheet in place of drag-and-drop.
+  onAssign?: () => void;
 }) {
   const dotColor = job.effective_color || catColor(job.category).dot;
   const haveNeeds = job.men_needed != null || job.vans_needed != null || job.hgv_needed != null;
@@ -591,6 +758,18 @@ function JobTrayCard({
           )}
         </div>
       )}
+      {onAssign && (
+        <button
+          type="button"
+          draggable={false}
+          onClick={e => { e.stopPropagation(); onAssign(); }}
+          className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-white bg-blue-600 active:bg-blue-700 rounded-full px-2.5 py-1 shadow-sm"
+          title="Assign staff to this job"
+        >
+          <UserPlus className="w-3 h-3" />
+          Assign
+        </button>
+      )}
     </div>
   );
 }
@@ -647,13 +826,14 @@ function useDropTarget(onDrop: (p: DragPayload) => void) {
 // ── Assigned row (editable, drag source for its job, drop target) ────────────
 
 function AssignmentGridRow({
-  staffName, staffRole, row, cols, hasFinish, vehicles, onChange, luxRate, onDropOnRow,
+  staffName, staffAssetId, date, staffRole, row, cols, vehicles, onChange, luxRate, onDropOnRow,
 }: {
   staffName: string;
+  staffAssetId: number;
+  date: string;
   staffRole: string | null;
   row: StaffWeekRow;
   cols: string;
-  hasFinish: boolean;
   vehicles: VehicleOption[];
   onChange: () => void;
   luxRate: number;
@@ -684,6 +864,13 @@ function AssignmentGridRow({
     }
     return row.wage_total;
   }, [row, startTime, finishTime, luxRate]);
+
+  // Live worked-hours preview — derived from the current start/finish inputs so
+  // the Hours column updates as the user types, before the server round-trip.
+  const liveHours = useMemo(
+    () => deriveHoursClient(startTime, finishTime),
+    [startTime, finishTime],
+  );
 
   async function patch(body: Record<string, unknown>) {
     setSaving(true);
@@ -721,15 +908,16 @@ function AssignmentGridRow({
     patch({ wage_override: n });
   }
 
-  // This row is a drag source for its own job (so the user can grab the
-  // job label and drop on another staff row to reassign).
+  // This row is a drag source for its own assignment — grab the staff name and
+  // drop on another staff row to reassign the job to that person, or drop onto
+  // empty space (any non-row area) to remove them from the job entirely.
   function onJobDragStart(e: DragEvent<HTMLSpanElement>) {
     const payload: DragPayload = {
       kind: 'assignment',
       assignment_id: row.assignment_id,
       source: row.source,
       source_id: row.source_id,
-      from_asset_id: -1,
+      from_asset_id: staffAssetId,
     };
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
     e.dataTransfer.setData('text/plain', JSON.stringify(payload));
@@ -739,6 +927,14 @@ function AssignmentGridRow({
     // Stop the row's drag handlers (if any) from also firing — only the
     // <span> is supposed to be the drag source.
     e.stopPropagation();
+  }
+
+  // Released over empty space → unassign. A drop that lands on a real staff row
+  // is handled by that row's drop target (which calls preventDefault), so the
+  // browser reports a concrete dropEffect ('move'/'copy'). Only a drop that
+  // landed on no valid target reports 'none' — that's our "drag to remove".
+  function onJobDragEnd(e: DragEvent<HTMLSpanElement>) {
+    if (e.dataTransfer.dropEffect === 'none') unassign();
   }
 
   const { over, handlers } = useDropTarget(onDropOnRow);
@@ -753,7 +949,16 @@ function AssignmentGridRow({
       }`}
       style={{ gridTemplateColumns: cols }}
     >
-      <span className="truncate text-slate-800 font-medium flex items-center gap-1.5">
+      <span
+        draggable
+        onDragStart={onJobDragStart}
+        onDragEnd={onJobDragEnd}
+        data-staff-asset-id={staffAssetId}
+        data-staff-date={date}
+        className="min-w-0 cursor-grab active:cursor-grabbing text-slate-800 font-medium flex items-center gap-1.5"
+        title={`Drag ${staffName} onto another staff row to reassign, or onto empty space to remove from this job`}
+      >
+        {row.is_lux_job && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
         <span className="truncate">{staffName}</span>
         {staffRole && (
           <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex-shrink-0">
@@ -761,19 +966,21 @@ function AssignmentGridRow({
           </span>
         )}
       </span>
-      <span
-        draggable
-        onDragStart={onJobDragStart}
-        className="cursor-grab active:cursor-grabbing truncate text-slate-600 hover:text-blue-700 inline-flex items-center gap-1.5 transition-colors"
-        title={row.job_label ? `${row.job_label}${row.is_lux_job ? ' · Lux Move' : ''}\nDrag onto another staff row to reassign` : 'Drag onto another staff row to reassign'}
-      >
-        {row.is_lux_job && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
-        <span className="truncate">{row.job_label || '—'}</span>
-      </span>
       <VehicleSelect
         value={row.vehicle_asset_id}
         vehicles={vehicles}
-        onChange={async v => { await patch({ vehicle_asset_id: v }); }}
+        onChange={async v => {
+          // Picking a vehicle promotes the staff member to DRIVER (driver wage,
+          // plus the lorry bonus when the van is a lorry — the server adds that
+          // automatically once the role is driver). Clearing it reverts to
+          // PORTER. daily_rate is reset to null so the wage re-derives from the
+          // new role rather than keeping the previous rate.
+          await patch({
+            vehicle_asset_id: v,
+            assigned_role: v != null ? 'driver' : 'porter',
+            daily_rate: null,
+          });
+        }}
       />
       <input
         type="time"
@@ -783,23 +990,25 @@ function AssignmentGridRow({
           if (startTime === (row.start_time || '')) return;
           patch({ start_time: startTime || null });
         }}
-        className="bg-transparent ring-1 ring-transparent hover:ring-slate-200 focus:ring-blue-300 focus:bg-white focus:outline-none rounded-md px-1.5 py-0.5 w-full text-[11px] tabular-nums transition-all"
+        className="min-w-0 bg-transparent ring-1 ring-transparent hover:ring-slate-200 focus:ring-blue-300 focus:bg-white focus:outline-none rounded-md px-1 py-0.5 w-full text-[11px] tabular-nums transition-all [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:w-0"
       />
-      {hasFinish && (
-        <input
-          type="time"
-          value={finishTime}
-          onChange={e => setFinishTime(e.target.value)}
-          onBlur={() => {
-            if (finishTime === (row.finish_time || '')) return;
-            patch({ finish_time: finishTime || null });
-          }}
-          disabled={!row.is_lux_job}
-          placeholder={row.is_lux_job ? '' : '—'}
-          className="bg-transparent ring-1 ring-transparent hover:ring-slate-200 focus:ring-blue-300 focus:bg-white focus:outline-none rounded-md px-1.5 py-0.5 w-full text-[11px] tabular-nums disabled:text-slate-300 disabled:cursor-not-allowed transition-all"
-        />
-      )}
-      <span className="justify-self-end inline-flex items-center gap-1 tabular-nums">
+      <input
+        type="time"
+        value={finishTime}
+        onChange={e => setFinishTime(e.target.value)}
+        onBlur={() => {
+          if (finishTime === (row.finish_time || '')) return;
+          patch({ finish_time: finishTime || null });
+        }}
+        className="min-w-0 bg-transparent ring-1 ring-transparent hover:ring-slate-200 focus:ring-blue-300 focus:bg-white focus:outline-none rounded-md px-1 py-0.5 w-full text-[11px] tabular-nums transition-all [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:w-0"
+      />
+      <span
+        className={`min-w-0 truncate text-[11px] tabular-nums px-1 ${liveHours != null && liveHours > 0 ? 'text-slate-600 font-medium' : 'text-slate-300'}`}
+        title={liveHours != null && liveHours > 0 ? `${liveHours} hours worked` : 'Set start and finish to compute hours'}
+      >
+        {fmtHours(liveHours)}
+      </span>
+      <span className="min-w-0 justify-self-end inline-flex items-center gap-1 tabular-nums">
         {editingWage ? (
           <span className="inline-flex items-center gap-0.5">
             <span className="text-[10px] text-slate-400">£</span>
@@ -851,15 +1060,6 @@ function AssignmentGridRow({
             <X className="w-2.5 h-2.5" />
           </button>
         )}
-        <button
-          type="button"
-          onClick={unassign}
-          disabled={saving}
-          title={`Unassign ${staffName} from this job`}
-          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 inline-flex items-center justify-center w-5 h-5 rounded-md text-slate-400 hover:text-white hover:bg-red-500 transition-all"
-        >
-          <X className="w-3 h-3" />
-        </button>
       </span>
     </div>
   );
@@ -882,7 +1082,12 @@ function VehicleSelect({
     <select
       value={value ?? ''}
       onChange={e => onChange(e.target.value === '' ? null : parseInt(e.target.value, 10))}
-      className={`bg-transparent ring-1 ring-transparent hover:ring-slate-200 focus:ring-blue-300 focus:bg-white focus:outline-none rounded-md px-1.5 py-0.5 w-full min-w-0 text-[11px] truncate transition-all cursor-pointer ${
+      // Keep this floor tight so the native dropdown arrow sits close to the van
+      // name rather than floating far right (the gap the user flagged). ~3rem is
+      // enough for 3–4 letters plus the arrow before the ellipsis kicks in; the
+      // minmax(0,…) track lets it truncate gracefully past that.
+      style={{ minWidth: '3rem' }}
+      className={`min-w-0 bg-transparent ring-1 ring-transparent hover:ring-slate-200 focus:ring-blue-300 focus:bg-white focus:outline-none rounded-md px-1 py-0.5 w-full text-[11px] truncate transition-all cursor-pointer ${
         value != null ? 'text-slate-700 font-medium' : 'text-slate-400'
       }`}
       title={tooltip}
@@ -900,9 +1105,9 @@ function VehicleSelect({
 // ── Available row (drop target + mark-day-off) ──────────────────────────────
 
 function AvailableRow({
-  staff, date, cols, hasFinish, onChange, onDropOnRow,
+  staff, date, cols, collapsed = false, onChange, onDropOnRow,
 }: {
-  staff: StaffEntry; date: string; cols: string; hasFinish: boolean;
+  staff: StaffEntry; date: string; cols: string; collapsed?: boolean;
   onChange: () => void; onDropOnRow: (p: DragPayload) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -919,6 +1124,38 @@ function AvailableRow({
     } finally { setBusy(false); }
   }
   const { over, handlers } = useDropTarget(onDropOnRow);
+
+  // Compact rail layout for a collapsed (no-jobs) day: just the name + OFF
+  // toggle in a simple flex row, no Vehicle/Start/Finish/Hours/Wage cells.
+  if (collapsed) {
+    return (
+      <div
+        {...handlers}
+        className={`flex items-center gap-1 px-3 py-0.5 text-xs transition-colors ${
+          over ? 'bg-blue-100/70 ring-1 ring-blue-400/70 ring-inset' : 'hover:bg-white/50'
+        }`}
+        title="Drop a job here to assign this staff member"
+      >
+        <span
+          data-staff-asset-id={staff.asset_id}
+          data-staff-date={date}
+          className="min-w-0 flex-1 text-slate-700 font-medium leading-tight flex items-center gap-1.5"
+        >
+          <span className="truncate">{staff.name}</span>
+          <span className="text-emerald-600/70 italic text-[10px] font-normal flex-shrink-0">Free</span>
+        </span>
+        <button
+          onClick={markOff}
+          disabled={busy}
+          className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md px-1.5 py-0.5 transition-colors"
+          title="Mark this staff member off for the day"
+        >
+          OFF
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       {...handlers}
@@ -930,11 +1167,18 @@ function AvailableRow({
       style={{ gridTemplateColumns: cols }}
       title="Drop a job here to assign this staff member"
     >
-      <span className="truncate text-slate-700 font-medium leading-tight">{staff.name}</span>
-      <span className="text-emerald-600/80 italic text-[11px] leading-tight">Free</span>
+      <span
+        data-staff-asset-id={staff.asset_id}
+        data-staff-date={date}
+        className="min-w-0 text-slate-700 font-medium leading-tight flex items-center gap-1.5"
+      >
+        <span className="truncate">{staff.name}</span>
+        <span className="text-emerald-600/70 italic text-[10px] font-normal flex-shrink-0">Free</span>
+      </span>
       <span className="text-slate-300 text-center">·</span>
       <span className="text-slate-300 text-center">·</span>
-      {hasFinish && <span className="text-slate-300 text-center">·</span>}
+      <span className="text-slate-300 text-center">·</span>
+      <span className="text-slate-300 text-center">·</span>
       <button
         onClick={markOff}
         disabled={busy}
@@ -950,10 +1194,10 @@ function AvailableRow({
 // ── Day-off row ──────────────────────────────────────────────────────────────
 
 function DayOffRow({
-  staff, date, reason, cols, hasFinish, onChange,
+  staff, date, reason, cols, collapsed = false, onChange,
 }: {
   staff: StaffEntry; date: string; reason: string | null;
-  cols: string; hasFinish: boolean; onChange: () => void;
+  cols: string; collapsed?: boolean; onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   async function clear() {
@@ -963,17 +1207,51 @@ function DayOffRow({
       onChange();
     } finally { setBusy(false); }
   }
+
+  // Compact rail layout for a collapsed (no-jobs) day: name + reason + Clear.
+  if (collapsed) {
+    return (
+      <div
+        className="flex items-center gap-1 px-3 py-0.5 text-xs text-red-700/90"
+        title={reason || 'Day off'}
+      >
+        <span
+          data-staff-asset-id={staff.asset_id}
+          data-staff-date={date}
+          className="min-w-0 flex-1 font-medium leading-tight flex items-center gap-1.5"
+        >
+          <span className="truncate flex-shrink-0 max-w-[55%]">{staff.name}</span>
+          <span className="italic text-[10px] font-normal text-red-500/70 truncate" title="Day off">{reason || 'Day off'}</span>
+        </span>
+        <button
+          onClick={clear}
+          disabled={busy}
+          className="flex-shrink-0 text-[10px] font-medium text-red-500/70 hover:text-red-700 hover:bg-red-100/60 rounded-md px-1.5 py-0.5 transition-colors"
+        >
+          Clear
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       className="grid items-center gap-1 px-3 py-0.5 text-xs text-red-700/90"
       style={{ gridTemplateColumns: cols }}
       title={reason || 'Day off'}
     >
-      <span className="truncate font-medium leading-tight">{staff.name}</span>
-      <span className="italic truncate text-[11px]" title="Day off">{reason || 'Day off'}</span>
+      <span
+        data-staff-asset-id={staff.asset_id}
+        data-staff-date={date}
+        className="min-w-0 font-medium leading-tight flex items-center gap-1.5"
+      >
+        <span className="truncate flex-shrink-0 max-w-[60%]">{staff.name}</span>
+        <span className="italic text-[10px] font-normal text-red-500/70 truncate" title="Day off">{reason || 'Day off'}</span>
+      </span>
       <span className="text-red-200 text-center">·</span>
       <span className="text-red-200 text-center">·</span>
-      {hasFinish && <span className="text-red-200 text-center">·</span>}
+      <span className="text-red-200 text-center">·</span>
+      <span className="text-red-200 text-center">·</span>
       <button
         onClick={clear}
         disabled={busy}
@@ -981,6 +1259,240 @@ function DayOffRow({
       >
         Clear
       </button>
+    </div>
+  );
+}
+
+// ── Mobile/tablet staff picker sheet ────────────────────────────────────────
+//
+// Touch alternative to drag-and-drop. Opened from a job's "Assign" button, it
+// shows the job at the top and a list of staff with square toggles. Tapping a
+// name assigns/unassigns that person to THIS job immediately (instant mode):
+//   - unchecked → checked: POST a porter assignment (same as a drag-drop)
+//   - checked → unchecked: DELETE that person's assignment for this job
+// After each change it refetches via onChange, so the toggles reflect the live
+// server state (and the planner rows below update too). Day-off staff are shown
+// disabled so it's clear why they can't be picked.
+function MobileAssignSheet({
+  job, date, staff, onChange, onClose,
+}: {
+  job: DayJob;
+  date: string;
+  staff: StaffEntry[];
+  onChange: () => void;
+  onClose: () => void;
+}) {
+  // Local selection — which staff SHOULD be on this job. Seeded from the current
+  // assignments and edited freely by tapping; nothing hits the server until the
+  // user taps Done (batch mode). `saving` guards the apply round-trip.
+  const [selected, setSelected] = useState<Set<number>>(() => {
+    const set = new Set<number>();
+    for (const s of staff) {
+      if (s.days[date]?.rows.some(r => r.source === job.source && r.source_id === job.id)) {
+        set.add(s.asset_id);
+      }
+    }
+    return set;
+  });
+  const [saving, setSaving] = useState(false);
+
+  // Bucket every staff member by their CURRENT (server) state for this day/job.
+  // The grouping stays put while you toggle; only the checkmark follows your
+  // selection, so the list doesn't jump around under your thumb.
+  const { onJob, free, elsewhere, off } = useMemo(() => {
+    const onJob: StaffEntry[] = [];
+    const free: StaffEntry[] = [];
+    const elsewhere: { s: StaffEntry; other: string }[] = [];
+    const off: { s: StaffEntry; reason: string | null }[] = [];
+    for (const s of staff) {
+      const bucket = s.days[date];
+      // No bucket → this person isn't on the roster for this day; skip them, the
+      // same way the planner's own available/assigned lists do.
+      if (!bucket) continue;
+      if (bucket.day_off) { off.push({ s, reason: bucket.day_off.reason }); continue; }
+      const rows = bucket.rows;
+      if (rows.some(r => r.source === job.source && r.source_id === job.id)) onJob.push(s);
+      else if (rows.length > 0) elsewhere.push({ s, other: rows[0].job_label || 'another job' });
+      else free.push(s);
+    }
+    return { onJob, free, elsewhere, off };
+  }, [staff, date, job.source, job.id]);
+
+  // Local-only toggle — no network. Just flips membership in `selected`.
+  function toggle(s: StaffEntry) {
+    setSelected(prev => {
+      const n = new Set(prev);
+      if (n.has(s.asset_id)) n.delete(s.asset_id);
+      else n.add(s.asset_id);
+      return n;
+    });
+  }
+
+  // How many adds/removes are pending vs the current server state — drives the
+  // count badge on the Done button so the user sees there's something to save.
+  const pendingCount = useMemo(() => {
+    let n = 0;
+    for (const s of staff) {
+      const bucket = s.days[date];
+      if (!bucket || bucket.day_off) continue;
+      const existing = bucket.rows.some(r => r.source === job.source && r.source_id === job.id);
+      if (selected.has(s.asset_id) !== existing) n++;
+    }
+    return n;
+  }, [staff, date, job.source, job.id, selected]);
+
+  // Done → apply the whole diff at once (POST adds, DELETE removes), then refetch
+  // and close. Nothing pending → just close without a round-trip.
+  async function applyAndClose() {
+    if (pendingCount === 0) { onClose(); return; }
+    setSaving(true);
+    const ops: Promise<unknown>[] = [];
+    for (const s of staff) {
+      const bucket = s.days[date];
+      if (!bucket || bucket.day_off) continue;
+      const existing = bucket.rows.find(r => r.source === job.source && r.source_id === job.id);
+      const want = selected.has(s.asset_id);
+      if (want && !existing) {
+        ops.push(api.post('/planner/assignments', {
+          asset_id: s.asset_id,
+          assigned_date: date,
+          assigned_role: 'porter',
+          daily_rate: null,
+          [job.source === 'job' ? 'job_id' : 'event_id']: job.id,
+        }));
+      } else if (!want && existing) {
+        ops.push(api.delete(`/planner/assignments/${existing.assignment_id}`));
+      }
+    }
+    // allSettled so one failed op doesn't abort the rest; 409 (already assigned)
+    // is benign and the refetch reconciles whatever actually landed.
+    const results = await Promise.allSettled(ops);
+    const failed = results.filter(
+      r => r.status === 'rejected' && (r.reason as any)?.response?.status !== 409,
+    );
+    if (failed.length) console.error('[StaffView] batch assign: some ops failed', failed);
+    onChange();
+    setSaving(false);
+    onClose();
+  }
+
+  function StaffToggle({ s, subtitle }: { s: StaffEntry; subtitle?: string }) {
+    const checked = selected.has(s.asset_id);
+    return (
+      <button
+        type="button"
+        onClick={() => toggle(s)}
+        disabled={saving}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-slate-50 disabled:opacity-60 transition-colors"
+      >
+        <span
+          className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+            checked ? 'bg-blue-600 text-white' : 'bg-white ring-2 ring-slate-300'
+          }`}
+        >
+          {checked ? <Check className="w-4 h-4" /> : null}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-slate-800 truncate">{s.name}</span>
+            {s.role && (
+              <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-slate-400">{s.role}</span>
+            )}
+          </span>
+          {subtitle && <span className="block text-[11px] text-amber-600 truncate mt-0.5">{subtitle}</span>}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <button type="button" aria-label="Cancel" disabled={saving} className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="relative bg-white rounded-t-2xl shadow-[0_-8px_30px_-12px_rgba(15,23,42,0.4)] max-h-[82vh] flex flex-col">
+        {/* Grab handle */}
+        <div className="pt-2 pb-1 flex justify-center flex-shrink-0">
+          <span className="w-9 h-1 rounded-full bg-slate-300" />
+        </div>
+        {/* Job header + Done */}
+        <div className="px-4 pb-3 pt-1 flex items-start gap-3 border-b border-slate-100 flex-shrink-0">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              {job.is_lux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
+              <span className="text-base font-semibold text-slate-900 truncate">{job.label}</span>
+            </div>
+            {(job.contract_name || job.time) && (
+              <div className="text-[12px] text-slate-500 truncate mt-0.5">
+                {job.contract_name && <span>{job.contract_name}</span>}
+                {job.contract_name && job.time && <span className="text-slate-300"> · </span>}
+                {job.time && <span className="tabular-nums">{job.time}</span>}
+              </div>
+            )}
+            <div className="text-[11px] text-slate-400 mt-0.5">Toggle staff on/off, then tap Done to save.</div>
+          </div>
+          <button
+            type="button"
+            onClick={applyAndClose}
+            disabled={saving}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 text-sm font-semibold text-white bg-blue-600 active:bg-blue-700 disabled:opacity-70 rounded-full px-4 py-1.5 -mr-1"
+          >
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {saving ? 'Saving…' : 'Done'}
+            {!saving && pendingCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-white/25 text-[11px] tabular-nums">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        </div>
+        {/* Staff list */}
+        <div className="overflow-y-auto overscroll-contain divide-y divide-slate-100">
+          {onJob.length > 0 && (
+            <>
+              <SheetSectionLabel>On this job · {onJob.length}</SheetSectionLabel>
+              {onJob.map(s => <StaffToggle key={s.asset_id} s={s} />)}
+            </>
+          )}
+          {free.length > 0 && (
+            <>
+              <SheetSectionLabel>Available</SheetSectionLabel>
+              {free.map(s => <StaffToggle key={s.asset_id} s={s} />)}
+            </>
+          )}
+          {elsewhere.length > 0 && (
+            <>
+              <SheetSectionLabel>On another job</SheetSectionLabel>
+              {elsewhere.map(({ s, other }) => (
+                <StaffToggle key={s.asset_id} s={s} subtitle={`Already on ${other}`} />
+              ))}
+            </>
+          )}
+          {off.length > 0 && (
+            <>
+              <SheetSectionLabel>Day off</SheetSectionLabel>
+              {off.map(({ s, reason }) => (
+                <div key={s.asset_id} className="w-full flex items-center gap-3 px-4 py-3 opacity-50">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-md bg-slate-100 ring-2 ring-slate-200" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-slate-500 truncate">{s.name}</span>
+                    <span className="block text-[11px] text-red-500/70 truncate">{reason || 'Day off'}</span>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+          {onJob.length + free.length + elsewhere.length + off.length === 0 && (
+            <div className="px-4 py-8 text-center text-sm text-slate-400">No staff to show</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SheetSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="sticky top-0 bg-slate-50/95 backdrop-blur px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 z-10">
+      {children}
     </div>
   );
 }

@@ -1835,9 +1835,9 @@ function StaffTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
 // ── Vehicles tab ──────────────────────────────────────────────────────────────
 
 interface VehicleForm {
-  name: string; make_model: string; registration: string; capacity_notes: string; notes: string;
+  name: string; make_model: string; registration: string; capacity_notes: string; notes: string; is_lorry: boolean;
 }
-const EMPTY_VEHICLE: VehicleForm = { name: '', make_model: '', registration: '', capacity_notes: '', notes: '' };
+const EMPTY_VEHICLE: VehicleForm = { name: '', make_model: '', registration: '', capacity_notes: '', notes: '', is_lorry: false };
 
 function VehiclesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
   const [vehicles, setVehicles] = useState<PlannerAsset[]>([]);
@@ -1862,7 +1862,7 @@ function VehiclesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'er
     setEditTarget(v);
     setForm({
       name: v.name, make_model: v.make_model || '', registration: v.registration || '',
-      capacity_notes: v.capacity_notes || '', notes: v.notes || '',
+      capacity_notes: v.capacity_notes || '', notes: v.notes || '', is_lorry: !!v.is_lorry,
     });
     setFormError(''); setModalOpen(true);
   };
@@ -1978,6 +1978,23 @@ function VehiclesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'er
               <input value={form.capacity_notes} onChange={setF('capacity_notes')} placeholder="e.g. 3.5T, fits 3-bed" className="input-field w-full" />
             </div>
             <div className="col-span-2">
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, is_lorry: !f.is_lorry }))}
+                className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left hover:bg-slate-100 transition-colors"
+              >
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">HGV / Lorry</span>
+                  <span className="block text-[11px] text-slate-400 mt-0.5">A driver assigned to this vehicle earns the lorry driving bonus.</span>
+                </span>
+                <span
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${form.is_lorry ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.is_lorry ? 'translate-x-4' : 'translate-x-1'}`} />
+                </span>
+              </button>
+            </div>
+            <div className="col-span-2">
               <label className="block text-xs font-medium text-slate-500 mb-1">Internal Notes</label>
               <textarea value={form.notes} onChange={setF('notes')} rows={2} placeholder="Any notes…" className="input-field w-full resize-none" />
             </div>
@@ -2014,6 +2031,9 @@ interface ContractForm {
   office_number: string; direct_line: string; address: string;
   description: string; payment_terms: string;
   is_lux: boolean;
+  overtime_applicable: boolean;
+  overtime_fee: string;
+  overtime_threshold_hours: string;
   color: string | null;
 }
 const EMPTY_CONTRACT: ContractForm = {
@@ -2021,6 +2041,9 @@ const EMPTY_CONTRACT: ContractForm = {
   office_number: '', direct_line: '', address: '',
   description: '', payment_terms: '',
   is_lux: false,
+  overtime_applicable: false,
+  overtime_fee: '',
+  overtime_threshold_hours: '10',
   color: null,
 };
 
@@ -2055,6 +2078,9 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
       direct_line: c.direct_line || '', address: c.address || '',
       description: c.description || '', payment_terms: c.payment_terms || '',
       is_lux: !!c.is_lux,
+      overtime_applicable: !!c.overtime_applicable,
+      overtime_fee: c.overtime_fee != null ? String(c.overtime_fee) : '',
+      overtime_threshold_hours: c.overtime_threshold_hours != null ? String(c.overtime_threshold_hours) : '10',
       color: c.color || null,
     });
     setFormError(''); setModalOpen(true);
@@ -2298,6 +2324,50 @@ function ContractsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'e
             </label>
             <p className="text-[11px] text-slate-400 mt-1 ml-6">
               Jobs under this contract bill staff at the Lux Hourly Rate (configured under Company Details → Wage Rules) instead of the daily rate.
+            </p>
+          </div>
+
+          {/* Overtime fee — independent of Lux. Drives the auto overtime line on weekly invoices. */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.overtime_applicable}
+                onChange={e => setForm(f => ({ ...f, overtime_applicable: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-300"
+              />
+              <span>Is overtime fee applicable</span>
+            </label>
+            {form.overtime_applicable && (
+              <div className="mt-2 ml-6 flex flex-wrap items-end gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Overtime fee (£ / hour)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.overtime_fee}
+                    onChange={e => setForm(f => ({ ...f, overtime_fee: e.target.value }))}
+                    placeholder="e.g. 24"
+                    className="input-field w-32"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Overtime after (hours/day)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={form.overtime_threshold_hours}
+                    onChange={e => setForm(f => ({ ...f, overtime_threshold_hours: e.target.value }))}
+                    placeholder="10"
+                    className="input-field w-32"
+                  />
+                </div>
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400 mt-1 ml-6">
+              Hours each staff member works past the daily threshold are billed at this fee. All overtime for a day is summed into one line on the weekly invoice.
             </p>
           </div>
 

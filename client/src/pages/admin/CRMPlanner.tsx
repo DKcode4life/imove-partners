@@ -1782,6 +1782,9 @@ export default function CRMPlanner() {
   // Modals
   const [showQuickJob,  setShowQuickJob]  = useState(false);
   const [quickJobDate,  setQuickJobDate]  = useState('');
+  // Bumped after a quick job is saved so the Staff View (which loads its own
+  // data) refetches and shows the new job without a manual reload.
+  const [staffReloadKey, setStaffReloadKey] = useState(0);
   const [editEvent,     setEditEvent]     = useState<PlannerCalendarItem | null>(null);
   const [showAssetForm, setShowAssetForm] = useState(false);
   const [editAsset,     setEditAsset]     = useState<PlannerAsset | null>(null);
@@ -1879,6 +1882,12 @@ export default function CRMPlanner() {
   function switchToWeek(fromDate?: string) {
     if (fromDate) setCurrentDate(new Date(fromDate + 'T00:00:00'));
     setView('week');
+    setExpandedKeys(new Set());
+  }
+
+  function switchToStaff(fromDate?: string) {
+    if (fromDate) setCurrentDate(new Date(fromDate + 'T00:00:00'));
+    setView('staff');
     setExpandedKeys(new Set());
   }
 
@@ -2267,7 +2276,7 @@ export default function CRMPlanner() {
           <MonthlyView
             currentDate={currentDate}
             items={items}
-            onDayClick={date => switchToWeek(date)}
+            onDayClick={date => switchToStaff(date)}
             onItemClick={item => {
               if (item.source === 'job') { navigate(`/admin/crm/${item.id}`); }
               else { setModalItem(item); }
@@ -2275,7 +2284,14 @@ export default function CRMPlanner() {
             onAddQuickJob={date => { setQuickJobDate(date || toISO(new Date())); setShowQuickJob(true); }}
           />
         ) : view === 'staff' ? (
-          <StaffWeekView weekStart={toISO(getWeekStart(currentDate))} />
+          <StaffWeekView
+            weekStart={toISO(getWeekStart(currentDate))}
+            highlightAssetId={highlightAssetId}
+            highlightDate={highlightDate}
+            onHighlightConsumed={() => { setHighlightAssetId(null); setHighlightDate(null); }}
+            onAddJob={date => { setEditEvent(null); setQuickJobDate(date); setShowQuickJob(true); }}
+            reloadKey={staffReloadKey}
+          />
         ) : (
           <WeeklyView
             weekDates={weekDates}
@@ -2322,7 +2338,7 @@ export default function CRMPlanner() {
         onClose={() => { setShowQuickJob(false); setEditEvent(null); }}
         defaultDate={quickJobDate}
         editItem={editEvent}
-        onSaved={() => { loadData(); showToast(editEvent ? 'Quick job updated' : 'Quick job added', 'success'); }}
+        onSaved={() => { loadData(); setStaffReloadKey(k => k + 1); showToast(editEvent ? 'Quick job updated' : 'Quick job added', 'success'); }}
       />
 
       <AssetFormModal

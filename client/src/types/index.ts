@@ -505,6 +505,9 @@ export interface Contract {
   description: string | null;
   payment_terms: string | null;
   is_lux: boolean;
+  overtime_applicable: boolean;
+  overtime_fee: number | null;
+  overtime_threshold_hours: number;
   color: string | null;
   created_at: string;
   updated_at: string;
