@@ -92,7 +92,10 @@ function computeAssignmentWage({ assignment, asset, vehicle, contract, event, lu
   // persisted to the assignment — falling back here makes the wage compute
   // regardless of that.)
   const effectiveStart = a.start_time || event?.event_time || null;
-  const hours = isLuxContract ? deriveHours(effectiveStart, a.finish_time) : null;
+  // Worked hours are derived for EVERY job, not just Lux — the Staff View shows
+  // an Hours column so overtime-billed contracts can be reconciled by eye. Only
+  // Lux jobs feed `hours` into the wage; all others stay on the daily rate.
+  const hours = deriveHours(effectiveStart, a.finish_time);
   // Effective role on the day = assigned_role (per-assignment) ?? asset.role (staff default).
   // Drives both per-staff rate selection and the lorry bonus check.
   const effectiveRole = String(a.assigned_role || asset?.role || '').toLowerCase();

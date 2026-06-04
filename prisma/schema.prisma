@@ -653,6 +653,12 @@ model Contract {
   description   String?
   payment_terms String?
   is_lux        Boolean  @default(false) // flags Lux Move contracts so planner assignments use hourly Lux rate instead of daily
+  // Overtime billing — independent of is_lux. When overtime_applicable, hours a
+  // staff member works past overtime_threshold_hours on a day are billed at
+  // overtime_fee £/hour on the weekly invoice (one summed line per day).
+  overtime_applicable      Boolean @default(false)
+  overtime_fee             Float?  // £ per overtime hour
+  overtime_threshold_hours Float   @default(10) // hours/day before overtime starts
   color         String?  // hex color used by the planner for this contract's jobs; overrides category color
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now()) @updatedAt
@@ -766,6 +772,7 @@ model ContractInvoiceItem {
   unit_price                  Float  @default(0)
   total                       Float  @default(0)
   sort_order                  Int    @default(0)
+  is_overtime                 Boolean @default(false) // system-managed per-day overtime line; recomputed on reconcile
 
   invoice         ContractInvoice  @relation(fields: [contract_invoice_id], references: [id], onDelete: Cascade)
   source_job      ContractJob?     @relation(fields: [source_contract_job_id], references: [id], onDelete: SetNull)

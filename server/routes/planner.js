@@ -385,6 +385,21 @@ router.patch('/assignments/:id', wrap(async (req, res) => {
 
   const updated = await prisma.plannerAssignment.update({ where: { id }, data, select: ASSIGNMENT_SELECT });
   res.json(flattenAssignment(updated));
+
+  // Times drive overtime billing — if they changed, refresh this contractor's
+  // draft invoice for the day so the overtime line tracks the new hours live.
+  // Best-effort and after the response: must never affect the planner edit.
+  if (('start_time' in req.body || 'finish_time' in req.body) && a.event_id) {
+    try {
+      const ev = await prisma.plannerEvent.findUnique({
+        where: { id: a.event_id },
+        select: { contract_id: true },
+      });
+      if (ev?.contract_id) await syncDraftInvoiceForJobDate(ev.contract_id, a.assigned_date);
+    } catch (e) {
+      console.error('[Planner] overtime draft sync failed:', e.message);
+    }
+  }
 }));
 
 router.delete('/assignments/:id', wrap(async (req, res) => {

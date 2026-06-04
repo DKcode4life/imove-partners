@@ -8,6 +8,7 @@
  *                                       needs to propagate to its source job
  */
 const prisma = require('../db/prisma');
+const { computeOvertimeLines } = require('./overtime-calc');
 
 function num(v, d = 0) {
   const n = parseFloat(v);
@@ -44,6 +45,13 @@ async function reconcileDraftInvoice(invoiceId) {
     orderBy: [{ job_date: 'asc' }, { created_at: 'asc' }],
   });
 
+  // System-managed overtime lines: one per day with overtime, recomputed from
+  // the planner times every reconcile. Keyed by job_date so each day's line is
+  // flushed right after that day's job items (keeps the PDF's date grouping intact).
+  const contract = await prisma.contract.findUnique({ where: { id: inv.contract_id } });
+  const overtimeLines = await computeOvertimeLines(prisma, contract, inv.week_start, inv.week_end);
+  const overtimeByDate = new Map(overtimeLines.map(l => [l.job_date, l]));
+
   const liveItemIds = new Set();
   const emptyJobIds = new Set();
   for (const job of jobs) {
@@ -53,10 +61,14 @@ async function reconcileDraftInvoice(invoiceId) {
 
   const existingLinkedByItemId = new Map();
   const existingEmptyJobLineByJobId = new Map();
+  const existingOvertimeByDate = new Map();
   const freeForm = [];
   const stale = [];
   for (const line of inv.items) {
-    if (line.source_contract_job_item_id && liveItemIds.has(line.source_contract_job_item_id)) {
+    if (line.is_overtime) {
+      // Overtime lines are owned by the calculator — never treat as free-form.
+      existingOvertimeByDate.set(line.job_date, line);
+    } else if (line.source_contract_job_item_id && liveItemIds.has(line.source_contract_job_item_id)) {
       existingLinkedByItemId.set(line.source_contract_job_item_id, line);
     } else if (!line.source_contract_job_item_id && line.source_contract_job_id && emptyJobIds.has(line.source_contract_job_id)) {
       existingEmptyJobLineByJobId.set(line.source_contract_job_id, line);
@@ -70,7 +82,45 @@ async function reconcileDraftInvoice(invoiceId) {
   const ops = [];
   let sort = 0;
 
+  // Emit (create/update) the overtime line for `date` at the current sort slot,
+  // so it lands immediately after that date's job items.
+  const flushOvertime = (date) => {
+    const ot = overtimeByDate.get(date);
+    if (!ot) return;
+    const existing = existingOvertimeByDate.get(date);
+    const data = {
+      source_contract_job_id: null,
+      source_contract_job_item_id: null,
+      job_date: date,
+      description: ot.description,
+      quantity: ot.hours,
+      unit_price: ot.fee,
+      total: ot.total,
+      sort_order: sort,
+      is_overtime: true,
+    };
+    if (existing) {
+      const needsUpdate =
+        existing.description !== ot.description ||
+        existing.quantity !== ot.hours ||
+        existing.unit_price !== ot.fee ||
+        existing.total !== ot.total ||
+        existing.sort_order !== sort;
+      if (needsUpdate) {
+        ops.push(prisma.contractInvoiceItem.update({ where: { id: existing.id }, data }));
+      }
+    } else {
+      ops.push(prisma.contractInvoiceItem.create({ data: { contract_invoice_id: inv.id, ...data } }));
+    }
+    sort += 1;
+  };
+
+  let prevDate = null;
   for (const job of jobs) {
+    // Jobs are date-ordered: when the date advances, the previous day's items
+    // are all emitted, so flush that day's overtime line before moving on.
+    if (prevDate !== null && job.job_date !== prevDate) flushOvertime(prevDate);
+    prevDate = job.job_date;
     if (job.items.length === 0) {
       const descDesc = job.description || 'Contract job';
       const existing = existingEmptyJobLineByJobId.get(job.id);
@@ -161,9 +211,19 @@ async function reconcileDraftInvoice(invoiceId) {
     }
   }
 
-  if (stale.length > 0) {
+  // Flush the final day's overtime (the loop only flushes on a date change).
+  if (prevDate !== null) flushOvertime(prevDate);
+
+  // Drop overtime lines for days that no longer have any overtime.
+  const staleOvertimeIds = [];
+  for (const [date, line] of existingOvertimeByDate) {
+    if (!overtimeByDate.has(date)) staleOvertimeIds.push(line.id);
+  }
+
+  const toDelete = [...stale.map(s => s.id), ...staleOvertimeIds];
+  if (toDelete.length > 0) {
     ops.push(prisma.contractInvoiceItem.deleteMany({
-      where: { id: { in: stale.map(s => s.id) } },
+      where: { id: { in: toDelete } },
     }));
   }
 

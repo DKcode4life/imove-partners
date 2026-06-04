@@ -19,6 +19,7 @@ const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
 const { generateContractInvoicePDF } = require('../services/pdf');
 const { send: sendEmail } = require('../services/email');
 const { reconcileDraftInvoice, syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
+const { computeOvertimeLines } = require('../lib/overtime-calc');
 const { resolveBankSnapshot } = require('../lib/bank-account-snapshot');
 
 router.use(authenticate, requireAdmin);
@@ -400,7 +401,46 @@ router.post('/contractors/:cid/invoices/auto', wrap(async (req, res) => {
     }
   }
 
-  const totals = recalc(lines, tax_rate);
+  // Interleave one overtime line after each day that has overtime, so it sits
+  // within that day's block on the invoice. Recomputed live thereafter by
+  // reconcileDraftInvoice.
+  const overtimeLines = await computeOvertimeLines(prisma, contract, start, end);
+  const otByDate = new Map(overtimeLines.map(l => [l.job_date, l]));
+  const merged = [];
+  for (let i = 0; i < lines.length; i++) {
+    merged.push(lines[i]);
+    const lastOfDay = i === lines.length - 1 || lines[i + 1].job_date !== lines[i].job_date;
+    const ot = lastOfDay ? otByDate.get(lines[i].job_date) : undefined;
+    if (ot) {
+      merged.push({
+        source_contract_job_id: null,
+        source_contract_job_item_id: null,
+        job_date: ot.job_date,
+        description: ot.description,
+        quantity: ot.hours,
+        unit_price: ot.fee,
+        total: ot.total,
+        is_overtime: true,
+      });
+      otByDate.delete(ot.job_date);
+    }
+  }
+  // Overtime on a day with no priced job lines (shouldn't normally happen) — append.
+  for (const ot of otByDate.values()) {
+    merged.push({
+      source_contract_job_id: null,
+      source_contract_job_item_id: null,
+      job_date: ot.job_date,
+      description: ot.description,
+      quantity: ot.hours,
+      unit_price: ot.fee,
+      total: ot.total,
+      is_overtime: true,
+    });
+  }
+  merged.forEach((l, idx) => { l.sort_order = idx; });
+
+  const totals = recalc(merged, tax_rate);
 
   const earliestDate = jobs[0]?.job_date || start;
   const bankSnapshot = await resolveBankSnapshot(prisma, req.body?.bank_account_id);
@@ -416,7 +456,7 @@ router.post('/contractors/:cid/invoices/auto', wrap(async (req, res) => {
         tax_rate: num(tax_rate, 20),
         ...totals,
         ...bankSnapshot,
-        items: { create: lines },
+        items: { create: merged },
       },
       include: {
         items: { orderBy: [{ job_date: 'asc' }, { sort_order: 'asc' }] },
