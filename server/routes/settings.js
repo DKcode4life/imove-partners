@@ -446,42 +446,54 @@ router.put('/planner-day-orders', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ── Planner category colors ──────────────────────────────────────────────────
-// Stored as a single JSON blob: { [category: string]: '#hex' }. Server-side
-// resolver in server/lib/planner-color.js merges saved values over defaults so
-// a partial map is fine (missing categories use the hardcoded fallback).
+// ── Job Categories ────────────────────────────────────────────────────────────
+// One ordered JSON array in CompanySetting (`job_categories`). Single source of
+// truth for the planner add-job dropdown, planner colors, and the P&L filter.
+// Saving the whole array diffs by stable id: renames cascade onto existing
+// PlannerEvents; deletes reassign their events to the system "Unassigned"
+// category; system entries cannot be deleted or renamed.
 
-const { withDefaults, CONFIGURABLE_CATEGORIES } = require('../lib/planner-color');
+const jobCats = require('../lib/job-categories');
 
-router.get('/planner-colors', wrap(async (_req, res) => {
-  const row = await prisma.companySetting.findUnique({ where: { key: 'planner_category_colors' } });
-  const saved = row?.value ? safeJson(row.value) : {};
-  res.json({
-    categories: CONFIGURABLE_CATEGORIES,
-    colors: withDefaults(saved),
-  });
+router.get('/job-categories', wrap(async (_req, res) => {
+  const list = await jobCats.loadCategories(prisma);
+  res.json(list);
 }));
 
-router.put('/planner-colors', wrap(async (req, res) => {
-  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
-    return res.status(400).json({ error: 'Expected object mapping category → hex' });
-  }
-  // Only persist hex values for known categories. Anything else is dropped.
-  const clean = {};
-  for (const cat of CONFIGURABLE_CATEGORIES) {
-    const v = req.body[cat];
-    if (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) clean[cat] = v.toUpperCase();
-  }
-  const value = JSON.stringify(clean);
-  await prisma.companySetting.upsert({
-    where:  { key: 'planner_category_colors' },
-    update: { value },
-    create: { key: 'planner_category_colors', value },
-  });
-  res.json({ ok: true, colors: withDefaults(clean) });
-}));
+router.put('/job-categories', wrap(async (req, res) => {
+  const incoming = req.body;
+  const previous = await jobCats.loadCategories(prisma);
 
-function safeJson(s) { try { return JSON.parse(s); } catch { return {}; } }
+  // Assign ids to any brand-new rows (no id yet) before validating/diffing.
+  const usedIds = [];
+  const withIds = (Array.isArray(incoming) ? incoming : []).map(c => {
+    const id = c && c.id ? c.id : jobCats.slugify(c && c.name, usedIds);
+    usedIds.push(id);
+    return { ...c, id };
+  });
+
+  const error = jobCats.validateList(withIds, previous);
+  if (error) return res.status(400).json({ error });
+
+  const normalized = jobCats.normalizeStored(withIds);
+  const { renames, deletes } = jobCats.diffCategories(previous, normalized);
+
+  // Cascade renames, then reassign deleted-category jobs to "Unassigned".
+  for (const { oldName, newName } of renames) {
+    await prisma.plannerEvent.updateMany({ where: { category: oldName }, data: { category: newName } });
+  }
+  let reassigned = 0;
+  for (const name of deletes) {
+    const r = await prisma.plannerEvent.updateMany({
+      where: { category: name },
+      data: { category: jobCats.UNASSIGNED_NAME },
+    });
+    reassigned += r.count;
+  }
+
+  await jobCats.saveCategories(prisma, normalized);
+  res.json({ ok: true, categories: normalized, reassigned });
+}));
 
 // ── Bank Accounts ─────────────────────────────────────────────────────────────
 // Multiple bank accounts can be saved; one is flagged is_default. The selected
