@@ -11,7 +11,7 @@ import StaffWeekView from '../../components/StaffWeekView';
 import ColorPickerPopover from '../../components/ColorPickerPopover';
 import api from '../../lib/api';
 import type { PlannerAsset, PlannerCalendarItem, PlannerAssignment, PlannerEvent } from '../../types';
-import { PLANNER_CATEGORIES } from '../../types';
+import { fetchJobCategories, FALLBACK_CATEGORY_NAMES } from '../../lib/jobCategories';
 import { catColor } from '../../lib/planner-colors';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1427,11 +1427,24 @@ function QuickJobModal({
 }) {
   const [form, setForm] = useState({ ...EMPTY_QUICK });
   const [contracts, setContracts] = useState<{ id: number; company_name: string }[]>([]);
+  const [categoryNames, setCategoryNames] = useState<string[]>(FALLBACK_CATEGORY_NAMES);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     api.get('/contracts').then(r => setContracts(r.data)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetchJobCategories()
+      .then(list => {
+        if (!alive) return;
+        // Selectable = non-system categories, in saved order.
+        setCategoryNames(list.filter(c => !c.system).map(c => c.name));
+      })
+      .catch(() => { /* keep fallback names */ });
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -1496,7 +1509,10 @@ function QuickJobModal({
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Category *</label>
             <select className="input" value={form.category} onChange={e => set('category', e.target.value)}>
-              {PLANNER_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              {(categoryNames.includes(form.category) || !form.category
+                ? categoryNames
+                : [form.category, ...categoryNames]
+              ).map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
           <div>
