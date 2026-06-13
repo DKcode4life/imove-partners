@@ -5,6 +5,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { computeAssignmentWage } = require('../lib/wage-calc');
 const pnlCalc = require('../lib/pnl-calc');
+const jobCats = require('../lib/job-categories');
 
 async function loadWageSettings() {
   const rows = await prisma.companySetting.findMany({
@@ -230,7 +231,7 @@ router.get('/pnl', wrap(async (req, res) => {
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: start, lte: endDate } },
       select: {
-        id: true, title: true, event_date: true, pnl_income: true,
+        id: true, title: true, event_date: true, pnl_income: true, category: true,
         contract_job: { select: { items: { select: { total: true } } } },
       },
     }),
@@ -258,6 +259,11 @@ router.get('/pnl', wrap(async (req, res) => {
     }),
     loadWageSettings(),
   ]);
+
+  // Categories toggled out of the P&L are hidden from the list (and totals).
+  const categories = await jobCats.loadCategories(prisma);
+  const excludedPnl = jobCats.excludedPnlNames(categories);
+  const removalExcluded = excludedPnl.has('Removal Job');
 
   // Vehicles referenced by these assignments (for the lorry bonus).
   const vehicleIds = [...new Set(assignments.map(a => a.vehicle_asset_id).filter(Boolean))];
@@ -296,6 +302,7 @@ router.get('/pnl', wrap(async (req, res) => {
 
   const rows = [];
   for (const j of jobs) {
+    if (removalExcluded) continue;
     const key = `job|${j.id}`;
     const myLines = linesByKey.get(key) || [];
     const baseIncome = pnlCalc.effectiveBaseIncome(j.pnl_income, pnlCalc.jobIncomeSuggestion(j));
@@ -311,6 +318,7 @@ router.get('/pnl', wrap(async (req, res) => {
     });
   }
   for (const e of events) {
+    if (e.category && excludedPnl.has(e.category)) continue;
     const key = `event|${e.id}`;
     const myLines = linesByKey.get(key) || [];
     const baseIncome = pnlCalc.effectiveBaseIncome(e.pnl_income, pnlCalc.eventIncomeSuggestion(e.contract_job));
