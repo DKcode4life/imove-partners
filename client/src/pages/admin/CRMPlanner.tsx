@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import CRMSidebar from '../../components/CRMSidebar';
 import Modal from '../../components/Modal';
+import JobPnlPanel from '../../components/JobPnlPanel';
 import StaffWeekView from '../../components/StaffWeekView';
 import ColorPickerPopover from '../../components/ColorPickerPopover';
 import api from '../../lib/api';
@@ -1036,6 +1037,11 @@ function JobCard({
               </button>
             )}
           </div>
+
+          {/* ── Profit & Loss ── */}
+          {!isSurveyEvent && (
+            <JobPnlPanel source={item.source} id={item.id} />
+          )}
         </div>
       )}
     </div>

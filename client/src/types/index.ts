@@ -512,3 +512,45 @@ export interface Contract {
   created_at: string;
   updated_at: string;
 }
+
+// ── Profit & Loss ─────────────────────────────────────────────────────────────
+
+export interface JobLedgerLine {
+  id: number;
+  job_id?: number | null;
+  event_id?: number | null;
+  kind: 'income' | 'expense';
+  label: string;
+  amount: number;
+  sort_order: number;
+}
+
+export interface JobPnl {
+  source: 'job' | 'event';
+  id: number;
+  income: number | null;          // raw saved base income; null = using suggestion
+  income_suggestion: number;
+  income_lines: JobLedgerLine[];
+  expense_lines: JobLedgerLine[];
+  wages_total: number;
+  total_income: number;
+  total_expenses: number;
+  profit: number;
+}
+
+export interface WeeklyPnlRow {
+  source: 'job' | 'event';
+  id: number;
+  label: string;
+  date: string;
+  income: number;
+  wages: number;
+  expenses: number;
+  profit: number;
+}
+
+export interface WeeklyPnlResponse {
+  week_start: string;
+  jobs: WeeklyPnlRow[];
+  totals: { income: number; wages: number; expenses: number; profit: number };
+}
