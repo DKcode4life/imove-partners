@@ -5,6 +5,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
 const { computeAssignmentWage } = require('../lib/wage-calc');
+const pnlCalc = require('../lib/pnl-calc');
 const { resolveItemColor, withDefaults } = require('../lib/planner-color');
 
 function cleanColor(v) {
@@ -902,6 +903,193 @@ router.get('/staff-week', wrap(async (req, res) => {
       lorry_driving_bonus: settings.lorryBonus,
     },
   });
+}));
+
+// ── Per-job Profit & Loss ─────────────────────────────────────────────────────
+// Lazy-loaded when a planner card is expanded. `source` is 'job' (CrmJob) or
+// 'event' (PlannerEvent); `id` is that row's id.
+
+const PNL_ASSIGNMENT_SELECT = {
+  id: true, asset_id: true, assigned_date: true, daily_rate: true,
+  assigned_role: true, vehicle_asset_id: true,
+  start_time: true, finish_time: true, wage_override: true,
+  asset: {
+    select: {
+      id: true, name: true, role: true,
+      driver_daily_rate: true, porter_daily_rate: true, lux_hourly_rate: true,
+    },
+  },
+  event: { select: { event_time: true, contract: { select: { id: true, is_lux: true } } } },
+};
+
+// Loads everything needed to compute one job's P&L and returns the math result.
+async function computeJobPnl(source, id) {
+  const where = source === 'job' ? { job_id: id } : { event_id: id };
+
+  const [lines, assignments, settings] = await Promise.all([
+    prisma.jobLedgerLine.findMany({
+      where,
+      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.plannerAssignment.findMany({
+      where: { ...where, asset: { type: 'staff' } },
+      select: PNL_ASSIGNMENT_SELECT,
+    }),
+    loadWageSettings(),
+  ]);
+
+  // Income suggestion + saved base income.
+  let savedIncome = null;
+  let suggestion = 0;
+  if (source === 'job') {
+    const job = await prisma.crmJob.findUnique({
+      where: { id },
+      select: { id: true, pnl_income: true, quote_amount: true },
+    });
+    if (!job) return null;
+    savedIncome = job.pnl_income;
+    suggestion = pnlCalc.jobIncomeSuggestion(job);
+  } else {
+    const ev = await prisma.plannerEvent.findUnique({
+      where: { id },
+      select: { id: true, pnl_income: true, contract_job: { select: { items: { select: { total: true } } } } },
+    });
+    if (!ev) return null;
+    savedIncome = ev.pnl_income;
+    suggestion = pnlCalc.eventIncomeSuggestion(ev.contract_job);
+  }
+
+  const vehicleIds = [...new Set(assignments.map(a => a.vehicle_asset_id).filter(Boolean))];
+  const vehicles = vehicleIds.length
+    ? await prisma.plannerAsset.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, is_lorry: true } })
+    : [];
+  const vehicleById = new Map(vehicles.map(v => [v.id, v]));
+
+  const wages_total = pnlCalc.sumAssignmentWages(assignments, {
+    vehicleById,
+    luxHourlyRate: settings.luxHourlyRate,
+    lorryBonus: settings.lorryBonus,
+  });
+
+  const baseIncome = pnlCalc.effectiveBaseIncome(savedIncome, suggestion);
+  const incomeLineSum = pnlCalc.sumLines(lines, 'income');
+  const expenseLineSum = pnlCalc.sumLines(lines, 'expense');
+  const { totalIncome, totalExpenses, profit } = pnlCalc.rollup({
+    baseIncome, incomeLines: incomeLineSum, expenseLines: expenseLineSum, wages: wages_total,
+  });
+
+  return {
+    source, id,
+    income: savedIncome,                 // raw saved value (null = using suggestion)
+    income_suggestion: suggestion,
+    income_lines: lines.filter(l => l.kind === 'income'),
+    expense_lines: lines.filter(l => l.kind === 'expense'),
+    wages_total,
+    total_income: totalIncome,
+    total_expenses: totalExpenses,
+    profit,
+  };
+}
+
+router.get('/pnl', wrap(async (req, res) => {
+  const source = req.query.source;
+  const id = parseInt(req.query.id, 10);
+  if (!['job', 'event'].includes(source) || !Number.isFinite(id)) {
+    return res.status(400).json({ error: "source ('job'|'event') and id are required" });
+  }
+  const result = await computeJobPnl(source, id);
+  if (!result) return res.status(404).json({ error: 'Job not found' });
+  res.json(result);
+}));
+
+// Set/clear the base income. income null|'' clears → falls back to suggestion.
+router.put('/pnl/income', wrap(async (req, res) => {
+  const { source, id, income } = req.body || {};
+  const itemId = parseInt(id, 10);
+  if (!['job', 'event'].includes(source) || !Number.isFinite(itemId)) {
+    return res.status(400).json({ error: "source ('job'|'event') and id are required" });
+  }
+
+  let value;
+  if (income === null || income === '' || income === undefined) {
+    value = null;
+  } else {
+    const n = Number(income);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'income must be a number ≥ 0' });
+    value = n;
+  }
+
+  if (source === 'job') {
+    const existing = await prisma.crmJob.findUnique({ where: { id: itemId }, select: { id: true } });
+    if (!existing) return res.status(404).json({ error: 'Job not found' });
+    await prisma.crmJob.update({ where: { id: itemId }, data: { pnl_income: value } });
+  } else {
+    const existing = await prisma.plannerEvent.findUnique({ where: { id: itemId }, select: { id: true } });
+    if (!existing) return res.status(404).json({ error: 'Event not found' });
+    await prisma.plannerEvent.update({ where: { id: itemId }, data: { pnl_income: value } });
+  }
+
+  const result = await computeJobPnl(source, itemId);
+  res.json(result);
+}));
+
+// Add an income or expense line.
+router.post('/pnl/line', wrap(async (req, res) => {
+  const { source, id, kind } = req.body || {};
+  const itemId = parseInt(id, 10);
+  const label = String(req.body?.label ?? '').trim();
+  if (!['job', 'event'].includes(source) || !Number.isFinite(itemId)) {
+    return res.status(400).json({ error: "source ('job'|'event') and id are required" });
+  }
+  if (!['income', 'expense'].includes(kind)) {
+    return res.status(400).json({ error: "kind must be 'income' or 'expense'" });
+  }
+  const amountRaw = req.body?.amount;
+  const amount = amountRaw === '' || amountRaw == null ? 0 : Number(amountRaw);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return res.status(400).json({ error: 'amount must be a number ≥ 0' });
+  }
+
+  const where = source === 'job' ? { job_id: itemId } : { event_id: itemId };
+  const maxRow = await prisma.jobLedgerLine.aggregate({ where, _max: { sort_order: true } });
+  const sortOrder = (maxRow._max.sort_order ?? 0) + 1;
+
+  const line = await prisma.jobLedgerLine.create({
+    data: {
+      job_id: source === 'job' ? itemId : null,
+      event_id: source === 'event' ? itemId : null,
+      kind, label: label || (kind === 'income' ? 'Income' : 'Expense'),
+      amount, sort_order: sortOrder,
+    },
+  });
+  res.status(201).json(line);
+}));
+
+// Edit a line's label and/or amount.
+router.patch('/pnl/line/:id', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const line = await prisma.jobLedgerLine.findUnique({ where: { id } });
+  if (!line) return res.status(404).json({ error: 'Line not found' });
+
+  const data = {};
+  if ('label' in req.body) data.label = String(req.body.label ?? '').trim() || line.label;
+  if ('amount' in req.body) {
+    const n = req.body.amount === '' || req.body.amount == null ? 0 : Number(req.body.amount);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'amount must be a number ≥ 0' });
+    data.amount = n;
+  }
+
+  const updated = await prisma.jobLedgerLine.update({ where: { id }, data });
+  res.json(updated);
+}));
+
+// Delete a line.
+router.delete('/pnl/line/:id', wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const line = await prisma.jobLedgerLine.findUnique({ where: { id } });
+  if (!line) return res.status(404).json({ error: 'Line not found' });
+  await prisma.jobLedgerLine.delete({ where: { id } });
+  res.json({ ok: true });
 }));
 
 module.exports = router;
