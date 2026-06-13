@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import api from '../../lib/api';
 import type { CatalogCategory, CatalogItem } from '../../data/inventoryCatalog';
 import { loadCatalog, saveCatalog, resetCatalog } from '../../lib/catalogStorage';
+import { fetchJobCategories, type JobCategory } from '../../lib/jobCategories';
 import type {
   CompanySettings, JobStatusSetting, LeadSourceSetting, MoveTypeSetting, PlannerAsset, Contract,
 } from '../../types';
@@ -677,86 +678,141 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
     </form>
 
     <BankAccountsSection showToast={showToast} />
-    <PlannerColorsSection showToast={showToast} />
+    <JobCategoriesSection showToast={showToast} />
     </div>
   );
 }
 
-// ── Planner Colors section ───────────────────────────────────────────────────
-// Lets the user set default colors per job category (Removal Job, Quick Job,
-// Survey, etc.). The picked colors flow through the planner via the server's
-// resolveItemColor helper — contract.color and per-card overrides still take
-// priority over these defaults.
+// ── Job Categories section ───────────────────────────────────────────────────
+// Single source of truth for the planner add-job categories, their colors, and
+// whether each appears in the weekly P&L. Renames cascade and deletes reassign
+// to "Unassigned" — handled server-side on Save. System rows (Removal Job,
+// Contract Job, Unassigned) can't be renamed/deleted; their color + P&L toggle
+// stay editable.
 
-type PlannerColorsPayload = {
-  categories: string[];
-  colors: Record<string, string>;
-};
+const NEW_CATEGORY_COLOR = '#64748B';
 
-function PlannerColorsSection({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
-  const [payload, setPayload] = useState<PlannerColorsPayload | null>(null);
-  const [draft, setDraft] = useState<Record<string, string>>({});
+function JobCategoriesSection({ showToast }: { showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const [saved, setSaved] = useState<JobCategory[] | null>(null);
+  const [draft, setDraft] = useState<JobCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get<PlannerColorsPayload>('/settings/planner-colors')
-      .then(r => {
-        setPayload(r.data);
-        setDraft({ ...r.data.colors });
-      })
+    fetchJobCategories()
+      .then(list => { setSaved(list); setDraft(list); })
+      .catch(() => showToast('Failed to load job categories', 'error'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [showToast]);
 
-  const dirty = payload && JSON.stringify(draft) !== JSON.stringify(payload.colors);
+  const dirty = saved && JSON.stringify(draft) !== JSON.stringify(saved);
+
+  function update(idx: number, patch: Partial<JobCategory>) {
+    setDraft(d => d.map((c, i) => i === idx ? { ...c, ...patch } : c));
+  }
+  function move(idx: number, dir: -1 | 1) {
+    setDraft(d => {
+      const next = [...d];
+      const j = idx + dir;
+      if (j < 0 || j >= next.length) return d;
+      [next[idx], next[j]] = [next[j], next[idx]];
+      return next;
+    });
+  }
+  function remove(idx: number) {
+    setDraft(d => d.filter((_, i) => i !== idx));
+  }
+  function add() {
+    setDraft(d => [
+      ...d,
+      { id: '', name: '', color: NEW_CATEGORY_COLOR, includeInPnl: true, system: false },
+    ]);
+  }
 
   async function save() {
+    // Guard: no empty names before sending.
+    if (draft.some(c => !c.name.trim())) {
+      showToast('Every category needs a name', 'error');
+      return;
+    }
     setSaving(true);
     try {
-      const r = await api.put<{ ok: boolean; colors: Record<string, string> }>('/settings/planner-colors', draft);
-      setPayload(p => p ? { ...p, colors: r.data.colors } : p);
-      setDraft({ ...r.data.colors });
-      showToast('Planner colors saved');
-    } catch {
-      showToast('Failed to save planner colors', 'error');
+      const r = await api.put<{ ok: boolean; categories: JobCategory[]; reassigned: number }>(
+        '/settings/job-categories', draft,
+      );
+      setSaved(r.data.categories);
+      setDraft(r.data.categories);
+      showToast(
+        r.data.reassigned > 0
+          ? `Saved — ${r.data.reassigned} job(s) moved to Unassigned`
+          : 'Job categories saved',
+      );
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || 'Failed to save job categories', 'error');
     } finally {
       setSaving(false);
     }
   }
 
-  function setColor(category: string, hex: string) {
-    setDraft(d => ({ ...d, [category]: hex }));
-  }
-
   if (loading) return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-400">Loading planner colors…</div>
+    <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-400">Loading job categories…</div>
   );
-  if (!payload) return null;
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-slate-700">Planner Colors</h2>
+        <h2 className="text-sm font-semibold text-slate-700">Job Categories</h2>
         <p className="text-[11px] text-slate-400 mt-0.5">
-          Default color per job category, shown on planner cards. Contracts can override these per company; individual cards can be re-coloured from the planner.
+          Categories you can pick when adding a planner job. Set each one's planner colour and whether it appears in the weekly P&amp;L. Renaming updates existing jobs; deleting moves their jobs to “Unassigned”. System categories can be re-coloured but not renamed or removed.
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        {payload.categories.map(cat => (
-          <div key={cat} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg ring-1 ring-slate-200/60 bg-slate-50/40">
-            <span className="text-xs font-medium text-slate-700 truncate">{cat}</span>
-            <ColorSwatch color={draft[cat] || payload.colors[cat]} onChange={hex => setColor(cat, hex)} />
+
+      <div className="space-y-2">
+        {draft.map((cat, idx) => (
+          <div key={cat.id || `new-${idx}`} className="flex items-center gap-2 px-3 py-2 rounded-lg ring-1 ring-slate-200/60 bg-slate-50/40">
+            <div className="flex flex-col">
+              <button type="button" onClick={() => move(idx, -1)} disabled={idx === 0}
+                className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none" title="Move up">▲</button>
+              <button type="button" onClick={() => move(idx, 1)} disabled={idx === draft.length - 1}
+                className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none" title="Move down">▼</button>
+            </div>
+
+            <ColorSwatch color={cat.color} onChange={hex => update(idx, { color: hex })} />
+
+            {cat.system ? (
+              <span className="flex-1 text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                {cat.name}
+                <span className="text-[9px] uppercase tracking-wide text-slate-400 ring-1 ring-slate-200 rounded px-1 py-0.5">system</span>
+              </span>
+            ) : (
+              <input
+                className="input flex-1 text-xs"
+                value={cat.name}
+                placeholder="Category name"
+                onChange={e => update(idx, { name: e.target.value })}
+              />
+            )}
+
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-600 whitespace-nowrap cursor-pointer">
+              <input type="checkbox" checked={cat.includeInPnl}
+                onChange={e => update(idx, { includeInPnl: e.target.checked })} />
+              In P&amp;L
+            </label>
+
+            {!cat.system && (
+              <button type="button" onClick={() => remove(idx)}
+                className="text-slate-300 hover:text-red-600 text-sm px-1" title="Delete category">✕</button>
+            )}
           </div>
         ))}
       </div>
-      <div className="pt-1 flex justify-end">
-        <button
-          type="button"
-          onClick={save}
-          disabled={!dirty || saving}
-          className="btn-primary disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save Colors'}
+
+      <div className="flex items-center justify-between pt-1">
+        <button type="button" onClick={add}
+          className="text-xs font-medium text-blue-600 hover:text-blue-800">+ Add category</button>
+        <button type="button" onClick={save} disabled={!dirty || saving}
+          className="btn-primary disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save Categories'}
         </button>
       </div>
     </div>
