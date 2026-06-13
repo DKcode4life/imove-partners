@@ -15,7 +15,8 @@
     "db:seed": "npx prisma db seed",
     "seed:templates": "node prisma/seed-templates.js",
     "db:studio": "npx prisma studio",
-    "db:reset": "npx prisma migrate reset"
+    "db:reset": "npx prisma migrate reset",
+    "test": "node --test \"server/**/*.test.js\""
   },
   "prisma": {
     "seed": "node prisma/seed.js"
