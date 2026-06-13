@@ -678,7 +678,6 @@ function CompanyTab({ showToast }: { showToast: (m: string, t?: 'success' | 'err
     </form>
 
     <BankAccountsSection showToast={showToast} />
-    <JobCategoriesSection showToast={showToast} />
     </div>
   );
 }
@@ -1256,6 +1255,7 @@ function JobSettingsTab({ showToast }: { showToast: (m: string, t?: 'success' | 
   return (
     <div className="space-y-6 max-w-2xl">
       <StatusesSection showToast={showToast} />
+      <JobCategoriesSection showToast={showToast} />
       <SimpleList
         endpoint="/settings/lead-sources"
         title="Lead Sources"
