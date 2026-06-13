@@ -4,6 +4,7 @@ const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { computeAssignmentWage } = require('../lib/wage-calc');
+const pnlCalc = require('../lib/pnl-calc');
 
 async function loadWageSettings() {
   const rows = await prisma.companySetting.findMany({
@@ -199,6 +200,141 @@ router.put('/period', wrap(async (req, res) => {
     update: data,
   });
   res.json(row);
+}));
+
+// Weekly Profit & Loss rollup for the wages page. Lists every job/event in the
+// week with income, wages, expenses and profit, sorted most-profitable-first.
+router.get('/pnl', wrap(async (req, res) => {
+  const { start } = req.query;
+  if (!start || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+    return res.status(400).json({ error: 'start is required (YYYY-MM-DD)' });
+  }
+
+  const dates = weekDates(start);
+  const endDate = dates[dates.length - 1];
+
+  const [jobs, events, assignments, lines, settings] = await Promise.all([
+    prisma.crmJob.findMany({
+      where: {
+        status: { not: 'Lost / Cancelled' },
+        OR: [
+          { confirmed_move_date: { gte: start, lte: endDate } },
+          { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: start, lte: endDate } }] },
+        ],
+      },
+      select: {
+        id: true, full_name: true, quote_amount: true, pnl_income: true,
+        confirmed_move_date: true, preferred_move_date: true,
+      },
+    }),
+    prisma.plannerEvent.findMany({
+      where: { event_date: { gte: start, lte: endDate } },
+      select: {
+        id: true, title: true, event_date: true, pnl_income: true,
+        contract_job: { select: { items: { select: { total: true } } } },
+      },
+    }),
+    prisma.plannerAssignment.findMany({
+      where: { assigned_date: { gte: start, lte: endDate }, asset: { type: 'staff' } },
+      select: {
+        id: true, asset_id: true, assigned_date: true, daily_rate: true,
+        assigned_role: true, job_id: true, event_id: true,
+        start_time: true, finish_time: true, vehicle_asset_id: true, wage_override: true,
+        asset: { select: { id: true, role: true, driver_daily_rate: true, porter_daily_rate: true, lux_hourly_rate: true } },
+        job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true } },
+        event: { select: { event_date: true, event_time: true, contract: { select: { id: true, is_lux: true } } } },
+      },
+    }),
+    prisma.jobLedgerLine.findMany({
+      where: {
+        OR: [
+          { job:   { OR: [
+            { confirmed_move_date: { gte: start, lte: endDate } },
+            { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: start, lte: endDate } }] },
+          ] } },
+          { event: { event_date: { gte: start, lte: endDate } } },
+        ],
+      },
+    }),
+    loadWageSettings(),
+  ]);
+
+  // Vehicles referenced by these assignments (for the lorry bonus).
+  const vehicleIds = [...new Set(assignments.map(a => a.vehicle_asset_id).filter(Boolean))];
+  const vehicles = vehicleIds.length
+    ? await prisma.plannerAsset.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, is_lorry: true } })
+    : [];
+  const vehicleById = new Map(vehicles.map(v => [v.id, v]));
+
+  // Group wages by job/event, skipping orphan/stale assignments (same filter as /wages/week).
+  const wagesByKey = new Map(); // key = `${source}|${id}`
+  function addWage(key, total) { wagesByKey.set(key, (wagesByKey.get(key) || 0) + total); }
+  for (const a of assignments) {
+    if (a.job_id) {
+      if (!a.job || a.job.status === 'Lost / Cancelled') continue;
+      const d = String(a.job.confirmed_move_date || a.job.preferred_move_date || '').slice(0, 10);
+      if (d !== a.assigned_date) continue;
+    } else if (a.event_id) {
+      if (!a.event || String(a.event.event_date).slice(0, 10) !== a.assigned_date) continue;
+    } else continue;
+    const wage = computeAssignmentWage({
+      assignment: a, asset: a.asset,
+      vehicle: a.vehicle_asset_id ? (vehicleById.get(a.vehicle_asset_id) || null) : null,
+      contract: a.event?.contract || null, event: a.event || null,
+      luxHourlyRate: settings.luxHourlyRate, lorryBonus: settings.lorryBonus,
+    });
+    addWage(`${a.job_id ? 'job' : 'event'}|${a.job_id || a.event_id}`, wage.total);
+  }
+
+  // Group ledger lines by job/event.
+  const linesByKey = new Map();
+  for (const l of lines) {
+    const key = `${l.job_id ? 'job' : 'event'}|${l.job_id || l.event_id}`;
+    if (!linesByKey.has(key)) linesByKey.set(key, []);
+    linesByKey.get(key).push(l);
+  }
+
+  const rows = [];
+  for (const j of jobs) {
+    const key = `job|${j.id}`;
+    const myLines = linesByKey.get(key) || [];
+    const baseIncome = pnlCalc.effectiveBaseIncome(j.pnl_income, pnlCalc.jobIncomeSuggestion(j));
+    const wages = pnlCalc.round2(wagesByKey.get(key) || 0);
+    const { totalIncome, totalExpenses, profit } = pnlCalc.rollup({
+      baseIncome, incomeLines: pnlCalc.sumLines(myLines, 'income'),
+      expenseLines: pnlCalc.sumLines(myLines, 'expense'), wages,
+    });
+    rows.push({
+      source: 'job', id: j.id, label: j.full_name,
+      date: String(j.confirmed_move_date || j.preferred_move_date || '').slice(0, 10),
+      income: totalIncome, wages, expenses: totalExpenses, profit,
+    });
+  }
+  for (const e of events) {
+    const key = `event|${e.id}`;
+    const myLines = linesByKey.get(key) || [];
+    const baseIncome = pnlCalc.effectiveBaseIncome(e.pnl_income, pnlCalc.eventIncomeSuggestion(e.contract_job));
+    const wages = pnlCalc.round2(wagesByKey.get(key) || 0);
+    const { totalIncome, totalExpenses, profit } = pnlCalc.rollup({
+      baseIncome, incomeLines: pnlCalc.sumLines(myLines, 'income'),
+      expenseLines: pnlCalc.sumLines(myLines, 'expense'), wages,
+    });
+    rows.push({
+      source: 'event', id: e.id, label: e.title,
+      date: String(e.event_date).slice(0, 10),
+      income: totalIncome, wages, expenses: totalExpenses, profit,
+    });
+  }
+
+  rows.sort((a, b) => b.profit - a.profit);
+
+  const totals = rows.reduce((t, r) => {
+    t.income += r.income; t.wages += r.wages; t.expenses += r.expenses; t.profit += r.profit;
+    return t;
+  }, { income: 0, wages: 0, expenses: 0, profit: 0 });
+  for (const k of Object.keys(totals)) totals[k] = pnlCalc.round2(totals[k]);
+
+  res.json({ week_start: start, jobs: rows, totals });
 }));
 
 module.exports = router;
