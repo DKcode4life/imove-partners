@@ -405,9 +405,6 @@ export default function CRMWages() {
           </div>
         </div>
 
-        {/* Company spend — full-width strip below the staff table */}
-        <CompanyPanel summary={data?.summary} />
-
         {/* Weekly Profit & Loss */}
         <PnlPanel pnl={pnl} onOpenJob={(row) => navigate(`/admin/crm/planner?view=week&date=${row.date}`)} />
       </div>
@@ -431,44 +428,6 @@ function SummaryCard({
       <div className="text-xs uppercase tracking-wider font-semibold text-slate-500">{label}</div>
       <div className={`mt-2 inline-flex px-3 py-1 rounded-lg text-2xl font-bold ring-1 ring-inset ${ACC[accent]} tabular-nums`}>
         {value}
-      </div>
-    </div>
-  );
-}
-
-function CompanyPanel({ summary }: { summary?: WagesWeekResponse['summary'] }) {
-  const roles = summary?.by_role ?? [];
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <Banknote className="w-4 h-4 text-slate-500" />
-            Company spend
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">By role, this week</p>
-        </div>
-        <div className="text-right">
-          <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Total</div>
-          <div className="text-xl font-bold text-emerald-700 tabular-nums">
-            {fmtMoney(summary?.total_earnings ?? 0)}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        {roles.length === 0 && (
-          <p className="text-xs text-slate-400 italic">No data yet.</p>
-        )}
-        {roles.map(r => (
-          <div key={r.role} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2 min-w-[180px]">
-            <span className="text-xs font-medium text-slate-600 capitalize">{r.role}</span>
-            <div className="ml-auto text-right">
-              <div className="text-sm font-bold text-slate-800 tabular-nums">{fmtMoney(r.total)}</div>
-              <div className="text-[10px] text-slate-400">{r.headcount} {r.headcount === 1 ? 'person' : 'people'}</div>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
