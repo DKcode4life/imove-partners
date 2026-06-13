@@ -6,7 +6,8 @@ const wrap = require('../lib/async-handler');
 const { syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
 const { computeAssignmentWage } = require('../lib/wage-calc');
 const pnlCalc = require('../lib/pnl-calc');
-const { resolveItemColor, withDefaults } = require('../lib/planner-color');
+const { resolveItemColor } = require('../lib/planner-color');
+const { loadCategories, colorMap } = require('../lib/job-categories');
 
 function cleanColor(v) {
   if (typeof v !== 'string') return null;
@@ -25,10 +26,7 @@ function parseRate(v) {
 }
 
 async function loadCategoryColors() {
-  const row = await prisma.companySetting.findUnique({ where: { key: 'planner_category_colors' } });
-  let saved = {};
-  if (row?.value) { try { saved = JSON.parse(row.value); } catch { saved = {}; } }
-  return withDefaults(saved);
+  return colorMap(await loadCategories(prisma));
 }
 
 async function loadWageSettings() {
