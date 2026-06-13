@@ -452,6 +452,8 @@ export interface PlannerCalendarItem {
   planner_color?: string | null;
 }
 
+// Legacy fallback only. The live, editable list comes from
+// GET /settings/job-categories (see client/src/lib/jobCategories.ts).
 export const PLANNER_CATEGORIES = [
   'Loading', 'Moving', 'Unloading', 'Packing', 'Box Drop off', 'Box Collection', 'Survey', 'Sundry', 'Quick Job',
 ] as const;
