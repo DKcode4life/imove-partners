@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Banknote, RefreshCw, CheckCircle2 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import api from '../../lib/api';
+import type { WeeklyPnlResponse } from '../../types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,15 +94,21 @@ export default function CRMWages() {
   const [data, setData] = useState<WagesWeekResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [pnl, setPnl] = useState<WeeklyPnlResponse | null>(null);
 
   async function load() {
     setLoading(true);
     try {
-      const r = await api.get<WagesWeekResponse>('/wages/week', { params: { start: weekStart } });
-      setData(r.data);
+      const [wagesRes, pnlRes] = await Promise.all([
+        api.get<WagesWeekResponse>('/wages/week', { params: { start: weekStart } }),
+        api.get<WeeklyPnlResponse>('/wages/pnl', { params: { start: weekStart } }),
+      ]);
+      setData(wagesRes.data);
+      setPnl(pnlRes.data);
     } catch (err) {
       console.error('Failed to load wages', err);
       setData(null);
+      setPnl(null);
     } finally {
       setLoading(false);
     }
@@ -400,6 +407,9 @@ export default function CRMWages() {
 
         {/* Company spend — full-width strip below the staff table */}
         <CompanyPanel summary={data?.summary} />
+
+        {/* Weekly Profit & Loss */}
+        <PnlPanel pnl={pnl} onOpenJob={(row) => navigate(`/admin/crm/planner?view=week&date=${row.date}`)} />
       </div>
     </CRMLayout>
   );
@@ -491,6 +501,84 @@ function MoneyInput({
         placeholder="0"
         className="w-24 pl-5 pr-1 py-1 rounded border border-slate-200 text-xs text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
       />
+    </div>
+  );
+}
+
+function PnlPanel({
+  pnl, onOpenJob,
+}: { pnl: WeeklyPnlResponse | null; onOpenJob: (row: WeeklyPnlResponse['jobs'][number]) => void }) {
+  const jobs = pnl?.jobs ?? [];
+  const totals = pnl?.totals ?? { income: 0, wages: 0, expenses: 0, profit: 0 };
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-bold text-slate-900">Profit &amp; Loss</h2>
+        <span className="text-xs text-slate-500">Operational, this week (ex-VAT)</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <SummaryCard label="Income" value={fmtMoney(totals.income)} accent="emerald" />
+        <SummaryCard label="Wages" value={fmtMoney(totals.wages)} accent="violet" />
+        <SummaryCard label="Expenses" value={fmtMoney(totals.expenses)} accent="amber" />
+        <SummaryCard label="Operational profit" value={fmtMoney(totals.profit)} accent="blue" />
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold text-slate-600">Job</th>
+                <th className="text-right px-3 py-2 font-semibold text-slate-600">Income</th>
+                <th className="text-right px-3 py-2 font-semibold text-slate-600">Wages</th>
+                <th className="text-right px-3 py-2 font-semibold text-slate-600">Expenses</th>
+                <th className="text-right px-3 py-2 font-semibold text-slate-700 bg-blue-50/50">Profit</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {jobs.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-slate-400">
+                  No jobs this week. Schedule jobs on the planner to see P&amp;L here.
+                </td></tr>
+              )}
+              {jobs.map(row => (
+                <tr key={`${row.source}-${row.id}`}>
+                  <td className="px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpenJob(row)}
+                      className="font-medium text-slate-800 hover:text-indigo-700 hover:underline text-left"
+                      title="Open in planner"
+                    >
+                      {row.label}
+                    </button>
+                  </td>
+                  <td className="text-right px-3 py-2 tabular-nums text-slate-700">{fmtMoney(row.income)}</td>
+                  <td className="text-right px-3 py-2 tabular-nums text-slate-700">{fmtMoney(row.wages)}</td>
+                  <td className="text-right px-3 py-2 tabular-nums text-slate-700">{fmtMoney(row.expenses)}</td>
+                  <td className={`text-right px-3 py-2 font-bold tabular-nums bg-blue-50/40 ${row.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {fmtMoney(row.profit)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {jobs.length > 0 && (
+              <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+                <tr>
+                  <td className="px-4 py-2 text-xs uppercase tracking-wider font-bold text-slate-500">Week totals</td>
+                  <td className="text-right px-3 py-2 font-semibold text-slate-700 tabular-nums">{fmtMoney(totals.income)}</td>
+                  <td className="text-right px-3 py-2 font-semibold text-slate-700 tabular-nums">{fmtMoney(totals.wages)}</td>
+                  <td className="text-right px-3 py-2 font-semibold text-slate-700 tabular-nums">{fmtMoney(totals.expenses)}</td>
+                  <td className={`text-right px-3 py-2 font-bold tabular-nums bg-blue-100/60 ${totals.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {fmtMoney(totals.profit)}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
