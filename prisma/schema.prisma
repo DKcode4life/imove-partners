@@ -159,6 +159,8 @@ model CrmJob {
   covers_state            Json?
   // Per-job planner color override (hex); beats category default
   planner_color           String?
+  // Per-job P&L base income (manual; UI prefills a smart suggestion when null)
+  pnl_income              Float?
   // Timestamps
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt
@@ -173,6 +175,7 @@ model CrmJob {
   documents           Document[]
   calendar_events     CalendarEvent[]
   change_logs         JobChangeLog[]
+  ledger_lines        JobLedgerLine[]
 
   @@map("crm_jobs")
 }
@@ -251,12 +254,14 @@ model PlannerEvent {
   notes          String?
   contract_id    Int?
   planner_color  String?  // per-event color override (hex), beats contract + category defaults
+  pnl_income     Float?   // per-job P&L base income (manual; UI prefills suggestion when null)
   created_at     DateTime @default(now())
   updated_at     DateTime @default(now()) @updatedAt
 
   assignments  PlannerAssignment[]
   contract     Contract?           @relation(fields: [contract_id], references: [id], onDelete: SetNull)
   contract_job ContractJob?
+  ledger_lines JobLedgerLine[]
 
   @@map("planner_events")
 }
@@ -281,6 +286,24 @@ model PlannerAssignment {
   event PlannerEvent? @relation(fields: [event_id], references: [id], onDelete: Cascade)
 
   @@map("planner_assignments")
+}
+
+model JobLedgerLine {
+  id         Int      @id @default(autoincrement())
+  job_id     Int?
+  event_id   Int?
+  kind       String // 'income' | 'expense'
+  label      String
+  amount     Float    @default(0)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+
+  job   CrmJob?       @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  event PlannerEvent? @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([job_id])
+  @@index([event_id])
+  @@map("job_ledger_lines")
 }
 
 model StaffTimeOff {
