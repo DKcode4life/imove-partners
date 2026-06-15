@@ -58,12 +58,21 @@ const COMPANY = {
   sortCode:      '04-00-03',
   accountNumber: '66057796',
   signOffName:   'Daniel',
-  socials:       'Google ★★★★★ 5.0   •   Facebook ★★★★★ 5 Star   •   TikTok @myimoveuk',
 };
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const LOGO_HEADER    = path.join(ASSETS_DIR, 'logo-header.png');
 const LOGO_WATERMARK = path.join(ASSETS_DIR, 'logo-watermark.png');
+
+// Footer social badges. Drop transparent PNGs with these exact names into
+// server/assets and they render automatically; until then each platform falls
+// back to a plain text label so the footer never shows broken glyphs.
+const SOCIAL_LOGOS = {
+  google:   path.join(ASSETS_DIR, 'google-logo.png'),
+  facebook: path.join(ASSETS_DIR, 'facebook-logo.png'),
+  tiktok:   path.join(ASSETS_DIR, 'tiktok-logo.png'),
+};
+const STAR_GOLD = '#f5a623';
 
 // A4 page geometry
 const PAGE_W    = 595;
@@ -496,6 +505,82 @@ function drawStamp(doc, text, color) {
   doc.opacity(1);
 }
 
+// Draw a filled 5-point star centred at (cx, cy). Used for the footer review
+// badges instead of the ★ character, which the standard PDF fonts can't render
+// (it showed up as "&"). Pure vector — no font or image dependency.
+function drawStar(doc, cx, cy, outerR, color) {
+  const innerR = outerR * 0.4;
+  doc.save().fillColor(color);
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const px = cx + r * Math.cos(a);
+    const py = cy + r * Math.sin(a);
+    if (i === 0) doc.moveTo(px, py);
+    else doc.lineTo(px, py);
+  }
+  doc.closePath().fill().restore();
+}
+
+// Build the centred footer "review badges" row: each platform's logo (or a text
+// label fallback) followed by five gold stars, then the website link. Returns
+// nothing; lays everything out horizontally, centred on the page.
+function drawFooterSocials(doc, centerY) {
+  const STAR_R = 3;
+  const STAR_GAP = 1.3;
+  const STAR_COUNT = 5;
+  const LOGO_H = 12;
+  const ITEM_GAP = 4;    // logo ↔ stars
+  const SEG_GAP = 11;    // between platforms / website
+  const FS = 8;
+  const starsW = STAR_COUNT * (2 * STAR_R) + (STAR_COUNT - 1) * STAR_GAP;
+
+  doc.font(F.regular).fontSize(FS);
+
+  // Resolve a logo's scaled width, or fall back to a text label.
+  const logoOrLabel = (logoPath, label) => {
+    if (fs.existsSync(logoPath)) {
+      try {
+        const img = doc.openImage(logoPath);
+        return { kind: 'logo', path: logoPath, w: LOGO_H * (img.width / img.height) };
+      } catch { /* fall through to label */ }
+    }
+    return { kind: 'text', str: label, w: doc.widthOfString(label) };
+  };
+
+  // Assemble the ordered list of drawable items with measured widths.
+  const items = [];
+  const sep = () => items.push({ kind: 'sep', w: SEG_GAP });
+  const stars = () => items.push({ kind: 'stars', w: starsW });
+  const gap = () => items.push({ kind: 'gap', w: ITEM_GAP });
+  const website = () => items.push({ kind: 'link', str: COMPANY.website, w: doc.widthOfString(COMPANY.website) });
+
+  items.push(logoOrLabel(SOCIAL_LOGOS.google, 'Google'));   gap(); stars(); sep();
+  items.push(logoOrLabel(SOCIAL_LOGOS.facebook, 'Facebook')); gap(); stars(); sep();
+  items.push(logoOrLabel(SOCIAL_LOGOS.tiktok, 'TikTok'));    sep();
+  website();
+
+  const totalW = items.reduce((s, it) => s + it.w, 0);
+  let x = (PAGE_W - totalW) / 2;
+
+  for (const it of items) {
+    if (it.kind === 'logo') {
+      try { doc.image(it.path, x, centerY - LOGO_H / 2, { height: LOGO_H }); } catch { /* skip */ }
+    } else if (it.kind === 'text') {
+      doc.fillColor(C.gray).font(F.regular).fontSize(FS).text(it.str, x, centerY - FS / 2 - 1, { lineBreak: false });
+    } else if (it.kind === 'link') {
+      doc.fillColor(C.blue).font(F.regular).fontSize(FS).text(it.str, x, centerY - FS / 2 - 1, { lineBreak: false });
+      doc.link(x, centerY - FS / 2 - 1, it.w, FS + 2, `https://${COMPANY.website}`);
+    } else if (it.kind === 'stars') {
+      for (let s = 0; s < STAR_COUNT; s++) {
+        const cx = x + STAR_R + s * (2 * STAR_R + STAR_GAP);
+        drawStar(doc, cx, centerY, STAR_R, STAR_GOLD);
+      }
+    }
+    x += it.w;
+  }
+}
+
 // Pass the page number + total explicitly: PDFKit does NOT populate
 // `doc.page.number`, so deriving it here would print "Page 1" on every page.
 // Callers iterate the buffered range and pass `i - start + 1` and `count`.
@@ -511,9 +596,8 @@ function drawFooter(doc, pageNumber, totalPages) {
   doc.fillColor(C.gray).font(F.regular).fontSize(8)
      .text(`Company number: ${COMPANY.companyNumber}`, LEFT, y + 20);
 
-  // Centre: socials
-  doc.fillColor(C.gray).font(F.regular).fontSize(8)
-     .text(COMPANY.socials, 0, y + 14, { width: PAGE_W, align: 'center' });
+  // Centre: review badges (logos + gold stars) + website link
+  drawFooterSocials(doc, y + 17);
 
   // Right: page number
   const range = doc.bufferedPageRange ? doc.bufferedPageRange() : { start: 0, count: 1 };
