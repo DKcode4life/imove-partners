@@ -13,8 +13,9 @@ import SurveyTool from '../../components/SurveyTool';
 import SurveyReport from '../../components/SurveyReport';
 import FurnitureCovers from '../../components/FurnitureCovers';
 import api from '../../lib/api';
-import type { CrmJob, CrmActivity, CrmStatus, JobStatusSetting, PlannerAssignment } from '../../types';
+import type { CrmJob, CrmActivity, CrmStatus, JobStatusSetting, PlannerAssignment, MoveScheduleDay } from '../../types';
 import { CRM_STATUSES, CRM_SURVEY_TYPES, CRM_BEDROOM_OPTIONS, CRM_PROPERTY_TYPES } from '../../types';
+import { OFFSET_PRESETS, offsetLabel, scheduleAnchor, expandSchedule, addDaysIso, newDayId } from '../../lib/moveSchedule';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -503,6 +504,7 @@ export default function CRMDetailPage() {
   const [parkingNotesTo, setParkingNotesTo] = useState('');
   const [prefMoveDate,   setPrefMoveDate]   = useState('');
   const [confMoveDate,   setConfMoveDate]   = useState('');
+  const [moveSchedule,   setMoveSchedule]   = useState<MoveScheduleDay[]>([]);
   const [flexNotes,      setFlexNotes]      = useState('');
   const [moveType,       setMoveType]       = useState('');
   const [isKeyWorker,    setIsKeyWorker]    = useState(false);
@@ -555,6 +557,7 @@ export default function CRMDetailPage() {
     setBedrooms(j.bedrooms || '');     setParkingNotes(j.parking_notes || '');
     setBedroomsTo(j.bedrooms_to || ''); setParkingNotesTo(j.parking_notes_to || '');
     setPrefMoveDate(j.preferred_move_date || ''); setConfMoveDate(j.confirmed_move_date || '');
+    setMoveSchedule(Array.isArray(j.move_schedule) ? j.move_schedule : []);
     setFlexNotes(j.flexibility_notes || '');
     setMoveType(j.move_type || '');
     setIsKeyWorker(j.is_key_worker);
@@ -644,6 +647,7 @@ export default function CRMDetailPage() {
     bedrooms: bedrooms || null, parking_notes: parkingNotes || null,
     bedrooms_to: bedroomsTo || null, parking_notes_to: parkingNotesTo || null,
     preferred_move_date: prefMoveDate || null, confirmed_move_date: confMoveDate || null,
+    move_schedule: moveSchedule,
     flexibility_notes: flexNotes || null,
     move_type: moveType || null, is_key_worker: isKeyWorker,
     floor_from: floorFrom || null, has_lift_from: hasLiftFrom,
@@ -1071,6 +1075,66 @@ export default function CRMDetailPage() {
                     <input type="date" className="input" value={confMoveDate} onChange={e => setConfMoveDate(e.target.value)} />
                   </F>
                 </div>
+                {/* Additional days — packing, pre-load, delivery, etc. Each is set
+                    relative to the move date, so they shift automatically when the
+                    confirmed (or preferred) move date changes. */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Additional Days</p>
+                    <button
+                      type="button"
+                      onClick={() => setMoveSchedule(s => [...s, { id: newDayId(), label: '', offset: -1 }])}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700"
+                    >
+                      <PlusCircle className="w-4 h-4" /> Add day
+                    </button>
+                  </div>
+                  {moveSchedule.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">
+                      None yet. Add a packing, pre-load, delivery or unpacking day — set each one relative to the move date and it follows automatically.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {moveSchedule.map((day, idx) => {
+                        const computed = (confMoveDate || prefMoveDate)
+                          ? addDaysIso(confMoveDate || prefMoveDate, day.offset)
+                          : null;
+                        return (
+                          <div key={day.id} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              className="input flex-1"
+                              placeholder="Day name e.g. Packing"
+                              value={day.label}
+                              onChange={e => setMoveSchedule(s => s.map((d, i) => i === idx ? { ...d, label: e.target.value } : d))}
+                            />
+                            <select
+                              className="input w-36 flex-shrink-0"
+                              value={day.offset}
+                              onChange={e => setMoveSchedule(s => s.map((d, i) => i === idx ? { ...d, offset: Number(e.target.value) } : d))}
+                            >
+                              {OFFSET_PRESETS.map(o => <option key={o} value={o}>{offsetLabel(o)}</option>)}
+                            </select>
+                            <span className="w-20 flex-shrink-0 text-xs text-slate-500 tabular-nums text-right">
+                              {computed ? fmtDate(computed) : '—'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setMoveSchedule(s => s.filter((_, i) => i !== idx))}
+                              className="flex-shrink-0 p-1 text-slate-400 hover:text-red-500 transition-colors"
+                              aria-label="Remove day"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {!(confMoveDate || prefMoveDate) && (
+                        <p className="text-[11px] text-amber-600">Set a move date above to see the actual dates for these days.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <F label="Flexibility Notes">
                   <input type="text" className="input" placeholder="e.g. Can move +/- 2 weeks either side"
                     value={flexNotes} onChange={e => setFlexNotes(e.target.value)} />
@@ -1114,6 +1178,20 @@ export default function CRMDetailPage() {
                   <ReadF label="Preferred Move Date" value={fmtDate(prefMoveDate)} />
                   <ReadF label="Confirmed Move Date" value={fmtDate(confMoveDate)} />
                 </div>
+                {moveSchedule.length > 0 && (
+                  <div className="pt-1 space-y-1">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Additional Days</p>
+                    {expandSchedule(moveSchedule, scheduleAnchor({ confirmed_move_date: confMoveDate || null, preferred_move_date: prefMoveDate || null })).map(day => (
+                      <div key={day.id} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-slate-700 font-medium">{day.label || <span className="italic text-slate-300">Untitled day</span>}</span>
+                        <span className="flex items-center gap-2 text-slate-500">
+                          <span className="text-xs">{offsetLabel(day.offset)}</span>
+                          <span className="tabular-nums text-slate-700">{day.date ? fmtDate(day.date) : '—'}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {flexNotes && <ReadF label="Flexibility Notes" value={flexNotes} />}
                 <div className="grid grid-cols-2 gap-3 pt-1 border-t border-slate-100">
                   <ReadF label="Move Type" value={moveType} />
@@ -1397,6 +1475,12 @@ export default function CRMDetailPage() {
                       <ReadF label="Survey Date" value={fmtDate(surveyDate)} />
                       <ReadF label="Survey Time" value={surveyTime ? surveyTime : undefined} />
                     </div>
+                    {surveyDate && (
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                        Booked on the planner — assign crew in Planner › Staff.
+                      </p>
+                    )}
                     {surveyType && surveyDate && (
                       <div className="mt-1 space-y-2">
                         <button

@@ -16,6 +16,14 @@ const { generateInvoicePDF } = require('../services/pdf');
 const { sendTemplated } = require('../services/email');
 const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
 const { resolveBankSnapshot } = require('../lib/bank-account-snapshot');
+const { recordSentDocument } = require('../lib/sent-document');
+
+/** Map an invoice_type to the SentDocument doc_type used in the history list. */
+function invoiceDocType(invoiceType) {
+  if (invoiceType === 'deposit') return 'deposit-invoice';
+  if (invoiceType === 'additional') return 'additional-invoice';
+  return 'main-invoice';
+}
 
 function bankFieldsForPdf(invoice) {
   return {
@@ -146,6 +154,54 @@ router.post('/jobs/:id/invoices', wrap(async (req, res) => {
   res.status(201).json(invoice);
 }));
 
+// ─── PATCH: refresh a deposit/main invoice's financials + items ──────────
+// Used so a Final Invoice re-sent after the quote changed (e.g. packing added)
+// bills the *latest* total. Additional invoices keep using their own PUT route.
+router.patch('/jobs/:id/invoices/:invoiceId/financials', wrap(async (req, res) => {
+  const jobId = parseInt(req.params.id);
+  const invoiceId = parseInt(req.params.invoiceId);
+  if (isNaN(jobId) || isNaN(invoiceId)) return res.status(400).json({ error: 'Invalid IDs' });
+
+  const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, job_id: jobId } });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (invoice.invoice_type === 'additional') {
+    return res.status(400).json({ error: 'Use PUT for additional invoices' });
+  }
+
+  const { subtotal, tax_rate, tax_amount, total, items } = req.body;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (Array.isArray(items)) {
+      await tx.invoiceItem.deleteMany({ where: { invoice_id: invoiceId } });
+      if (items.length > 0) {
+        await tx.invoiceItem.createMany({
+          data: items.map((item, idx) => ({
+            invoice_id: invoiceId,
+            description: item.description || '',
+            quantity: parseFloat(item.quantity) || 1,
+            unit_price: parseFloat(item.unit_price) || 0,
+            total: parseFloat(item.total) || 0,
+            sort_order: idx,
+          })),
+        });
+      }
+    }
+
+    return tx.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        subtotal:   subtotal   != null ? parseFloat(subtotal)   : invoice.subtotal,
+        tax_rate:   tax_rate   != null ? parseFloat(tax_rate)   : invoice.tax_rate,
+        tax_amount: tax_amount != null ? parseFloat(tax_amount) : invoice.tax_amount,
+        total:      total      != null ? parseFloat(total)      : invoice.total,
+        updated_at: new Date(),
+      },
+    });
+  });
+
+  res.json({ ok: true, id: updated.id, total: updated.total });
+}));
+
 // ─── GET: PDF preview of an invoice ──────────────────────────────────────
 router.get('/jobs/:id/invoices/:invoiceId/pdf', wrap(async (req, res) => {
   const jobId = parseInt(req.params.id);
@@ -226,25 +282,29 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
   }
   const balance = invoice.total - depositPaid;
 
+  // Build the exact PDF argument object unconditionally so the SentDocument
+  // snapshot can recreate this document even when "attach PDF" is un-ticked.
+  const invoicePdfMode = invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice';
+  const pdfArgs = {
+    mode: invoicePdfMode,
+    invoice_number: invoice.invoice_number,
+    ...jobToPdfFields(job),
+    due_date: invoice.due_date,
+    items: invoice.items.map(i => ({ description: i.description, quantity: i.quantity, unit_price: i.unit_price, total: i.total })),
+    subtotal: invoice.subtotal,
+    tax_rate: invoice.tax_rate,
+    tax_amount: invoice.tax_amount,
+    total: invoice.total,
+    deposit_paid: depositPaid,
+    balance,
+    notes: invoice.notes,
+    ...bankFieldsForPdf(invoice),
+  };
+
   // Build PDF attachment
   let pdfAttachment = null;
   if (attach_pdf) {
-    const invoicePdfMode = invoice.invoice_type === 'deposit' ? 'deposit-invoice' : 'main-invoice';
-    const pdf = await generateInvoicePDF({
-      mode: invoicePdfMode,
-      invoice_number: invoice.invoice_number,
-      ...jobToPdfFields(job),
-      due_date: invoice.due_date,
-      items: invoice.items.map(i => ({ description: i.description, quantity: i.quantity, unit_price: i.unit_price, total: i.total })),
-      subtotal: invoice.subtotal,
-      tax_rate: invoice.tax_rate,
-      tax_amount: invoice.tax_amount,
-      total: invoice.total,
-      deposit_paid: depositPaid,
-      balance,
-      notes: invoice.notes,
-      ...bankFieldsForPdf(invoice),
-    });
+    const pdf = await generateInvoicePDF(pdfArgs);
     pdfAttachment = { filename: pdf.filename, content: pdf.buffer, contentType: pdf.mimeType };
   }
 
@@ -304,6 +364,27 @@ router.post('/jobs/:id/invoices/:invoiceId/send-email', wrap(async (req, res) =>
     });
   } catch (e) {
     console.error('[Invoice Email] activity log failed:', e.message);
+  }
+
+  // Immutable history snapshot — freezes the exact email + PDF data for this send.
+  try {
+    await recordSentDocument(prisma, {
+      jobId,
+      docType: invoiceDocType(invoice.invoice_type),
+      reference: invoice.invoice_number,
+      toEmail: to,
+      subject: emailResult?.subject || subject,
+      bodyHtml: emailResult?.html || body_html || '',
+      amount: invoice.total,
+      total: invoice.total,
+      deposit: depositPaid,
+      balance,
+      pdfGenerator: 'invoice',
+      pdfArgs,
+      sourceInvoiceId: invoice.id,
+    });
+  } catch (e) {
+    console.error('[Invoice Email] sent-document snapshot failed:', e.message);
   }
 
   res.json({ success: true, email: emailResult, invoice: { id: invoice.id, invoice_number: invoice.invoice_number } });
@@ -517,7 +598,7 @@ router.post('/jobs/:id/invoices/:invoiceId/send-receipt', wrap(async (req, res) 
 
   const isMoveReceipt = invoice.invoice_type === 'main';
 
-  const pdf = await generateInvoicePDF({
+  const receiptPdfArgs = {
     mode: isMoveReceipt ? 'move-receipt' : 'deposit-receipt',
     invoice_number: invoice.invoice_number,
     ...jobToPdfFields(job),
@@ -527,7 +608,9 @@ router.post('/jobs/:id/invoices/:invoiceId/send-receipt', wrap(async (req, res) 
     payment_method: lastPayment?.method,
     payment_date: lastPayment?.paid_at,
     notes: invoice.notes,
-  });
+  };
+
+  const pdf = await generateInvoicePDF(receiptPdfArgs);
 
   const variables = {
     job_id: jobId,
@@ -559,6 +642,27 @@ router.post('/jobs/:id/invoices/:invoiceId/send-receipt', wrap(async (req, res) 
     });
   } catch (e) {
     console.error('[Receipt Email] activity log failed:', e.message);
+  }
+
+  // Immutable history snapshot — freezes the exact receipt email + PDF data.
+  try {
+    await recordSentDocument(prisma, {
+      jobId,
+      docType: isMoveReceipt ? 'move-receipt' : 'deposit-receipt',
+      reference: invoice.invoice_number,
+      toEmail: to,
+      subject: emailResult?.subject || subject,
+      bodyHtml: emailResult?.html || body_html || '',
+      amount: totalPaid,
+      total: invoice.total,
+      deposit: 0,
+      balance,
+      pdfGenerator: 'invoice',
+      pdfArgs: receiptPdfArgs,
+      sourceInvoiceId: invoice.id,
+    });
+  } catch (e) {
+    console.error('[Receipt Email] sent-document snapshot failed:', e.message);
   }
 
   res.json({ success: true, email: emailResult });

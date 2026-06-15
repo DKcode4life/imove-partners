@@ -11,9 +11,10 @@ import StaffWeekView from '../../components/StaffWeekView';
 import ColorPickerPopover from '../../components/ColorPickerPopover';
 import CreateContractJobModal from '../../components/CreateContractJobModal';
 import api from '../../lib/api';
-import type { PlannerAsset, PlannerCalendarItem, PlannerAssignment, PlannerEvent, Contract } from '../../types';
+import type { PlannerAsset, PlannerCalendarItem, PlannerAssignment, PlannerEvent, Contract, JobDayPnl, JobLedgerLine } from '../../types';
 import { fetchJobCategories, FALLBACK_CATEGORY_NAMES } from '../../lib/jobCategories';
 import { catColor } from '../../lib/planner-colors';
+import { offsetLabel } from '../../lib/moveSchedule';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -206,10 +207,14 @@ function CatBadge({ cat, size = 'sm' }: { cat: string; size?: 'xs' | 'sm' }) {
 
 function ItemChip({ item, onClick }: { item: PlannerCalendarItem; onClick: () => void }) {
   const c = catColor(item.category);
+  // Additional move days (packing, delivery, …) are read-only markers — give
+  // them a dashed outline so they read as "linked extra day", not a main move.
+  const extra = item.is_extra_day ? 'border border-dashed border-slate-400/70' : '';
   return (
     <button
       onClick={e => { e.stopPropagation(); onClick(); }}
-      className={`w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate transition-opacity hover:opacity-75 ${c.bg} ${c.text}`}
+      title={item.is_extra_day ? `Additional move day (${item.schedule_offset != null ? offsetLabel(item.schedule_offset) : 'extra day'})` : undefined}
+      className={`w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate transition-opacity hover:opacity-75 ${c.bg} ${c.text} ${extra}`}
     >
       {item.title}
     </button>
@@ -308,306 +313,6 @@ function MonthlyView({
         })}
       </div>
     </div>
-  );
-}
-
-// ── Asset chip (draggable) ────────────────────────────────────────────────────
-
-function AssetChip({
-  asset,
-  reorderMode,
-  onJobDragStart,
-  onJobDragEnd,
-  onReorderDragStart,
-  onReorderDragOver,
-  onReorderDrop,
-  onReorderDragEnd,
-  onEdit,
-  onDelete,
-}: {
-  asset: PlannerAsset;
-  reorderMode: boolean;
-  isReorderTarget?: boolean;
-  onJobDragStart: () => void;
-  onJobDragEnd: () => void;
-  onReorderDragStart: () => void;
-  onReorderDragOver: () => void;
-  onReorderDrop: () => void;
-  onReorderDragEnd: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const isAvailable = asset.availability === 'available';
-  return (
-    <div
-      data-drag-asset={(!reorderMode && isAvailable) ? String(asset.id) : undefined}
-      data-drag-reorder={reorderMode ? String(asset.id) : undefined}
-      onContextMenu={e => e.preventDefault()}
-      draggable={reorderMode || isAvailable}
-      onDragStart={e => {
-        if (reorderMode) {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', String(asset.id));
-          setTimeout(() => onReorderDragStart(), 0);
-        } else if (isAvailable) {
-          e.dataTransfer.effectAllowed = 'copy';
-          e.dataTransfer.setData('text/plain', String(asset.id));
-          setTimeout(() => onJobDragStart(), 0);
-        } else {
-          e.preventDefault();
-        }
-      }}
-      onDragEnd={() => { onJobDragEnd(); onReorderDragEnd(); }}
-      onDragOver={e => { if (reorderMode) { e.preventDefault(); e.stopPropagation(); onReorderDragOver(); } }}
-      onDrop={e => { if (reorderMode) { e.preventDefault(); e.stopPropagation(); onReorderDrop(); } }}
-      className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg border text-sm transition-all ${
-        reorderMode
-          ? 'bg-white border-slate-200 hover:border-indigo-200 cursor-grab active:cursor-grabbing active:opacity-60'
-          : isAvailable
-            ? 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm cursor-grab active:cursor-grabbing active:opacity-60'
-            : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-      }`}
-    >
-      <span className="flex-shrink-0">
-        <GripVertical className={`w-3 h-3 transition-colors ${
-          reorderMode ? 'text-indigo-400' : 'text-slate-200 group-hover:text-slate-300'
-        }`} />
-      </span>
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isAvailable ? 'bg-green-400' : 'bg-slate-300'}`} />
-      <span className="text-xs font-medium text-slate-700 flex-1 truncate">{asset.name}</span>
-
-      {!reorderMode && (
-        <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
-          <button onClick={e => { e.stopPropagation(); onEdit(); }} className="p-0.5 text-slate-400 hover:text-slate-700"><Edit2 className="w-3 h-3" /></button>
-          <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-0.5 text-slate-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Asset panel ───────────────────────────────────────────────────────────────
-
-function AssetPanel({
-  assets: initialAssets,
-  assignments,
-  draggingAsset,
-  draggingAssignment,
-  onJobDragStart,
-  onJobDragEnd,
-  onAddAsset,
-  onEditAsset,
-  onDeleteAsset,
-  onAssetsReordered,
-}: {
-  assets: PlannerAsset[];
-  assignments: PlannerAssignment[];
-  draggingAsset: PlannerAsset | null;
-  draggingAssignment: PlannerAssignment | null;
-  onJobDragStart: (a: PlannerAsset) => void;
-  onJobDragEnd: () => void;
-  onAddAsset: () => void;
-  onEditAsset: (a: PlannerAsset) => void;
-  onDeleteAsset: (a: PlannerAsset) => void;
-  onAssetsReordered: (ordered: PlannerAsset[]) => void;
-}) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [reorderMode, setReorderMode] = useState(false);
-  // Local ordered list — we optimistically reorder then persist
-  const [assets, setAssets] = useState<PlannerAsset[]>(initialAssets);
-  // Keep in sync when parent refreshes (after add/edit/delete)
-  useEffect(() => { setAssets(initialAssets); }, [initialAssets]);
-
-  const reorderDragId = useRef<number | null>(null);
-  // "insert before" target: asset id, or 'end' to append at end of list
-  const [reorderOverId, setReorderOverId] = useState<number | 'end' | null>(null);
-
-  // Build set of (asset_id, date) combos that are booked
-  const bookedMap: Record<number, Set<string>> = {};
-  for (const a of assignments) {
-    if (!bookedMap[a.asset_id]) bookedMap[a.asset_id] = new Set();
-    bookedMap[a.asset_id].add(a.assigned_date);
-  }
-
-  // targetId: insert dragged item BEFORE this id; 'end' = append at end
-  function handleReorderDrop(targetId: number | 'end') {
-    const dragId = reorderDragId.current;
-    reorderDragId.current = null;
-    setReorderOverId(null);
-    if (!dragId) return;
-    if (targetId !== 'end' && dragId === targetId) return;
-    const next = [...assets];
-    const fromIdx = next.findIndex(a => a.id === dragId);
-    if (fromIdx === -1) return;
-    const [moved] = next.splice(fromIdx, 1);
-    if (targetId === 'end') {
-      next.push(moved);
-    } else {
-      const toIdx = next.findIndex(a => a.id === targetId);
-      if (toIdx === -1) { next.push(moved); }
-      else { next.splice(toIdx, 0, moved); }
-    }
-    const reindexed = next.map((a, i) => ({ ...a, sort_order: i + 1 }));
-    setAssets(reindexed);
-    onAssetsReordered(reindexed);
-  }
-
-  const drivers    = assets.filter(a => a.type === 'staff' && a.role === 'driver');
-  const porters    = assets.filter(a => a.type === 'staff' && a.role === 'porter');
-  const otherStaff = assets.filter(a => a.type === 'staff' && a.role !== 'driver' && a.role !== 'porter');
-  // Vehicles are no longer dragged onto jobs — they're picked from the
-  // per-driver dropdown in each job card. The Vehicles sidebar group has
-  // been removed; vehicle assets still exist (for that dropdown) and can be
-  // managed via "Add asset".
-
-  const toggle = (k: string) => setCollapsed(p => ({ ...p, [k]: !p[k] }));
-
-  function Group({ title, items, groupKey, icon }: { title: string; items: PlannerAsset[]; groupKey: string; icon: React.ReactNode }) {
-    return (
-      <div>
-        <button
-          onClick={() => toggle(groupKey)}
-          className="w-full flex items-center justify-between px-1 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-700"
-        >
-          <span className="flex items-center gap-1.5">{icon}{title} <span className="font-normal normal-case text-slate-400">({items.length})</span></span>
-          <ChevronRight className={`w-3 h-3 transition-transform ${collapsed[groupKey] ? '' : 'rotate-90'}`} />
-        </button>
-        {!collapsed[groupKey] && (
-          <div
-            className="mt-1"
-            onDragOver={e => {
-              if (!reorderMode || !reorderDragId.current) return;
-              e.preventDefault();
-              // Only set 'end' if the event target is the container itself, not a child chip
-              if (e.currentTarget === e.target) setReorderOverId('end');
-            }}
-            onDrop={e => {
-              if (!reorderMode) return;
-              e.stopPropagation();
-              handleReorderDrop('end');
-            }}
-          >
-            {items.length === 0 && <p className="text-xs text-slate-400 px-1 pb-1">None added yet</p>}
-            {items.map(a => (
-              <div key={a.id}>
-                {/* Gap line: appears above this chip when it's the insert-before target */}
-                {reorderMode && reorderOverId === a.id && reorderDragId.current !== a.id && (
-                  <div className="h-0.5 mx-1 rounded-full bg-indigo-400 my-1" />
-                )}
-                <AssetChip
-                  asset={a}
-                  reorderMode={reorderMode}
-                  isReorderTarget={false}
-                  onJobDragStart={() => onJobDragStart(a)}
-                  onJobDragEnd={onJobDragEnd}
-                  onReorderDragStart={() => { reorderDragId.current = a.id; }}
-                  onReorderDragOver={() => {
-                    if (reorderDragId.current && reorderDragId.current !== a.id) setReorderOverId(a.id);
-                  }}
-                  onReorderDrop={() => handleReorderDrop(a.id)}
-                  onReorderDragEnd={() => setReorderOverId(null)}
-                  onEdit={() => onEditAsset(a)}
-                  onDelete={() => onDeleteAsset(a)}
-                />
-              </div>
-            ))}
-            {/* Gap line at end of list */}
-            {reorderMode && reorderOverId === 'end' && items.length > 0 && (
-              <div className="h-0.5 mx-1 rounded-full bg-indigo-400 my-1" />
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-52 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col">
-      <div className="px-3 py-3 border-b border-slate-200">
-        <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Assets</p>
-        {draggingAsset && (
-          <p className="text-[10px] text-indigo-600 mt-1 font-medium">Dragging: {draggingAsset.name} — drop onto a job</p>
-        )}
-        {draggingAssignment && (
-          <p className="text-[10px] text-amber-600 mt-1 font-medium">Moving: {draggingAssignment.asset_name} — drop onto another job</p>
-        )}
-      </div>
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
-        <Group title="Drivers"  items={drivers}    groupKey="drivers"  icon={<Users className="w-3 h-3" />} />
-        <Group title="Porters"  items={porters}    groupKey="porters"  icon={<Users className="w-3 h-3" />} />
-        {otherStaff.length > 0 && <Group title="Staff" items={otherStaff} groupKey="staff" icon={<Users className="w-3 h-3" />} />}
-      </div>
-      <div className="px-3 py-3 border-t border-slate-200 space-y-1.5">
-        {reorderMode && (
-          <p className="text-[10px] text-indigo-600 font-medium text-center pb-1">
-            Drag to reorder — click Done when finished
-          </p>
-        )}
-        <button
-          onClick={onAddAsset}
-          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 rounded-lg border border-dashed border-slate-300 hover:border-slate-400 transition-colors"
-        >
-          <Plus className="w-3 h-3" />Add asset
-        </button>
-        <button
-          onClick={() => setReorderMode(m => !m)}
-          className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-            reorderMode
-              ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
-              : 'text-slate-600 hover:bg-slate-50 border-dashed border-slate-300 hover:border-slate-400'
-          }`}
-        >
-          <GripVertical className="w-3 h-3" />
-          {reorderMode ? 'Done reordering' : 'Change order'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Assignment chip ───────────────────────────────────────────────────────────
-
-function AssignmentChip({
-  a, onRemove, onDragStart, onDragEnd, unassigned,
-}: {
-  a: PlannerAssignment;
-  onRemove: () => void;
-  onDragStart?: () => void;
-  onDragEnd?: () => void;
-  unassigned?: boolean;
-}) {
-  return (
-    <span
-      data-assignment-chip
-      data-drag-assignment={onDragStart ? String(a.id) : undefined}
-      data-asset-id={String(a.asset_id)}
-      data-assigned-date={a.assigned_date}
-      onContextMenu={e => e.preventDefault()}
-      draggable={!!onDragStart}
-      onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', '1'); setTimeout(() => onDragStart?.(), 0); }}
-      onDragEnd={onDragEnd}
-      title={unassigned ? 'Not allocated to a driver' : undefined}
-      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold transition-all duration-150 select-none border shadow-sm ${
-        onDragStart ? 'cursor-grab active:cursor-grabbing active:scale-95 hover:shadow-md hover:-translate-y-px' : ''
-      } ${
-        a.asset_type === 'staff'
-          ? 'bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 border-indigo-200/70'
-          : unassigned
-          ? 'bg-gradient-to-br from-red-50 to-red-100/70 text-red-600/80 border-red-200/70'
-          : 'bg-gradient-to-br from-teal-50 to-teal-100 text-teal-700 border-teal-200/70'
-      }`}
-    >
-      <GripVertical className="w-2.5 h-2.5 opacity-40" />
-      {a.asset_type === 'staff' ? <Users className="w-3 h-3" /> : <Truck className="w-3 h-3" />}
-      <span className="tracking-tight">{a.asset_name}</span>
-      {a.asset_role && <span className="text-[10px] opacity-60 ml-0.5 capitalize font-medium">({a.asset_role})</span>}
-      <button
-        onClick={e => { e.stopPropagation(); onRemove(); }}
-        className="ml-0.5 opacity-50 hover:opacity-100 hover:text-red-500 transition-colors"
-      >
-        <X className="w-2.5 h-2.5" />
-      </button>
-    </span>
   );
 }
 
@@ -714,6 +419,7 @@ function JobCard({
   navigate,
   allAssets,
   onAssign,
+  readOnly = false,
 }: {
   cardKey: string;
   item: PlannerCalendarItem;
@@ -741,6 +447,9 @@ function JobCard({
   navigate: (path: string) => void;
   allAssets: PlannerAsset[];
   onAssign: (asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
+  // Jobs tab: hide drag-and-drop and show crew read-only (assignment happens in
+  // the Staff tab). The card still expands, recolors, and shows the P&L panel.
+  readOnly?: boolean;
 }) {
   const isMobile = useIsMobile();
   // Server-resolved color (override → contract → category → fallback). Fall
@@ -764,15 +473,15 @@ function JobCard({
     <div
       data-drag-card={`${item.source}:${item.id}`}
       onContextMenu={e => e.preventDefault()}
-      draggable={!isMobile}
-      onDragStart={isMobile ? undefined : e => {
+      draggable={!isMobile && !readOnly}
+      onDragStart={(isMobile || readOnly) ? undefined : e => {
         if ((e.target as HTMLElement).closest('[data-assignment-chip]')) { e.preventDefault(); return; }
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', '1');
         setTimeout(() => onCardDragStart(), 0);
       }}
-      onDragEnd={isMobile ? undefined : onCardDragEnd}
-      className={`group relative rounded-xl border bg-gradient-to-br from-white via-white to-slate-50/60 transition-all duration-200 overflow-hidden backdrop-blur-sm ${isMobile ? '' : 'cursor-grab active:cursor-grabbing active:scale-[0.98]'} ${
+      onDragEnd={(isMobile || readOnly) ? undefined : onCardDragEnd}
+      className={`group relative rounded-xl border bg-gradient-to-br from-white via-white to-slate-50/60 transition-all duration-200 overflow-hidden backdrop-blur-sm ${(isMobile || readOnly) ? '' : 'cursor-grab active:cursor-grabbing active:scale-[0.98]'} ${
         isExpanded
           ? 'border-indigo-200/80 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.18),0_2px_6px_-2px_rgba(15,23,42,0.06)] ring-1 ring-indigo-100'
           : 'border-slate-200/70 shadow-[0_1px_2px_0_rgba(15,23,42,0.04)] hover:border-slate-300 hover:shadow-[0_6px_16px_-6px_rgba(15,23,42,0.18),0_2px_4px_-2px_rgba(15,23,42,0.06)] hover:-translate-y-px'
@@ -833,7 +542,7 @@ function JobCard({
       </button>
 
       {/* Mini drop target shown on collapsed card when a staff drag is in flight */}
-      {hasActiveDrag && !isExpanded && (
+      {!readOnly && hasActiveDrag && !isExpanded && (
         <div className="px-2.5 pb-2.5">
           <div
             data-drop-zone="staff"
@@ -882,8 +591,37 @@ function JobCard({
             )}
           </div>
 
-          {/* ── Mobile: dropdown assignment ── */}
-          {isMobile ? (
+          {/* ── Read-only crew (Jobs tab) ── */}
+          {readOnly ? (
+            <div>
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                <Users className="w-3 h-3 text-indigo-500" />Crew
+              </p>
+              {staffAssignments.length === 0 ? (
+                <p className="text-[10px] text-slate-400 italic">No crew assigned — assign staff & vehicles in the Staff tab.</p>
+              ) : (
+                <div className="space-y-1">
+                  {[...driverAssignments, ...porterAssignments].map(a => {
+                    const role = (a.assigned_role ?? a.asset_role) || '';
+                    const isDriver = role === 'driver';
+                    const van = a.vehicle_asset_id != null ? allVehicles.find(v => v.id === a.vehicle_asset_id) : null;
+                    return (
+                      <div key={a.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200/70 text-xs">
+                        <Users className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                        <span className="font-medium text-slate-700 truncate flex-1 min-w-0">{a.asset_name}</span>
+                        {role && <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 flex-shrink-0">{role}</span>}
+                        {isDriver && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-slate-500 flex-shrink-0">
+                            <Truck className="w-3 h-3" />{van ? van.name : 'No van'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : isMobile ? (
             <div className="space-y-3">
               <MobileAssignZone
                 label="Drivers"
@@ -1004,6 +742,17 @@ function JobCard({
               )}
               {item.source === 'event' && (
                 <>
+                  {/* Survey created from a job profile → jump straight to that job. */}
+                  {item.survey_job_id && (
+                    <button
+                      onClick={e => { e.stopPropagation(); navigate(`/admin/crm/${item.survey_job_id}`); }}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 text-white border border-indigo-600/40 shadow-sm hover:shadow-md hover:-translate-y-px active:scale-95 transition-all"
+                      title="Open the job this survey belongs to"
+                    >
+                      Open job
+                      <ArrowUpRight className="w-3 h-3" />
+                    </button>
+                  )}
                   <button
                     onClick={e => { e.stopPropagation(); onEditEvent?.(); }}
                     className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:shadow active:scale-95 transition-all"
@@ -1016,7 +765,9 @@ function JobCard({
                   >
                     <Trash2 className="w-3 h-3" />Delete
                   </button>
-                  {isSurveyEvent && (
+                  {/* Only offer Convert for a standalone survey (no linked job) —
+                      e.g. a customer who self-booked a survey online. */}
+                  {isSurveyEvent && !item.survey_job_id && (
                     <button
                       onClick={e => { e.stopPropagation(); onConvertToJob?.(); }}
                       className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-gradient-to-br from-cyan-500 to-cyan-600 text-white border border-cyan-600/40 shadow-sm hover:shadow-md hover:-translate-y-px active:scale-95 transition-all"
@@ -1049,31 +800,217 @@ function JobCard({
   );
 }
 
-// ── Weekly view ───────────────────────────────────────────────────────────────
+// ── Per-day P&L panel (additional-day card) ───────────────────────────────────
+// Wages for that day's crew (read-only) + expense lines tagged to the day. No
+// income and no profit — those live on the main job; everything here rolls into
+// the main job's total P&L.
 
-function WeeklyView({
+function fmtPnlMoney(n: number): string {
+  return `£${(Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+}
+
+function ScheduleDayPanel({ jobId, dayKey, date }: { jobId: number; dayKey: string; date: string }) {
+  const [pnl, setPnl] = useState<JobDayPnl | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.get<JobDayPnl>('/planner/pnl/day', { params: { id: jobId, day_key: dayKey, date } });
+      setPnl(r.data);
+    } catch { setPnl(null); } finally { setLoading(false); }
+  }, [jobId, dayKey, date]);
+  useEffect(() => { load(); }, [load]);
+
+  async function addExpense() {
+    await api.post('/planner/pnl/line', { source: 'job', id: jobId, kind: 'expense', label: 'Expense', amount: 0, day_key: dayKey });
+    await load();
+  }
+  async function updateLine(lineId: number, patch: { label?: string; amount?: string }) {
+    await api.patch(`/planner/pnl/line/${lineId}`, patch);
+    await load();
+  }
+  async function deleteLine(lineId: number) {
+    await api.delete(`/planner/pnl/line/${lineId}`);
+    await load();
+  }
+
+  if (loading && !pnl) return <div className="text-[11px] text-slate-400 py-1">Loading…</div>;
+  if (!pnl) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200/80 bg-white/70 p-2.5 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium text-slate-600">Wages</span>
+        <span className="text-xs font-semibold text-slate-700 tabular-nums pr-1">{fmtPnlMoney(pnl.wages_total)}</span>
+      </div>
+      <div className="border-t border-slate-100 pt-1.5 space-y-1.5">
+        <span className="text-[11px] font-medium text-slate-600">Expenses</span>
+        {pnl.expense_lines.map(line => (
+          <DayLineRow key={line.id} line={line} onUpdate={updateLine} onDelete={deleteLine} />
+        ))}
+        <button
+          type="button"
+          onClick={addExpense}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-800"
+        >
+          <Plus className="w-3 h-3" /> Add expense
+        </button>
+      </div>
+      <p className="text-[10px] text-slate-400 italic border-t border-slate-100 pt-1.5">
+        Wages &amp; expenses roll into the main move job's P&amp;L.
+      </p>
+    </div>
+  );
+}
+
+// Compact editable expense row (label + amount + delete) for the day panel.
+function DayLineRow({
+  line, onUpdate, onDelete,
+}: {
+  line: JobLedgerLine;
+  onUpdate: (id: number, patch: { label?: string; amount?: string }) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [label, setLabel] = useState(line.label);
+  const [amount, setAmount] = useState(String(line.amount));
+  useEffect(() => { setLabel(line.label); }, [line.label]);
+  useEffect(() => { setAmount(String(line.amount)); }, [line.amount]);
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="text"
+        value={label}
+        onChange={e => setLabel(e.target.value)}
+        onBlur={() => { if (label !== line.label) onUpdate(line.id, { label }); }}
+        className="flex-1 min-w-0 px-2 py-1 rounded border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+      />
+      <div className="relative">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">£</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+          onBlur={() => { if (amount !== String(line.amount)) onUpdate(line.id, { amount }); }}
+          className="w-20 pl-5 pr-1 py-1 rounded border border-slate-200 text-xs text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+        />
+      </div>
+      <button type="button" onClick={() => onDelete(line.id)} title="Remove" className="p-1 text-slate-300 hover:text-red-500">
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// ── Schedule marker card (Jobs view, additional move day) ─────────────────────
+// An additional move day (packing, pre-load, delivery, …). Crew is assigned on
+// the Staff view, so it's read-only here; expanding shows the day's crew plus a
+// wages/expenses panel that rolls into the main job. The main move date owns
+// income and the overall P&L.
+
+function ScheduleMarkerCard({
+  item, isExpanded, onToggle, navigate, allAssets,
+}: {
+  item: PlannerCalendarItem;
+  isExpanded: boolean;
+  onToggle: () => void;
+  navigate: (path: string) => void;
+  allAssets: PlannerAsset[];
+}) {
+  const color = item.effective_color || catColor(item.category).dot;
+  // item.title is "Label — Customer"; show the customer name as the subline.
+  const customer = item.title.includes('—') ? item.title.split('—').slice(1).join('—').trim() : item.title;
+  const crew = (item.assignments || []).filter(a => a.asset_type === 'staff');
+  const allVehicles = allAssets.filter(a => a.type === 'vehicle');
+
+  return (
+    <div className="group relative rounded-xl border border-dashed border-slate-300 bg-white/70 overflow-hidden shadow-[0_1px_2px_0_rgba(15,23,42,0.04)]">
+      <div
+        className="absolute top-0 left-0 right-0 h-[6px]"
+        style={{ background: `linear-gradient(90deg, ${color}, ${color}cc 60%, ${color}55)` }}
+      />
+      {/* Header — click to expand */}
+      <button onClick={onToggle} className="w-full text-left px-3 pt-3 pb-2.5 flex items-start gap-2">
+        <span className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ring-2 ring-white" style={{ background: color }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-slate-900 truncate tracking-tight leading-snug">
+            {item.schedule_label || 'Extra day'}
+          </p>
+          <p className="text-[11px] text-slate-500 truncate">{customer}</p>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100/80 rounded-full px-1.5 py-0.5">
+              <CalendarDays className="w-2.5 h-2.5" />
+              {item.schedule_offset != null ? offsetLabel(item.schedule_offset) : 'Extra day'}
+            </span>
+            {crew.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100/80 rounded-full px-1.5 py-0.5 tabular-nums">
+                <Users className="w-2.5 h-2.5" />{crew.length}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="px-3 pb-3 space-y-3 border-t border-slate-100/80 bg-gradient-to-b from-slate-50/40 to-transparent">
+          {/* Crew (read-only — assign on Staff view) */}
+          <div className="pt-2.5">
+            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Users className="w-3 h-3 text-indigo-500" />Crew
+            </p>
+            {crew.length === 0 ? (
+              <p className="text-[10px] text-slate-400 italic">No crew yet — assign staff &amp; vehicles in the Staff tab.</p>
+            ) : (
+              <div className="space-y-1">
+                {crew.map(a => {
+                  const role = (a.assigned_role ?? a.asset_role) || '';
+                  const van = a.vehicle_asset_id != null ? allVehicles.find(v => v.id === a.vehicle_asset_id) : null;
+                  return (
+                    <div key={a.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200/70 text-xs">
+                      <Users className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                      <span className="font-medium text-slate-700 truncate flex-1 min-w-0">{a.asset_name}</span>
+                      {role && <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 flex-shrink-0">{role}</span>}
+                      {role === 'driver' && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-500 flex-shrink-0">
+                          <Truck className="w-3 h-3" />{van ? van.name : 'No van'}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Per-day wages + expenses */}
+          {item.schedule_id && item.date && (
+            <ScheduleDayPanel jobId={item.id} dayKey={item.schedule_id} date={item.date} />
+          )}
+
+          <button
+            onClick={() => navigate(`/admin/crm/${item.id}`)}
+            className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-indigo-300 hover:text-indigo-700 active:scale-95 transition-all"
+          >
+            Open job <ArrowUpRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Jobs view (weekly, read-only assignments) ─────────────────────────────────
+// Renamed from the old "Week" tab. Shows the week's jobs as cards with their
+// assigned crew/vehicles (read-only) and the P&L panel for adjusting expenses.
+// All staff/vehicle assignment lives in the Staff tab; there's no asset sidebar
+// and no drag-and-drop here.
+
+function JobsView({
   weekDates,
   items,
-  assets,
-  assignments,
   expandedKeys,
   setExpandedKeys,
-  draggingAsset,
-  setDraggingAsset,
-  draggingAssignment,
-  setDraggingAssignment,
-  draggingJobCard,
-  setDraggingJobCard,
-  dragOverZone,
-  setDragOverZone,
-  onDrop,
-  onReschedule,
-  onRemoveAssignment,
-  onUpdateAssignment,
-  onAddAsset,
-  onEditAsset,
-  onDeleteAsset,
-  onAssetsReordered,
   onAddQuickJob,
   onEditEvent,
   onDeleteEvent,
@@ -1082,33 +1019,11 @@ function WeeklyView({
   onItemColorChange,
   navigate,
   allAssets,
-  onAssign,
-  highlightAssetId,
-  highlightDate,
-  onHighlightConsumed,
 }: {
   weekDates: string[];
   items: PlannerCalendarItem[];
-  assets: PlannerAsset[];
-  assignments: PlannerAssignment[];
   expandedKeys: Set<string>;
   setExpandedKeys: React.Dispatch<React.SetStateAction<Set<string>>>;
-  draggingAsset: PlannerAsset | null;
-  setDraggingAsset: (a: PlannerAsset | null) => void;
-  draggingAssignment: PlannerAssignment | null;
-  setDraggingAssignment: (a: PlannerAssignment | null) => void;
-  draggingJobCard: PlannerCalendarItem | null;
-  setDraggingJobCard: (item: PlannerCalendarItem | null) => void;
-  dragOverZone: string | null;
-  setDragOverZone: (z: string | null) => void;
-  onDrop: (item: PlannerCalendarItem, zone: 'driver' | 'porter' | 'staff' | 'vehicle') => void;
-  onReschedule: (item: PlannerCalendarItem, newDate: string) => void;
-  onRemoveAssignment: (id: number) => void;
-  onUpdateAssignment: (id: number, data: { daily_rate?: number | null; vehicle_asset_id?: number | null }) => void;
-  onAddAsset: () => void;
-  onEditAsset: (a: PlannerAsset) => void;
-  onDeleteAsset: (a: PlannerAsset) => void;
-  onAssetsReordered: (ordered: PlannerAsset[]) => void;
   onAddQuickJob: (date: string) => void;
   onEditEvent: (item: PlannerCalendarItem) => void;
   onDeleteEvent: (item: PlannerCalendarItem) => void;
@@ -1117,206 +1032,36 @@ function WeeklyView({
   onItemColorChange: (item: PlannerCalendarItem, color: string | null) => void;
   navigate: (path: string) => void;
   allAssets: PlannerAsset[];
-  onAssign: (item: PlannerCalendarItem, asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') => void;
-  highlightAssetId: number | null;
-  highlightDate: string | null;
-  onHighlightConsumed: () => void;
 }) {
-  const isMobile = useIsMobile();
-
-  // Deep-link flash: when arriving from the Wages page with ?highlight=<assetId>,
-  // briefly pulse every chip belonging to that staff member so the user can see
-  // where they're assigned without scanning the grid by hand.
-  useEffect(() => {
-    if (highlightAssetId == null) return;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let touched: HTMLElement[] = [];
-    // Defer one frame so freshly-rendered chips are in the DOM.
-    const raf = requestAnimationFrame(() => {
-      // Narrow to the exact (staff, day) cell when a date is provided so we
-      // don't pulse every day this person worked.
-      const selector = highlightDate
-        ? `[data-asset-id="${highlightAssetId}"][data-assigned-date="${highlightDate}"]`
-        : `[data-asset-id="${highlightAssetId}"]`;
-      const targets = Array.from(document.querySelectorAll<HTMLElement>(selector));
-      if (targets.length === 0) {
-        onHighlightConsumed();
-        return;
-      }
-      touched = targets;
-      targets.forEach(el => {
-        el.classList.remove('planner-flash');
-        // Restart the animation by forcing reflow.
-        void el.offsetWidth;
-        el.classList.add('planner-flash');
-      });
-      targets[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // 3 pulses × 0.55s ≈ 1.7s — strip the class so re-triggers work.
-      timeoutId = setTimeout(() => {
-        targets.forEach(el => el.classList.remove('planner-flash'));
-        onHighlightConsumed();
-      }, 1900);
-    });
-    return () => {
-      cancelAnimationFrame(raf);
-      if (timeoutId) clearTimeout(timeoutId);
-      touched.forEach(el => el.classList.remove('planner-flash'));
-    };
-  }, [highlightAssetId, highlightDate, onHighlightConsumed]);
   const itemsByDate: Record<string, PlannerCalendarItem[]> = {};
   for (const item of items) {
     if (!item.date) continue;
     if (!itemsByDate[item.date]) itemsByDate[item.date] = [];
     itemsByDate[item.date].push(item);
   }
-
   const today = toISO(new Date());
-  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
-
-  // ── Within-day ordering (server-synced, localStorage-cached) ────────────
-  // Local cache paints instantly on load; the server copy is the source of
-  // truth across devices and overwrites the cache on mount.
-  const [dayOrders, setDayOrders] = useState<Record<string, string[]>>(() => {
-    try { return JSON.parse(localStorage.getItem('planner-day-orders') || '{}'); }
-    catch { return {}; }
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await api.get('/settings/planner-day-orders');
-        if (cancelled) return;
-        if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
-          localStorage.setItem('planner-day-orders', JSON.stringify(r.data));
-          setDayOrders(r.data as Record<string, string[]>);
-        }
-      } catch { /* offline — use cache */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const dayOrdersSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  function saveDayOrders(next: Record<string, string[]>) {
-    setDayOrders(next);
-    localStorage.setItem('planner-day-orders', JSON.stringify(next));
-    if (dayOrdersSyncRef.current) clearTimeout(dayOrdersSyncRef.current);
-    dayOrdersSyncRef.current = setTimeout(() => {
-      api.put('/settings/planner-day-orders', next).catch(() => {});
-    }, 500);
-  }
-
-  function getSortedItems(date: string, raw: PlannerCalendarItem[]): PlannerCalendarItem[] {
-    const order = dayOrders[date];
-    if (!order?.length) return raw;
-    const map = new Map(raw.map(i => [`${i.source}-${i.id}`, i]));
-    const sorted: PlannerCalendarItem[] = [];
-    for (const k of order) { const i = map.get(k); if (i) { sorted.push(i); map.delete(k); } }
-    for (const i of map.values()) sorted.push(i); // items not yet in stored order
-    return sorted;
-  }
-
-  // [gapOverKey] = "date|index" e.g. "2025-04-14|2"
-  const [gapOverKey, setGapOverKey] = useState<string | null>(null);
-
-  function handleGapDrop(targetDate: string, targetIndex: number) {
-    const item = draggingJobCard;
-    if (!item) return;
-    setDraggingJobCard(null);
-    setDragOverDate(null);
-    setGapOverKey(null);
-
-    const itemKey = `${item.source}-${item.id}`;
-    const isDifferentDate = targetDate !== item.date;
-
-    // Build new order for target date (insert at targetIndex)
-    const targetRaw = itemsByDate[targetDate] || [];
-    const targetSorted = getSortedItems(targetDate, targetRaw).map(i => `${i.source}-${i.id}`).filter(k => k !== itemKey);
-    targetSorted.splice(targetIndex, 0, itemKey);
-
-    // Build new order for source date (remove item)
-    const sourceRaw = itemsByDate[item.date] || [];
-    const sourceSorted = getSortedItems(item.date, sourceRaw).map(i => `${i.source}-${i.id}`).filter(k => k !== itemKey);
-
-    const updatedOrders = { ...dayOrders, [targetDate]: targetSorted };
-    if (isDifferentDate) updatedOrders[item.date] = sourceSorted;
-    saveDayOrders(updatedOrders);
-
-    if (isDifferentDate) onReschedule(item, targetDate);
-  }
+  const noop = () => {};
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      {!isMobile && (
-        <AssetPanel
-          assets={assets}
-          assignments={assignments}
-          draggingAsset={draggingAsset}
-          draggingAssignment={draggingAssignment}
-          onJobDragStart={setDraggingAsset}
-          onJobDragEnd={() => setDraggingAsset(null)}
-          onAddAsset={onAddAsset}
-          onEditAsset={onEditAsset}
-          onDeleteAsset={onDeleteAsset}
-          onAssetsReordered={onAssetsReordered}
-        />
-      )}
-
-      {/* Day columns */}
       <div className="flex-1 overflow-x-auto">
         <div className="flex min-w-[700px] h-full">
           {weekDates.map(date => {
-            const rawItems = itemsByDate[date] || [];
-            const dayItems = getSortedItems(date, rawItems);
+            const dayItems = itemsByDate[date] || [];
             const isToday = date === today;
-            const isDraggingHere = !!draggingJobCard && dragOverDate === date && !gapOverKey;
             const [, , day] = date.split('-');
             const dayName = new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short' });
-
-            // Gap line rendered between items (and before first / after last) when job card is being dragged
-            const Gap = ({ index }: { index: number }) => {
-              const key = `${date}|${index}`;
-              const isOver = gapOverKey === key;
-              return (
-                <div
-                  data-drop-gap={key}
-                  className="relative py-1 -my-0.5 z-10"
-                  onDragOver={e => { if (!draggingJobCard) return; e.preventDefault(); e.stopPropagation(); setGapOverKey(key); setDragOverDate(date); }}
-                  onDragLeave={() => { if (gapOverKey === key) setGapOverKey(null); }}
-                  onDrop={e => { e.preventDefault(); e.stopPropagation(); handleGapDrop(date, index); }}
-                >
-                  <div className={`h-0.5 rounded-full mx-1 transition-all ${isOver ? 'bg-indigo-400 scale-y-150' : 'bg-transparent'}`} />
-                </div>
-              );
-            };
 
             return (
               <div
                 key={date}
-                data-drop-date={date}
-                className={`flex-1 border-r border-slate-200/70 flex flex-col transition-colors ${
-                  isDraggingHere
-                    ? 'bg-gradient-to-b from-indigo-50/80 to-indigo-50/30'
-                    : isToday
-                    ? 'bg-gradient-to-b from-indigo-50/40 to-transparent'
-                    : 'bg-white'
-                }`}
-                onDragOver={e => { if (!draggingJobCard) return; e.preventDefault(); setDragOverDate(date); }}
-                onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { setDragOverDate(null); setGapOverKey(null); } }}
-                onDrop={e => {
-                  // Fallback: drop on empty space → append at end
-                  if (!draggingJobCard || gapOverKey) return;
-                  e.preventDefault();
-                  handleGapDrop(date, dayItems.length);
-                }}
+                className={`flex-1 border-r border-slate-200/70 flex flex-col ${isToday ? 'bg-gradient-to-b from-indigo-50/40 to-transparent' : 'bg-white'}`}
               >
                 {/* Day header */}
-                <div className={`px-2 py-3 border-b border-slate-200/70 text-center transition-all ${
-                  isDraggingHere ? 'bg-indigo-100/60' : ''
-                }`}>
+                <div className="px-2 py-3 border-b border-slate-200/70 text-center">
                   <p className={`text-[10px] font-bold uppercase tracking-widest ${isToday ? 'text-indigo-600' : 'text-slate-500'}`}>{dayName}</p>
                   <div className="flex justify-center mt-1">
-                    {isToday || isDraggingHere ? (
+                    {isToday ? (
                       <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(79,70,229,0.45)] ring-2 ring-white">
                         <span className="text-base font-bold tabular-nums">{parseInt(day, 10)}</span>
                       </div>
@@ -1324,13 +1069,11 @@ function WeeklyView({
                       <span className="text-lg font-bold text-slate-800 tabular-nums leading-none py-1.5">{parseInt(day, 10)}</span>
                     )}
                   </div>
-                  {isDraggingHere && <p className="text-[10px] text-indigo-600 font-semibold mt-1">Drop to move here</p>}
                 </div>
 
                 {/* Items */}
                 <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
-                  {/* Empty column */}
-                  {dayItems.length === 0 && !draggingJobCard && (
+                  {dayItems.length === 0 && (
                     <button
                       onClick={() => onAddQuickJob(date)}
                       className="w-full flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-gradient-to-br hover:from-indigo-50/60 hover:to-transparent text-slate-300 hover:text-indigo-500 transition-all py-6 group"
@@ -1339,59 +1082,65 @@ function WeeklyView({
                       <span className="text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">Add job</span>
                     </button>
                   )}
-                  {dayItems.length === 0 && draggingJobCard && (
-                    <Gap index={0} />
-                  )}
 
-                  {/* Gap before first item */}
-                  {dayItems.length > 0 && draggingJobCard && <Gap index={0} />}
-
-                  {dayItems.map((item, idx) => {
-                    const key = `${item.source}-${item.id}-${date}`;
-                    const isExpanded = expandedKeys.has(key);
-                    const hasActiveDrag = !!(draggingAsset || draggingAssignment);
-                    const isBeingDragged = draggingJobCard?.source === item.source && draggingJobCard?.id === item.id;
-                    return (
-                      <div key={key} className={isBeingDragged ? 'opacity-40' : ''}>
-                        <JobCard
-                          cardKey={key}
+                  {dayItems.map(item => {
+                    if (item.is_extra_day) {
+                      const mKey = `sched-${item.id}-${item.schedule_id}-${date}`;
+                      return (
+                        <ScheduleMarkerCard
+                          key={mKey}
                           item={item}
-                          isExpanded={isExpanded}
+                          isExpanded={expandedKeys.has(mKey)}
                           onToggle={() => setExpandedKeys(prev => {
                             const next = new Set(prev);
-                            if (next.has(key)) next.delete(key); else next.add(key);
+                            if (next.has(mKey)) next.delete(mKey); else next.add(mKey);
                             return next;
                           })}
-                          dragOverZone={(isExpanded || hasActiveDrag) ? dragOverZone : null}
-                          onDragOver={zone => { setDragOverZone(`${key}|${zone}`); }}
-                          onDragLeave={() => setDragOverZone(null)}
-                          onDropStaff={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'staff'); setDragOverZone(null); }}
-                          onDropDriver={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'driver'); setDragOverZone(null); }}
-                          onDropPorter={() => { if (draggingAsset || draggingAssignment) onDrop(item, 'porter'); setDragOverZone(null); }}
-                          onRemoveAssignment={onRemoveAssignment}
-                          onAssignmentDragStart={setDraggingAssignment}
-                          onAssignmentDragEnd={() => setDraggingAssignment(null)}
-                          onUpdateAssignment={onUpdateAssignment}
-                          hasActiveDrag={hasActiveDrag}
-                          onCardDragStart={() => setDraggingJobCard(item)}
-                          onCardDragEnd={() => { setDraggingJobCard(null); setDragOverDate(null); setGapOverKey(null); }}
-                          onEditEvent={item.source === 'event' ? () => onEditEvent(item) : undefined}
-                          onDeleteEvent={item.source === 'event' ? () => onDeleteEvent(item) : undefined}
-                          onDuplicate={() => onDuplicate(item)}
-                          onConvertToJob={item.source === 'event' && item.category === 'Survey' ? () => onConvertToJob(item) : undefined}
-                          onItemColorChange={color => onItemColorChange(item, color)}
                           navigate={navigate}
                           allAssets={allAssets}
-                          onAssign={(asset, zone) => onAssign(item, asset, zone)}
                         />
-                        {/* Gap after each item */}
-                        {draggingJobCard && <Gap index={idx + 1} />}
-                      </div>
+                      );
+                    }
+                    const key = `${item.source}-${item.id}-${date}`;
+                    const isExpanded = expandedKeys.has(key);
+                    return (
+                      <JobCard
+                        key={key}
+                        cardKey={key}
+                        item={item}
+                        isExpanded={isExpanded}
+                        onToggle={() => setExpandedKeys(prev => {
+                          const next = new Set(prev);
+                          if (next.has(key)) next.delete(key); else next.add(key);
+                          return next;
+                        })}
+                        dragOverZone={null}
+                        onDragOver={noop}
+                        onDragLeave={noop}
+                        onDropStaff={noop}
+                        onDropDriver={noop}
+                        onDropPorter={noop}
+                        onRemoveAssignment={noop}
+                        onAssignmentDragStart={noop}
+                        onAssignmentDragEnd={noop}
+                        onUpdateAssignment={noop}
+                        hasActiveDrag={false}
+                        onCardDragStart={noop}
+                        onCardDragEnd={noop}
+                        onEditEvent={item.source === 'event' ? () => onEditEvent(item) : undefined}
+                        onDeleteEvent={item.source === 'event' ? () => onDeleteEvent(item) : undefined}
+                        onDuplicate={() => onDuplicate(item)}
+                        onConvertToJob={item.source === 'event' && item.category === 'Survey' ? () => onConvertToJob(item) : undefined}
+                        onItemColorChange={color => onItemColorChange(item, color)}
+                        navigate={navigate}
+                        allAssets={allAssets}
+                        onAssign={noop}
+                        readOnly
+                      />
                     );
                   })}
 
-                  {/* Add button (shown when not dragging, only for days with items — empty days have their own above) */}
-                  {!draggingJobCard && dayItems.length > 0 && (
+                  {dayItems.length > 0 && (
                     <button
                       onClick={() => onAddQuickJob(date)}
                       className="w-full flex items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-gradient-to-br hover:from-indigo-50/60 hover:to-transparent text-slate-300 hover:text-indigo-500 transition-all py-2 group"
@@ -1576,181 +1325,6 @@ function QuickJobModal({
   );
 }
 
-// ── Asset form ────────────────────────────────────────────────────────────────
-
-const EMPTY_ASSET = {
-  type: 'staff' as 'staff' | 'vehicle',
-  name: '', role: 'driver', phone: '',
-  make_model: '', registration: '', capacity_notes: '',
-  is_lorry: false,
-  availability: 'available', notes: '',
-};
-
-function AssetFormModal({
-  open, onClose, initial, defaultType, onSaved,
-}: {
-  open: boolean;
-  onClose: () => void;
-  initial: PlannerAsset | null;
-  defaultType?: 'staff' | 'vehicle';
-  onSaved: (a: PlannerAsset) => void;
-}) {
-  const [form, setForm] = useState({ ...EMPTY_ASSET });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (open) {
-      if (initial) {
-        setForm({
-          type: initial.type,
-          name: initial.name,
-          role: initial.role || 'driver',
-          phone: initial.phone || '',
-          make_model: initial.make_model || '',
-          registration: initial.registration || '',
-          capacity_notes: initial.capacity_notes || '',
-          is_lorry: !!initial.is_lorry,
-          availability: initial.availability,
-          notes: initial.notes || '',
-        });
-      } else {
-        setForm({ ...EMPTY_ASSET, type: defaultType || 'staff' });
-      }
-      setError('');
-    }
-  }, [open, initial, defaultType]);
-
-  // Generic typed setter — supports string and boolean fields on the form.
-  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
-    setForm(p => ({ ...p, [k]: v }));
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.name.trim()) { setError('Name is required'); return; }
-    setSaving(true); setError('');
-    try {
-      const payload = {
-        type: form.type,
-        name: form.name.trim(),
-        role: form.type === 'staff' ? form.role : null,
-        phone: form.type === 'staff' ? (form.phone || null) : null,
-        make_model: form.type === 'vehicle' ? (form.make_model || null) : null,
-        registration: form.type === 'vehicle' ? (form.registration || null) : null,
-        capacity_notes: form.type === 'vehicle' ? (form.capacity_notes || null) : null,
-        is_lorry: form.type === 'vehicle' ? !!form.is_lorry : false,
-        availability: form.availability,
-        notes: form.notes || null,
-      };
-      const r = initial
-        ? await api.put(`/planner/assets/${initial.id}`, payload)
-        : await api.post('/planner/assets', payload);
-      onSaved(r.data);
-      onClose();
-    } catch {
-      setError('Failed to save. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title={initial ? 'Edit Asset' : 'Add Asset'} size="md">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {error && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-
-        {/* Type toggle */}
-        {!initial && (
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {(['staff', 'vehicle'] as const).map(t => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => set('type', t)}
-                className={`flex-1 py-2 text-sm font-medium flex items-center justify-center gap-1.5 transition-colors ${
-                  form.type === t ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {t === 'staff' ? <Users className="w-4 h-4" /> : <Truck className="w-4 h-4" />}
-                {t === 'staff' ? 'Staff' : 'Vehicle'}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">{form.type === 'staff' ? 'Full name' : 'Nickname'} *</label>
-            <input className="input" placeholder={form.type === 'staff' ? 'e.g. Mark Johnson' : 'e.g. Big Van'} value={form.name} onChange={e => set('name', e.target.value)} required />
-          </div>
-
-          {form.type === 'staff' && (
-            <>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Role</label>
-                <select className="input" value={form.role} onChange={e => set('role', e.target.value)}>
-                  <option value="driver">Driver</option>
-                  <option value="porter">Porter</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Phone (optional)</label>
-                <input className="input" placeholder="07700 900000" value={form.phone} onChange={e => set('phone', e.target.value)} />
-              </div>
-            </>
-          )}
-
-          {form.type === 'vehicle' && (
-            <>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Make & Model</label>
-                <input className="input" placeholder="e.g. Renault Master" value={form.make_model} onChange={e => set('make_model', e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Registration</label>
-                <input className="input" placeholder="e.g. AB12 CDE" value={form.registration} onChange={e => set('registration', e.target.value)} />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-medium text-slate-600 mb-1">Capacity / Notes</label>
-                <input className="input" placeholder="e.g. Long-wheelbase, 15 cubic metres" value={form.capacity_notes} onChange={e => set('capacity_notes', e.target.value)} />
-              </div>
-              <div className="col-span-2">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={form.is_lorry}
-                    onChange={e => set('is_lorry', e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-300"
-                  />
-                  <span>HGV / lorry — driver assigned to this vehicle earns the lorry driving bonus</span>
-                </label>
-              </div>
-            </>
-          )}
-
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Availability</label>
-            <select className="input" value={form.availability} onChange={e => set('availability', e.target.value)}>
-              <option value="available">Available</option>
-              <option value="unavailable">Unavailable</option>
-            </select>
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Notes (optional)</label>
-            <textarea className="input resize-none" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</> : <><Save className="w-4 h-4" /> Save</>}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 // ── Item detail modal (monthly view item click) ───────────────────────────────
 
 function ItemDetailModal({
@@ -1776,6 +1350,15 @@ function ItemDetailModal({
         {item.source === 'job' && (
           <button
             onClick={() => { navigate(`/admin/crm/${item.id}`); onClose(); }}
+            className="btn-primary w-full justify-center text-sm"
+          >
+            Open job record →
+          </button>
+        )}
+        {/* Survey booked from a job profile → straight to that job. */}
+        {item.source === 'event' && item.survey_job_id && (
+          <button
+            onClick={() => { navigate(`/admin/crm/${item.survey_job_id}`); onClose(); }}
             className="btn-primary w-full justify-center text-sm"
           >
             Open job record →
@@ -1822,7 +1405,6 @@ export default function CRMPlanner() {
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [items,       setItems]       = useState<PlannerCalendarItem[]>([]);
   const [assets,      setAssets]      = useState<PlannerAsset[]>([]);
-  const [assignments, setAssignments] = useState<PlannerAssignment[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [weekDates,   setWeekDates]   = useState<string[]>([]);
 
@@ -1838,16 +1420,7 @@ export default function CRMPlanner() {
   // and the contractor's weekly invoice (same flow as the Contract Jobs page).
   const [contractJobTarget, setContractJobTarget] = useState<Contract | null>(null);
   const [contractJobDate,   setContractJobDate]   = useState('');
-  const [showAssetForm, setShowAssetForm] = useState(false);
-  const [editAsset,     setEditAsset]     = useState<PlannerAsset | null>(null);
-  const [assetInitType, setAssetInitType] = useState<'staff' | 'vehicle'>('staff');
   const [modalItem,     setModalItem]     = useState<PlannerCalendarItem | null>(null);
-
-  // DnD
-  const [draggingAsset,       setDraggingAsset]       = useState<PlannerAsset | null>(null);
-  const [draggingAssignment,  setDraggingAssignment]  = useState<PlannerAssignment | null>(null);
-  const [draggingJobCard,     setDraggingJobCard]     = useState<PlannerCalendarItem | null>(null);
-  const [dragOverZone,        setDragOverZone]        = useState<string | null>(null);
 
   // Expanded card in weekly view
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
@@ -1879,7 +1452,6 @@ export default function CRMPlanner() {
         const m = currentDate.getMonth() + 1;
         const r = await api.get(`/planner/calendar?year=${y}&month=${m}`);
         setItems(r.data);
-        setAssignments([]);
         setWeekDates([]);
       } else if (view === 'week') {
         const ws = getWeekStart(currentDate);
@@ -1887,9 +1459,6 @@ export default function CRMPlanner() {
         const r = await api.get(`/planner/week?start=${start}`);
         setWeekDates(r.data.dates);
         setItems(r.data.items);
-        // Flatten all assignments for asset panel "busy" indicator
-        const allA: PlannerAssignment[] = r.data.items.flatMap((i: PlannerCalendarItem) => i.assignments || []);
-        setAssignments(allA);
         // Expand all job cards by default
         const allKeys = new Set<string>(
           r.data.items.map((i: PlannerCalendarItem) => `${i.source}-${i.id}-${i.date}`)
@@ -1897,7 +1466,7 @@ export default function CRMPlanner() {
         setExpandedKeys(allKeys);
       } else {
         // staff view — child fetches its own data from /planner/staff-week
-        setItems([]); setAssignments([]); setWeekDates([]);
+        setItems([]); setWeekDates([]);
       }
     } catch {
       showToast('Failed to load planner data', 'error');
@@ -1956,188 +1525,6 @@ export default function CRMPlanner() {
     return `Week of ${fmtDate(toISO(ws))}`;
   }
 
-  // ── Drag-and-drop handler ─────────────────────────────────────────────────
-
-  async function handleDrop(item: PlannerCalendarItem, zone: 'driver' | 'porter' | 'staff' | 'vehicle') {
-    const assignedDate = item.date;
-    if (!assignedDate) return;
-
-    const targetAssetType = zone === 'vehicle' ? 'vehicle' : 'staff';
-    const defaultRate =
-      zone === 'driver' ? 150 :
-      zone === 'porter' ? 125 :
-      zone === 'staff'  ? (draggingAsset?.role === 'driver' ? 150 : draggingAsset?.role === 'porter' ? 125 : null) :
-      null;
-
-    // ── Moving an existing assignment chip between jobs ─────────────────────
-    if (draggingAssignment) {
-      if (draggingAssignment.asset_type !== targetAssetType) {
-        showToast(`${draggingAssignment.asset_name} is a ${draggingAssignment.asset_type} — drop into the correct zone`, 'warning');
-        return;
-      }
-      const isSameTarget =
-        (item.source === 'job'   && draggingAssignment.job_id   === item.id) ||
-        (item.source === 'event' && draggingAssignment.event_id === item.id);
-
-      // Dropped back onto the same job — only meaningful if the role zone changed.
-      if (isSameTarget) {
-        if (zone !== 'driver' && zone !== 'porter') return;
-        const currentRole = draggingAssignment.assigned_role ?? draggingAssignment.asset_role;
-        if (currentRole === zone) return;
-
-        // Default rate for the new role; preserve custom rates (anything other than
-        // a recognised default like null/125/150/180).
-        const cur = draggingAssignment.daily_rate;
-        const isDefaultRate = cur == null || cur === 125 || cur === 150 || cur === 180;
-        const newRate = isDefaultRate ? (zone === 'driver' ? 150 : 125) : cur;
-
-        const patch: Record<string, unknown> = {
-          assigned_role: zone,
-          daily_rate: newRate,
-        };
-        // Porters can't drive — drop any attached vehicle when switching to porter.
-        if (zone === 'porter' && draggingAssignment.vehicle_asset_id != null) {
-          patch.vehicle_asset_id = null;
-        }
-
-        try {
-          await api.patch(`/planner/assignments/${draggingAssignment.id}`, patch);
-          showToast(`${draggingAssignment.asset_name} is now a ${zone}`, 'success');
-          await loadData();
-        } catch {
-          showToast('Failed to change role', 'error');
-        }
-        return;
-      }
-
-      try {
-        // Cross-job move: preserve role unless the destination zone is explicitly
-        // a different role (driver↔porter), in which case adopt the new role and
-        // bump the rate to its default when the current rate is one of the defaults.
-        let newRole = draggingAssignment.assigned_role ?? null;
-        let newRate: number | null = draggingAssignment.daily_rate ?? null;
-        if (zone === 'driver' || zone === 'porter') {
-          const currentRole = draggingAssignment.assigned_role ?? draggingAssignment.asset_role;
-          if (currentRole !== zone) {
-            newRole = zone;
-            const isDefaultRate = newRate == null || newRate === 125 || newRate === 150 || newRate === 180;
-            if (isDefaultRate) newRate = zone === 'driver' ? 150 : 125;
-          }
-        }
-
-        const payload: Record<string, unknown> = {
-          asset_id: draggingAssignment.asset_id,
-          assigned_date: assignedDate,
-          assigned_role: newRole,
-          daily_rate: newRate,
-        };
-        if (item.source === 'job')   payload.job_id   = item.id;
-        if (item.source === 'event') payload.event_id = item.id;
-
-        await api.post('/planner/assignments', payload);
-        await api.delete(`/planner/assignments/${draggingAssignment.id}`);
-        showToast(`${draggingAssignment.asset_name} moved to ${item.title}`, 'success');
-        await loadData();
-      } catch (err: unknown) {
-        const status = (err as { response?: { status: number } })?.response?.status;
-        if (status === 409) {
-          showToast(`${draggingAssignment.asset_name} is already assigned to this job`, 'warning');
-        } else {
-          showToast('Failed to move assignment', 'error');
-        }
-      }
-      return;
-    }
-
-    // ── Assigning a new asset from the panel ────────────────────────────────
-    if (!draggingAsset) return;
-    if (draggingAsset.type !== targetAssetType) {
-      showToast(`${draggingAsset.name} is a ${draggingAsset.type} — drop into the correct zone`, 'warning');
-      return;
-    }
-
-    try {
-      const assignedRole =
-        zone === 'driver' ? 'driver' :
-        zone === 'porter' ? 'porter' :
-        zone === 'staff'  ? (draggingAsset.role || null) :
-        null;
-
-      const payload: Record<string, unknown> = {
-        asset_id: draggingAsset.id,
-        assigned_date: assignedDate,
-        assigned_role: assignedRole,
-        daily_rate: defaultRate,
-      };
-      if (item.source === 'job')   payload.job_id   = item.id;
-      if (item.source === 'event') payload.event_id = item.id;
-
-      const r = await api.post('/planner/assignments', payload);
-      if (r.data.conflict) {
-        showToast(`${draggingAsset.name} is already assigned on another job this day`, 'warning');
-      } else {
-        showToast(`${draggingAsset.name} assigned to ${item.title}`, 'success');
-      }
-      await loadData();
-    } catch (err: unknown) {
-      const status = (err as { response?: { status: number } })?.response?.status;
-      if (status === 409) {
-        showToast(`${draggingAsset.name} is already assigned to this job`, 'warning');
-      } else {
-        showToast('Failed to assign asset', 'error');
-      }
-    }
-  }
-
-  async function handleAssign(item: PlannerCalendarItem, asset: PlannerAsset, zone: 'driver' | 'porter' | 'vehicle') {
-    const assignedDate = item.date;
-    if (!assignedDate) return;
-    const defaultRate = zone === 'driver' ? 150 : zone === 'porter' ? 125 : null;
-    try {
-      const payload: Record<string, unknown> = {
-        asset_id: asset.id,
-        assigned_date: assignedDate,
-        assigned_role: zone === 'vehicle' ? null : zone,
-        daily_rate: defaultRate,
-      };
-      if (item.source === 'job')   payload.job_id   = item.id;
-      if (item.source === 'event') payload.event_id = item.id;
-      const r = await api.post('/planner/assignments', payload);
-      if (r.data.conflict) {
-        showToast(`${asset.name} is already assigned on another job this day`, 'warning');
-      } else {
-        showToast(`${asset.name} assigned to ${item.title}`, 'success');
-      }
-      await loadData();
-    } catch (err: unknown) {
-      const status = (err as { response?: { status: number } })?.response?.status;
-      if (status === 409) {
-        showToast(`${asset.name} is already assigned to this job`, 'warning');
-      } else {
-        showToast('Failed to assign', 'error');
-      }
-    }
-  }
-
-  async function handleUpdateAssignment(id: number, data: { daily_rate?: number | null; vehicle_asset_id?: number | null }) {
-    try {
-      await api.patch(`/planner/assignments/${id}`, data);
-      await loadData();
-    } catch {
-      showToast('Failed to update assignment', 'error');
-    }
-  }
-
-  async function handleRemoveAssignment(id: number) {
-    try {
-      await api.delete(`/planner/assignments/${id}`);
-      showToast('Assignment removed', 'success');
-      await loadData();
-    } catch {
-      showToast('Failed to remove assignment', 'error');
-    }
-  }
-
   // Persist the per-card color override. `color === null` clears it so the
   // card falls back to contract / category color.
   async function handleUpdateItemColor(item: PlannerCalendarItem, color: string | null) {
@@ -2146,29 +1533,6 @@ export default function CRMPlanner() {
       await loadData();
     } catch {
       showToast('Failed to update color', 'error');
-    }
-  }
-
-  // ── Asset CRUD ────────────────────────────────────────────────────────────
-
-  function openAddAsset() {
-    setEditAsset(null);
-    setAssetInitType('staff');
-    setShowAssetForm(true);
-  }
-  function openEditAsset(a: PlannerAsset) {
-    setEditAsset(a);
-    setShowAssetForm(true);
-  }
-
-  async function handleReschedule(item: PlannerCalendarItem, newDate: string) {
-    if (item.date === newDate) return;
-    try {
-      await api.patch('/planner/reschedule', { source: item.source, id: item.id, date: newDate });
-      showToast(`Moved to ${new Date(newDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, 'success');
-      await loadData();
-    } catch {
-      showToast('Failed to reschedule', 'error');
     }
   }
 
@@ -2206,9 +1570,13 @@ export default function CRMPlanner() {
         survey_required: true,
         survey_type: 'In Person',
         survey_date: item.date,
+        survey_time: item.time || null,
         client_notes: item.notes || null,
         status: 'Survey Physical',
       });
+      // Creating the job auto-makes a survey event linked to it, so remove the
+      // original standalone survey to avoid a duplicate booking on the same day.
+      try { await api.delete(`/planner/events/${item.id}`); } catch { /* already gone */ }
       showToast(`CRM job created for "${fullName}"`, 'success');
       navigate(`/admin/crm/${r.data.id}`);
     } catch {
@@ -2227,31 +1595,32 @@ export default function CRMPlanner() {
     }
   }
 
-  async function handleDeleteAsset(a: PlannerAsset) {
-    if (!window.confirm(`Delete "${a.name}"? All assignments will also be removed.`)) return;
+  // Open a job's profile/form from the Staff view tray card:
+  //   - removal job (CrmJob)   → its CRM detail page
+  //   - contract job (event w/ contract) → that contractor's page
+  //   - quick job (plain event) → the quick-job edit modal (fetched for full data)
+  async function handleOpenStaffJob(
+    job: { source: 'job' | 'event'; id: number; contract_id?: number | null; survey_job_id?: number | null },
+    date: string,
+  ) {
+    if (job.source === 'job') { navigate(`/admin/crm/${job.id}`); return; }
+    if (job.survey_job_id) { navigate(`/admin/crm/${job.survey_job_id}`); return; } // survey → its job
+    if (job.contract_id) { navigate(`/admin/crm/contract-jobs/${job.contract_id}`); return; }
     try {
-      await api.delete(`/planner/assets/${a.id}`);
-      showToast(`${a.name} deleted`, 'success');
-      await loadAssets();
-      await loadData();
+      const r = await api.get('/planner/events', { params: { start: date, end: date } });
+      const ev = (r.data || []).find((e: { id: number }) => e.id === job.id);
+      if (!ev) { showToast('Job not found', 'error'); return; }
+      setEditEvent({
+        source: 'event', id: ev.id, title: ev.title, category: ev.category,
+        date: String(ev.event_date).slice(0, 10), time: ev.event_time || undefined,
+        customer_name: ev.customer_name || undefined, phone: ev.contact_number || undefined,
+        address: ev.address || undefined, notes: ev.notes || undefined,
+        contract_id: ev.contract_id ?? null,
+      });
+      setQuickJobDate(date);
+      setShowQuickJob(true);
     } catch {
-      showToast('Failed to delete asset', 'error');
-    }
-  }
-
-  function handleAssetSaved(a: PlannerAsset) {
-    showToast(editAsset ? `${a.name} updated` : `${a.name} added`, 'success');
-    loadAssets();
-  }
-
-  async function handleAssetsReordered(ordered: PlannerAsset[]) {
-    // Optimistic update already applied in AssetPanel — just persist
-    setAssets(ordered);
-    try {
-      await api.put('/planner/assets/reorder', ordered.map(a => ({ id: a.id, sort_order: a.sort_order })));
-    } catch {
-      showToast('Failed to save order', 'error');
-      loadAssets(); // revert on failure
+      showToast('Failed to open job', 'error');
     }
   }
 
@@ -2297,13 +1666,14 @@ export default function CRMPlanner() {
             <button
               onClick={() => switchToWeek()}
               className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === 'week' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              title="Weekly job cards — view jobs, assigned crew, and adjust profit & expenses"
             >
-              Week
+              Jobs
             </button>
             <button
               onClick={() => { setView('staff'); setExpandedKeys(new Set()); }}
               className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === 'staff' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-              title="Per-staff weekly grid — see who works where, who's free, who's off"
+              title="Per-staff weekly grid — assign crew & vehicles, set wages, mark days off"
             >
               Staff
             </button>
@@ -2342,32 +1712,15 @@ export default function CRMPlanner() {
             highlightDate={highlightDate}
             onHighlightConsumed={() => { setHighlightAssetId(null); setHighlightDate(null); }}
             onAddJob={date => { setEditEvent(null); setQuickJobDate(date); setShowQuickJob(true); }}
+            onOpenJob={handleOpenStaffJob}
             reloadKey={staffReloadKey}
           />
         ) : (
-          <WeeklyView
+          <JobsView
             weekDates={weekDates}
             items={items}
-            assets={assets}
-            assignments={assignments}
             expandedKeys={expandedKeys}
             setExpandedKeys={setExpandedKeys}
-            draggingAsset={draggingAsset}
-            setDraggingAsset={setDraggingAsset}
-            draggingAssignment={draggingAssignment}
-            setDraggingAssignment={setDraggingAssignment}
-            draggingJobCard={draggingJobCard}
-            setDraggingJobCard={setDraggingJobCard}
-            dragOverZone={dragOverZone}
-            setDragOverZone={setDragOverZone}
-            onDrop={handleDrop}
-            onReschedule={handleReschedule}
-            onRemoveAssignment={handleRemoveAssignment}
-            onUpdateAssignment={handleUpdateAssignment}
-            onAddAsset={openAddAsset}
-            onEditAsset={openEditAsset}
-            onDeleteAsset={handleDeleteAsset}
-            onAssetsReordered={handleAssetsReordered}
             onAddQuickJob={date => { setEditEvent(null); setQuickJobDate(date); setShowQuickJob(true); }}
             onEditEvent={item => { setEditEvent(item); setShowQuickJob(true); }}
             onDeleteEvent={handleDeleteEvent}
@@ -2376,10 +1729,6 @@ export default function CRMPlanner() {
             onItemColorChange={handleUpdateItemColor}
             navigate={navigate}
             allAssets={assets}
-            onAssign={handleAssign}
-            highlightAssetId={highlightAssetId}
-            highlightDate={highlightDate}
-            onHighlightConsumed={() => { setHighlightAssetId(null); setHighlightDate(null); }}
           />
         )}
       </div>
@@ -2414,14 +1763,6 @@ export default function CRMPlanner() {
           }}
         />
       )}
-
-      <AssetFormModal
-        open={showAssetForm}
-        onClose={() => { setShowAssetForm(false); setEditAsset(null); }}
-        initial={editAsset}
-        defaultType={editAsset ? editAsset.type : assetInitType}
-        onSaved={handleAssetSaved}
-      />
 
       <ItemDetailModal
         item={modalItem}

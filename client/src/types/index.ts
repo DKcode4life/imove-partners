@@ -202,6 +202,16 @@ export interface CrmActivity {
   created_at: string;
 }
 
+// One additional move day (packing, pre-load, delivery, unpacking, …). `offset`
+// is signed days relative to the anchor move date (confirmed || preferred);
+// negative = before, positive = after. Real dates are derived on read so they
+// auto-shift when the confirmed move date changes.
+export interface MoveScheduleDay {
+  id: string;
+  label: string;
+  offset: number;
+}
+
 export interface CrmJob {
   id: number;
   lead_id: number | null;
@@ -235,6 +245,7 @@ export interface CrmJob {
   preferred_move_date: string | null;
   confirmed_move_date: string | null;
   flexibility_notes: string | null;
+  move_schedule: MoveScheduleDay[] | null;
   // Survey / Quote
   survey_required: boolean;
   survey_type: string | null;
@@ -445,11 +456,22 @@ export interface PlannerCalendarItem {
   notes?: string;
   contract_id?: number | null;
   contract_name?: string | null;
+  // For a Survey event created from a job profile: the linked CrmJob id, so any
+  // planner view can jump straight to that job. Null = standalone survey (e.g. a
+  // customer self-booked online) → offer "Convert to job" instead.
+  survey_job_id?: number | null;
   assignments?: PlannerAssignment[];
   // Server-resolved color: per-item override → contract → category → fallback.
   effective_color?: string;
   // Raw per-item override (hex or null). When null, the card inherits its color.
   planner_color?: string | null;
+  // Read-only additional move day (packing, delivery, …). When true this item is
+  // a derived marker for an extra day, not the main move; it shares the job's id
+  // and color but carries no independent crew assignments.
+  is_extra_day?: boolean;
+  schedule_id?: string;
+  schedule_label?: string;
+  schedule_offset?: number;
 }
 
 // Legacy fallback only. The live, editable list comes from
@@ -525,6 +547,20 @@ export interface JobLedgerLine {
   label: string;
   amount: number;
   sort_order: number;
+  // Day this line belongs to: null/'move' = main move day; otherwise a
+  // move_schedule day id (packing, delivery, …).
+  day_key?: string | null;
+}
+
+// Per-day P&L for an additional move day (GET /planner/pnl/day). Wages from that
+// day's crew + expense lines tagged to the day. No income — that's on the main job.
+export interface JobDayPnl {
+  job_id: number;
+  day_key: string;
+  date: string;
+  wages_total: number;
+  expense_lines: JobLedgerLine[];
+  expenses_total: number;
 }
 
 export interface JobPnl {

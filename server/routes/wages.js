@@ -6,6 +6,7 @@ const wrap = require('../lib/async-handler');
 const { computeAssignmentWage } = require('../lib/wage-calc');
 const pnlCalc = require('../lib/pnl-calc');
 const jobCats = require('../lib/job-categories');
+const { jobValidDates } = require('../lib/move-schedule');
 
 async function loadWageSettings() {
   const rows = await prisma.companySetting.findMany({
@@ -66,7 +67,7 @@ router.get('/week', wrap(async (req, res) => {
             driver_daily_rate: true, porter_daily_rate: true, lux_hourly_rate: true,
           },
         },
-        job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true } },
+        job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true, move_schedule: true } },
         event: { select: { event_date: true, event_time: true, contract: { select: { id: true, is_lux: true } } } },
       },
       orderBy: { assigned_date: 'asc' },
@@ -96,8 +97,9 @@ router.get('/week', wrap(async (req, res) => {
     if (a.job_id) {
       if (!a.job) continue; // cascade should have removed it; defensive
       if (a.job.status === 'Lost / Cancelled') continue;
-      const jobDate = String(a.job.confirmed_move_date || a.job.preferred_move_date || '').slice(0, 10);
-      if (jobDate !== a.assigned_date) continue;
+      // Valid on the move date OR any additional day (packing, delivery, …) so
+      // crew get paid for extra-day work. Orphans (date matches nothing) skip.
+      if (!jobValidDates(a.job).has(a.assigned_date)) continue;
     } else if (a.event_id) {
       if (!a.event) continue;
       if (String(a.event.event_date).slice(0, 10) !== a.assigned_date) continue;
@@ -242,7 +244,7 @@ router.get('/pnl', wrap(async (req, res) => {
         assigned_role: true, job_id: true, event_id: true,
         start_time: true, finish_time: true, vehicle_asset_id: true, wage_override: true,
         asset: { select: { id: true, role: true, driver_daily_rate: true, porter_daily_rate: true, lux_hourly_rate: true } },
-        job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true } },
+        job:   { select: { status: true, confirmed_move_date: true, preferred_move_date: true, move_schedule: true } },
         event: { select: { event_date: true, event_time: true, contract: { select: { id: true, is_lux: true } } } },
       },
     }),
@@ -278,8 +280,9 @@ router.get('/pnl', wrap(async (req, res) => {
   for (const a of assignments) {
     if (a.job_id) {
       if (!a.job || a.job.status === 'Lost / Cancelled') continue;
-      const d = String(a.job.confirmed_move_date || a.job.preferred_move_date || '').slice(0, 10);
-      if (d !== a.assigned_date) continue;
+      // Move date OR an additional day → fold into this job's wages (keyed by
+      // job_id, listed once at the move date). Extra days never get their own row.
+      if (!jobValidDates(a.job).has(a.assigned_date)) continue;
     } else if (a.event_id) {
       if (!a.event || String(a.event.event_date).slice(0, 10) !== a.assigned_date) continue;
     } else continue;

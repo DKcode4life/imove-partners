@@ -123,6 +123,12 @@ async function sendTemplated({ to, templateSlug, variables, subjectOverride, bod
 
   const result = await send({ to, subject, html, attachments });
 
+  // Surface the fully-rendered subject + body so callers can snapshot the exact
+  // content the customer received (used by SentDocument history). `result.subject`
+  // is already the rendered subject; `html` is the rendered body.
+  result.subject = subject;
+  result.html = html;
+
   // Log to EmailLog (only fields that actually exist in the schema)
   try {
     await prisma.emailLog.create({

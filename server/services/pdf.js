@@ -344,6 +344,40 @@ function drawDepositAdjustment(doc, y, depositPaid, total, balance) {
   return y + 42;
 }
 
+// Acceptance confirmation block — declared insurance value + when/how the
+// customer accepted online. Rendered on the quote-acceptance document only.
+function drawAcceptanceBlock(doc, y, data) {
+  if (y > 660) {
+    doc.addPage();
+    drawWatermark(doc);
+    y = 50;
+  }
+
+  const boxH = 92;
+  doc.fillColor(C.lightBg).rect(LEFT, y, CONTENT_W, boxH).fill();
+  doc.strokeColor(C.green).lineWidth(1.5).rect(LEFT, y, CONTENT_W, boxH).stroke();
+
+  doc.fillColor(C.dark).font(F.bold).fontSize(11)
+     .text('Acceptance Confirmation', LEFT + 14, y + 10);
+
+  const cells = [
+    ['Declared value of items', fmtMoney(data.declared_value)],
+    ['Accepted on',             fmtDate(data.accepted_date || new Date())],
+    ['Accepted by',             data.customer_name || '—'],
+    ['Method',                  'Online — terms agreed'],
+  ];
+  const cellW = CONTENT_W / 4;
+  cells.forEach(([label, value], i) => {
+    const x = LEFT + cellW * i;
+    doc.fillColor(C.gray).font(F.regular).fontSize(8)
+       .text(label.toUpperCase(), x + 14, y + 38, { width: cellW - 16 });
+    doc.fillColor(C.dark).font(F.bold).fontSize(11)
+       .text(value, x + 14, y + 54, { width: cellW - 16 });
+  });
+
+  return y + boxH + 14;
+}
+
 function drawReceiptBlock(doc, y, data) {
   // Green success block
   const boxH = 70;
@@ -650,6 +684,10 @@ const DOC_CONFIG = {
     headerWord: 'Quote',       docType: 'quote',   docLabel: 'Quote',
     stamp: null,                                   showBank: false,
   },
+  'quote-acceptance': {
+    headerWord: 'Acceptance',  docType: 'quote',   docLabel: 'Quote',
+    stamp: 'ACCEPTED',         stampColor: C.paid, showBank: false,
+  },
   'deposit-invoice': {
     headerWord: 'Invoice',     docType: 'invoice', docLabel: 'Invoice',
     stamp: null,                                   showBank: true,
@@ -733,6 +771,11 @@ async function renderDocument(data) {
       const balance = (Number(data.total) || 0) - (Number(data.deposit_paid) || 0);
       y = drawDepositAdjustment(doc, y, data.deposit_paid, data.total, balance);
     }
+
+    // Acceptance confirmation (quote-acceptance only)
+    if (mode === 'quote-acceptance') {
+      y = drawAcceptanceBlock(doc, y, data);
+    }
   } else {
     // Receipt block replaces items table
     y = drawReceiptBlock(doc, y, { ...data, mode });
@@ -815,6 +858,51 @@ async function generateQuotePDF(quoteData) {
     tax_amount: quoteData.tax_amount,
     total: quoteData.total,
     deposit: quoteData.deposit,
+    notes: quoteData.notes,
+  });
+}
+
+/**
+ * generateAcceptancePDF(data)
+ *
+ * Renders the signed-off acceptance form a customer produces from the online
+ * /accept/:token page. Same layout family as a fixed quote (move details +
+ * services table) but with an ACCEPTED stamp, the firm accepted total, and an
+ * acceptance-confirmation block (declared insurance value + accepted date).
+ *
+ * `items` should already be the *accepted set* (mandatory + selected optional);
+ * no Optional Services table is drawn.
+ */
+async function generateAcceptancePDF(quoteData) {
+  return renderDocument({
+    mode: 'quote-acceptance',
+    doc_number: quoteData.quote_number,
+    date: quoteData.accepted_date || new Date(),
+    customer_name: quoteData.customer_name,
+    customer_email: quoteData.customer_email,
+    customer_phone: quoteData.customer_phone,
+    from_address: quoteData.from_address,
+    from_property_details: quoteData.from_property_details || buildPropertyDetails([
+      quoteData.property_type_from,
+      quoteData.bedrooms ? `${quoteData.bedrooms} bed` : null,
+      quoteData.floor_from ? `Floor ${quoteData.floor_from}` : null,
+      quoteData.has_lift_from === true ? 'Lift' : (quoteData.has_lift_from === false ? 'No lift' : null),
+    ]),
+    to_address: quoteData.to_address,
+    to_property_details: quoteData.to_property_details || buildPropertyDetails([
+      quoteData.property_type_to,
+      quoteData.bedrooms_to ? `${quoteData.bedrooms_to} bed` : null,
+      quoteData.floor_to ? `Floor ${quoteData.floor_to}` : null,
+      quoteData.has_lift_to === true ? 'Lift' : (quoteData.has_lift_to === false ? 'No lift' : null),
+    ]),
+    move_date: quoteData.move_date,
+    items: quoteData.items || [],
+    subtotal: quoteData.subtotal,
+    tax_rate: quoteData.tax_rate || 20,
+    tax_amount: quoteData.tax_amount,
+    total: quoteData.total,
+    declared_value: quoteData.declared_value,
+    accepted_date: quoteData.accepted_date,
     notes: quoteData.notes,
   });
 }
@@ -977,6 +1065,7 @@ async function renderHTMLToPDF(html, filename) {
 module.exports = {
   generateQuotePDF,
   generateInvoicePDF,
+  generateAcceptancePDF,
   generateContractInvoicePDF,
   renderDocument,
   renderHTMLToPDF,

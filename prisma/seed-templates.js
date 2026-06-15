@@ -153,7 +153,7 @@ async function main() {
       slug: 'fixed-quote',
       name: 'Fixed Quote',
       subject: 'Your fixed quote from iMove Relocations — Quote {{quote_number}}',
-      variables: '["customer_name","quote_number","move_date","amount","deposit","valid_until"]',
+      variables: '["customer_name","quote_number","move_date","amount","deposit","valid_until","accept_url"]',
       body_html: buildEmail({
         headerGradient: 'linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%)',
         headerTitle: 'Your Fixed Quote',
@@ -193,7 +193,63 @@ async function main() {
             </table>
 
             <p style="margin:0 0 16px;">This price is <strong>guaranteed and fixed</strong> — it will not change provided the inventory and access details remain as discussed during the survey.</p>
-            <p style="margin:0 0 24px;">To confirm your booking, please settle the deposit of <strong>£{{deposit}}</strong>. Bank details will be provided on your deposit invoice. If you have any questions, we're happy to help.</p>
+            <p style="margin:0 0 24px;">To go ahead, tap the button below to review your quote, add any optional extras (such as packing), confirm the value of your items for insurance, and accept online — it only takes a minute. Once accepted, we'll send your deposit invoice with our bank details.</p>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+              <tr>
+                <td align="center">
+                  <a href="{{accept_url}}" style="display:inline-block;background:#16a34a;color:#ffffff;font-weight:700;font-size:16px;padding:16px 44px;border-radius:10px;text-decoration:none;">✓ Accept Your Quote</a>
+                  <p style="margin:14px 0 0;font-size:12px;color:#94a3b8;">Or paste this link into your browser:<br><span style="color:#475569;word-break:break-all;">{{accept_url}}</span></p>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0;font-size:14px;color:#475569;">Kind regards,<br><strong>The iMove Team</strong></p>`,
+      }),
+    },
+
+    // ── 2b. Quote Accepted (customer confirmation) ──────────────────────────
+    {
+      slug: 'quote-accepted',
+      name: 'Quote Accepted Confirmation',
+      subject: 'Quote {{quote_number}} accepted — thank you! ✓',
+      variables: '["customer_name","quote_number","amount","declared_value","move_date"]',
+      body_html: buildEmail({
+        headerGradient: 'linear-gradient(135deg,#16a34a 0%,#15803d 100%)',
+        headerTitle: 'Quote Accepted — Thank You!',
+        headerSubtitle: 'iMove Relocations Ltd',
+        body: `
+            <p style="margin:0 0 20px;font-size:16px;">Dear <strong>{{customer_name}}</strong>,</p>
+            <p style="margin:0 0 20px;">Thank you for accepting your quote with <strong>iMove Relocations</strong>. Your signed acceptance form is attached for your records — please keep it safe.</p>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;margin:0 0 24px;">
+              <tr>
+                <td style="padding:24px 28px;">
+                  <p style="margin:0 0 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#16a34a;">Acceptance Summary</p>
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="font-size:13px;color:#166534;padding:4px 0;width:50%;">Quote Reference</td>
+                      <td style="font-size:13px;font-weight:700;color:#14532d;padding:4px 0;">{{quote_number}}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:13px;color:#166534;padding:4px 0;">Move Date</td>
+                      <td style="font-size:13px;font-weight:700;color:#14532d;padding:4px 0;">{{move_date}}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:13px;color:#166534;padding:4px 0;">Agreed Total</td>
+                      <td style="font-size:16px;font-weight:700;color:#16a34a;padding:4px 0;">£{{amount}}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:13px;color:#166534;padding:4px 0;">Declared Value (Insurance)</td>
+                      <td style="font-size:13px;font-weight:700;color:#14532d;padding:4px 0;">£{{declared_value}}</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 16px;">To secure your moving date, we'll shortly send your <strong>deposit invoice</strong> by email with our bank details. Once your deposit is received, your booking is confirmed.</p>
+            <p style="margin:0 0 24px;">If anything changes or you have any questions, just reply to this email — we're always happy to help.</p>
             <p style="margin:0;font-size:14px;color:#475569;">Kind regards,<br><strong>The iMove Team</strong></p>`,
       }),
     },

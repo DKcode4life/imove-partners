@@ -6,6 +6,8 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { send: sendEmail } = require('../services/email');
 const storage = require('../services/storage');
+const { normalizeSchedule } = require('../lib/move-schedule');
+const { syncSurveyEvent } = require('../lib/survey-event-sync');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -215,7 +217,8 @@ router.post('/jobs', wrap(async (req, res) => {
       bedrooms: b.bedrooms || null, parking_notes: b.parking_notes || null,
       preferred_move_date: b.preferred_move_date || null, confirmed_move_date: b.confirmed_move_date || null,
       flexibility_notes: b.flexibility_notes || null,
-      survey_required: !!b.survey_required, survey_type: b.survey_type || null, survey_date: b.survey_date || null,
+      move_schedule: normalizeSchedule(b.move_schedule),
+      survey_required: !!b.survey_required, survey_type: b.survey_type || null, survey_date: b.survey_date || null, survey_time: b.survey_time || null,
       quote_amount: b.quote_amount != null ? parseFloat(b.quote_amount) : null,
       quote_sent_date: b.quote_sent_date || null, quote_accepted: !!b.quote_accepted,
       deposit_required: !!b.deposit_required, deposit_paid: !!b.deposit_paid,
@@ -231,6 +234,10 @@ router.post('/jobs', wrap(async (req, res) => {
   await prisma.crmActivity.create({
     data: { job_id: job.id, type: 'created', note: `CRM record created for ${b.full_name.trim()}` },
   });
+
+  try {
+    await syncSurveyEvent(prisma, job.id);
+  } catch (err) { console.error('[crm] survey event sync failed for new job', job.id, err); }
 
   const activities = await prisma.crmActivity.findMany({
     where: { job_id: job.id }, orderBy: { created_at: 'desc' },
@@ -248,6 +255,13 @@ router.put('/jobs/:id', wrap(async (req, res) => {
   const b = req.body;
   const oldStatus = existing.status;
   let newStatus = b.status || oldStatus;
+
+  // Additional move days: keep existing schedule untouched when the caller omits
+  // the field; otherwise validate + persist what was sent.
+  const scheduleProvided = b.move_schedule !== undefined;
+  const normalizedSchedule = scheduleProvided
+    ? normalizeSchedule(b.move_schedule)
+    : normalizeSchedule(existing.move_schedule);
 
   // Auto-advance status when survey details are saved from an early or survey stage
   const surveyAutoStatuses = ['New Lead', 'Called V/M', 'Contacted', 'Survey Physical', 'Survey Video'];
@@ -359,6 +373,15 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     }
   }
 
+  // Additional move days are JSON, so compare serialised form rather than String().
+  if (scheduleProvided) {
+    const oldSchedule = JSON.stringify(normalizeSchedule(existing.move_schedule));
+    const newSchedule = JSON.stringify(normalizedSchedule);
+    if (oldSchedule !== newSchedule) {
+      changes.push({ field_name: 'move_schedule', old_value: oldSchedule, new_value: newSchedule });
+    }
+  }
+
   // Log changes to audit trail
   if (changes.length > 0) {
     for (const change of changes) {
@@ -394,6 +417,7 @@ router.put('/jobs/:id', wrap(async (req, res) => {
       bedrooms_to: b.bedrooms_to ?? null, parking_notes_to: b.parking_notes_to ?? null,
       preferred_move_date: b.preferred_move_date ?? null, confirmed_move_date: b.confirmed_move_date ?? null,
       flexibility_notes: b.flexibility_notes ?? null,
+      move_schedule: normalizedSchedule,
       survey_required: !!b.survey_required, survey_type: b.survey_type ?? null, survey_date: b.survey_date ?? null, survey_time: b.survey_time ?? null,
       quote_amount: b.quote_amount != null ? parseFloat(b.quote_amount) : null,
       quote_sent_date: b.quote_sent_date ?? null, quote_accepted: !!b.quote_accepted,
@@ -445,6 +469,12 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     } catch (err) { console.error('[crm] lead field sync failed for job', id, err); }
   }
 
+  // Keep the survey's planner event in sync (create/update/remove) so a booked
+  // survey shows on the planner/calendar and crew can be assigned to it.
+  try {
+    await syncSurveyEvent(prisma, id);
+  } catch (err) { console.error('[crm] survey event sync failed for job', id, err); }
+
   const activities = await prisma.crmActivity.findMany({
     where: { job_id: id }, orderBy: { created_at: 'desc' },
   });
@@ -472,6 +502,7 @@ router.post('/jobs/:id/duplicate', wrap(async (req, res) => {
       bedrooms_to: job.bedrooms_to, parking_notes_to: job.parking_notes_to,
       preferred_move_date: job.preferred_move_date, confirmed_move_date: job.confirmed_move_date,
       flexibility_notes: job.flexibility_notes,
+      move_schedule: normalizeSchedule(job.move_schedule),
       survey_required: job.survey_required, survey_type: job.survey_type, survey_date: job.survey_date,
       quote_amount: job.quote_amount, quote_sent_date: job.quote_sent_date, quote_accepted: job.quote_accepted,
       deposit_required: job.deposit_required, deposit_paid: job.deposit_paid,

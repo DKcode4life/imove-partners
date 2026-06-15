@@ -8,6 +8,8 @@ const { computeAssignmentWage } = require('../lib/wage-calc');
 const pnlCalc = require('../lib/pnl-calc');
 const { resolveItemColor } = require('../lib/planner-color');
 const { loadCategories, colorMap } = require('../lib/job-categories');
+const { expandSchedule, addDaysIso, MAX_OFFSET_DAYS, jobValidDates, scheduleDayForDate } = require('../lib/move-schedule');
+const { syncJobSurveyFromEvent } = require('../lib/survey-event-sync');
 
 function cleanColor(v) {
   if (typeof v !== 'string') return null;
@@ -66,6 +68,43 @@ router.use(authenticate, requireAdmin);
 function isoDate(d) {
   if (!d) return null;
   return String(d).slice(0, 10);
+}
+
+// Job date filter widened by the largest schedule offset, so a job whose extra
+// move day lands inside [start, endDate] is still fetched even when its own move
+// date sits just outside the visible window.
+function widenedJobWhere(start, endDate) {
+  const wStart = addDaysIso(start, -MAX_OFFSET_DAYS);
+  const wEnd = addDaysIso(endDate, MAX_OFFSET_DAYS);
+  return {
+    status: { not: 'Lost / Cancelled' },
+    OR: [
+      { confirmed_move_date: { gte: wStart, lte: wEnd } },
+      { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: wStart, lte: wEnd } }] },
+    ],
+  };
+}
+
+// Expand one job into its calendar items: the main move-day item (only when its
+// date is inside the window) plus a marker for each additional move day inside
+// the window. `buildMain(date)` returns the base item shape for a given date so
+// each item carries that date's own crew; markers add the schedule metadata.
+function jobItemsWithSchedule(job, start, endDate, buildMain) {
+  const items = [];
+  const mainDate = isoDate(job.confirmed_move_date || job.preferred_move_date);
+  if (mainDate && mainDate >= start && mainDate <= endDate) items.push(buildMain(mainDate));
+  for (const day of expandSchedule(job)) {
+    if (!day.date || day.date < start || day.date > endDate) continue;
+    items.push({
+      ...buildMain(day.date),
+      title: `${day.label} — ${job.full_name}`,
+      is_extra_day: true,
+      schedule_id: day.id,
+      schedule_label: day.label,
+      schedule_offset: day.offset,
+    });
+  }
+  return items;
 }
 
 function weekDates(start) {
@@ -237,6 +276,8 @@ router.put('/events/:id', wrap(async (req, res) => {
   if (event_date && event_date !== ev.event_date) {
     await syncContractJobFromPlannerEvent(id, event_date);
   }
+  // Push date/time edits back to a linked survey's job so the profile stays in step.
+  await syncJobSurveyFromEvent(prisma, id, updated.event_date, updated.event_time);
 
   res.json(updated);
 }));
@@ -423,16 +464,10 @@ router.get('/calendar', wrap(async (req, res) => {
 
   const [jobs, events, categoryColors] = await Promise.all([
     prisma.crmJob.findMany({
-      where: {
-        status: { not: 'Lost / Cancelled' },
-        OR: [
-          { confirmed_move_date: { gte: startDate, lte: endDate } },
-          { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: startDate, lte: endDate } }] },
-        ],
-      },
+      where: widenedJobWhere(startDate, endDate),
       select: {
         id: true, full_name: true, status: true, phone: true,
-        confirmed_move_date: true, preferred_move_date: true,
+        confirmed_move_date: true, preferred_move_date: true, move_schedule: true,
         from_postcode: true, to_postcode: true, from_line1: true, to_line1: true,
         planner_color: true,
       },
@@ -440,15 +475,15 @@ router.get('/calendar', wrap(async (req, res) => {
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: startDate, lte: endDate } },
       orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
-      include: { contract: { select: { id: true, company_name: true, color: true } } },
+      include: { contract: { select: { id: true, company_name: true, color: true } }, survey_for_job: { select: { id: true } } },
     }),
     loadCategoryColors(),
   ]);
 
   const items = [
-    ...jobs.map(j => ({
+    ...jobs.flatMap(j => jobItemsWithSchedule(j, startDate, endDate, date => ({
       source: 'job', id: j.id, title: j.full_name, category: j.status,
-      date: isoDate(j.confirmed_move_date || j.preferred_move_date),
+      date,
       phone: j.phone, from_postcode: j.from_postcode, to_postcode: j.to_postcode,
       from_line1: j.from_line1, to_line1: j.to_line1, status: j.status,
       planner_color: j.planner_color,
@@ -457,12 +492,13 @@ router.get('/calendar', wrap(async (req, res) => {
         null,
         { categoryColors }
       ),
-    })),
+    }))),
     ...events.map(e => ({
       source: 'event', id: e.id, title: e.title, category: e.category,
       date: isoDate(e.event_date), time: e.event_time,
       address: e.address, phone: e.contact_number, customer_name: e.customer_name,
       contract_id: e.contract_id, contract_name: e.contract?.company_name || null,
+      survey_job_id: e.survey_for_job?.id || null,
       planner_color: e.planner_color,
       effective_color: resolveItemColor(
         { source: 'event', category: e.category, planner_color: e.planner_color },
@@ -486,16 +522,10 @@ router.get('/week', wrap(async (req, res) => {
 
   const [jobs, events, assignmentsRaw, categoryColors] = await Promise.all([
     prisma.crmJob.findMany({
-      where: {
-        status: { not: 'Lost / Cancelled' },
-        OR: [
-          { confirmed_move_date: { gte: start, lte: endDate } },
-          { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: start, lte: endDate } }] },
-        ],
-      },
+      where: widenedJobWhere(start, endDate),
       select: {
         id: true, full_name: true, status: true, phone: true, email: true,
-        confirmed_move_date: true, preferred_move_date: true,
+        confirmed_move_date: true, preferred_move_date: true, move_schedule: true,
         from_line1: true, from_city: true, from_postcode: true,
         to_line1: true, to_city: true, to_postcode: true,
         bedrooms: true, internal_notes: true, packing_required: true, storage_required: true,
@@ -505,7 +535,7 @@ router.get('/week', wrap(async (req, res) => {
     prisma.plannerEvent.findMany({
       where: { event_date: { gte: start, lte: endDate } },
       orderBy: [{ event_date: 'asc' }, { event_time: 'asc' }],
-      include: { contract: { select: { id: true, company_name: true, color: true } } },
+      include: { contract: { select: { id: true, company_name: true, color: true } }, survey_for_job: { select: { id: true } } },
     }),
     prisma.plannerAssignment.findMany({
       where: { assigned_date: { gte: start, lte: endDate } },
@@ -529,28 +559,33 @@ router.get('/week', wrap(async (req, res) => {
   }
 
   const items = [
-    ...jobs.map(j => ({
-      source: 'job', id: j.id, title: j.full_name, category: j.status,
-      date: isoDate(j.confirmed_move_date || j.preferred_move_date),
-      phone: j.phone, email: j.email,
-      from_line1: j.from_line1, from_city: j.from_city, from_postcode: j.from_postcode,
-      to_line1: j.to_line1, to_city: j.to_city, to_postcode: j.to_postcode,
-      bedrooms: j.bedrooms, status: j.status, internal_notes: j.internal_notes,
-      packing_required: j.packing_required, storage_required: j.storage_required,
-      assignments: assignmentsByJob[j.id] || [],
-      planner_color: j.planner_color,
-      effective_color: resolveItemColor(
-        { source: 'job', planner_color: j.planner_color },
-        null,
-        { categoryColors }
-      ),
-    })),
+    ...jobs.flatMap(j => {
+      const jobAssignments = assignmentsByJob[j.id] || [];
+      return jobItemsWithSchedule(j, start, endDate, date => ({
+        source: 'job', id: j.id, title: j.full_name, category: j.status,
+        date,
+        phone: j.phone, email: j.email,
+        from_line1: j.from_line1, from_city: j.from_city, from_postcode: j.from_postcode,
+        to_line1: j.to_line1, to_city: j.to_city, to_postcode: j.to_postcode,
+        bedrooms: j.bedrooms, status: j.status, internal_notes: j.internal_notes,
+        packing_required: j.packing_required, storage_required: j.storage_required,
+        // Crew assigned on this specific date (move day or an additional day).
+        assignments: jobAssignments.filter(a => String(a.assigned_date).slice(0, 10) === date),
+        planner_color: j.planner_color,
+        effective_color: resolveItemColor(
+          { source: 'job', planner_color: j.planner_color },
+          null,
+          { categoryColors }
+        ),
+      }));
+    }),
     ...events.map(e => ({
       source: 'event', id: e.id, title: e.title, category: e.category,
       date: isoDate(e.event_date), time: e.event_time,
       address: e.address, phone: e.contact_number, customer_name: e.customer_name,
       notes: e.notes, assignments: assignmentsByEvent[e.id] || [],
       contract_id: e.contract_id, contract_name: e.contract?.company_name || null,
+      survey_job_id: e.survey_for_job?.id || null,
       planner_color: e.planner_color,
       effective_color: resolveItemColor(
         { source: 'event', category: e.category, planner_color: e.planner_color },
@@ -576,6 +611,7 @@ router.patch('/reschedule', wrap(async (req, res) => {
     await prisma.plannerEvent.update({ where: { id }, data: { event_date: date } });
     if (date !== ev.event_date) {
       await syncContractJobFromPlannerEvent(id, date);
+      await syncJobSurveyFromEvent(prisma, id, date); // keep a linked survey's job date in step
     }
     return res.json({ ok: true });
   }
@@ -661,7 +697,7 @@ router.get('/staff-week', wrap(async (req, res) => {
         job: {
           select: {
             id: true, full_name: true, status: true,
-            confirmed_move_date: true, preferred_move_date: true,
+            confirmed_move_date: true, preferred_move_date: true, move_schedule: true,
             planner_color: true,
           },
         },
@@ -684,16 +720,10 @@ router.get('/staff-week', wrap(async (req, res) => {
     // top-of-column "Jobs" list in the Staff View. Mirrors the filter used
     // by GET /planner/week so the two views show the same set.
     prisma.crmJob.findMany({
-      where: {
-        status: { not: 'Lost / Cancelled' },
-        OR: [
-          { confirmed_move_date: { gte: start, lte: endDate } },
-          { AND: [{ confirmed_move_date: null }, { preferred_move_date: { gte: start, lte: endDate } }] },
-        ],
-      },
+      where: widenedJobWhere(start, endDate),
       select: {
         id: true, full_name: true, status: true,
-        confirmed_move_date: true, preferred_move_date: true,
+        confirmed_move_date: true, preferred_move_date: true, move_schedule: true,
         planner_color: true,
       },
     }),
@@ -704,6 +734,7 @@ router.get('/staff-week', wrap(async (req, res) => {
         id: true, title: true, category: true, event_date: true, event_time: true,
         planner_color: true,
         contract: { select: { id: true, company_name: true, is_lux: true, color: true } },
+        survey_for_job: { select: { id: true } },
         contract_job: { select: { men_needed: true, vans_needed: true, hgv_needed: true } },
       },
     }),
@@ -735,11 +766,16 @@ router.get('/staff-week', wrap(async (req, res) => {
       : Number(settings.luxHourlyRate || 0);
     // Pick label/category off whichever side is set (job or event)
     let job_label = null, job_category = null, source = null, source_id = null, plannerColor = null;
+    let schedule_label = null;
     if (a.job) {
       source = 'job'; source_id = a.job.id;
       job_label = a.job.full_name;
       job_category = a.job.status;
       plannerColor = a.job.planner_color;
+      // Assignment on an additional day (packing/delivery/…) — tag it so the
+      // Staff view groups and labels it under that day, not the main move.
+      const sd = scheduleDayForDate(a.job, a.assigned_date);
+      if (sd) { schedule_label = sd.label; job_label = `${sd.label} — ${a.job.full_name}`; }
     } else if (a.event) {
       source = 'event'; source_id = a.event.id;
       job_label = a.event.title;
@@ -755,7 +791,7 @@ router.get('/staff-week', wrap(async (req, res) => {
       assignment_id: a.id,
       source, source_id,
       job_id: a.job_id, event_id: a.event_id,
-      job_label, job_category,
+      job_label, job_category, schedule_label,
       planner_color: plannerColor,
       effective_color,
       contract_id: contract?.id || null,
@@ -798,14 +834,19 @@ router.get('/staff-week', wrap(async (req, res) => {
   function jobsForDate(date) {
     const list = [];
     for (const j of jobsForWeek) {
-      const d = String(j.confirmed_move_date || j.preferred_move_date || '').slice(0, 10);
-      if (d !== date) continue;
+      const moveDate = String(j.confirmed_move_date || j.preferred_move_date || '').slice(0, 10);
+      const isMove = moveDate === date;
+      // An additional move day (packing, delivery, …) that lands on this date.
+      const sd = isMove ? null : scheduleDayForDate(j, date);
+      if (!isMove && !sd) continue; // job doesn't touch this day
       list.push({
         source: 'job', id: j.id,
         label: j.full_name,
         category: j.status,
         contract_name: null,
         is_lux: false,
+        is_extra_day: !!sd,
+        schedule_label: sd ? sd.label : null,
         men_needed: null, vans_needed: null, hgv_needed: null,
         assigned_count: assignedCountByJobDateKey.get(`job|${j.id}|${date}`) || 0,
         time: null,
@@ -826,6 +867,8 @@ router.get('/staff-week', wrap(async (req, res) => {
         label: e.title,
         category: e.category,
         contract_name: e.contract?.company_name || null,
+        contract_id: e.contract?.id || null,
+        survey_job_id: e.survey_for_job?.id || null,
         is_lux: !!e.contract?.is_lux,
         planner_color: e.planner_color,
         effective_color: resolveItemColor(
@@ -859,9 +902,9 @@ router.get('/staff-week', wrap(async (req, res) => {
       const bucket = days[a.assigned_date];
       if (!bucket) continue;
       // Skip orphan assignments where the underlying job/event no longer matches this date.
+      // A job is valid on its move date OR any of its additional days (packing, etc.).
       if (a.job) {
-        const jobDate = String(a.job.confirmed_move_date || a.job.preferred_move_date || '').slice(0, 10);
-        if (jobDate !== a.assigned_date) continue;
+        if (!jobValidDates(a.job).has(a.assigned_date)) continue;
         if (a.job.status === 'Lost / Cancelled') continue;
       } else if (a.event) {
         if (String(a.event.event_date).slice(0, 10) !== a.assigned_date) continue;
@@ -1000,6 +1043,55 @@ router.get('/pnl', wrap(async (req, res) => {
   res.json(result);
 }));
 
+// Per-day P&L for an additional move day (packing, delivery, …). Returns the
+// crew wages for that specific date plus the expense lines tagged to that day.
+// There is NO income on additional days — income lives only on the main job, and
+// these wages/expenses already roll into the job's total via computeJobPnl.
+async function computeDayPnl(jobId, dayKey, date) {
+  const [lines, assignments, settings] = await Promise.all([
+    prisma.jobLedgerLine.findMany({
+      where: { job_id: jobId, day_key: dayKey, kind: 'expense' },
+      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.plannerAssignment.findMany({
+      where: { job_id: jobId, assigned_date: date, asset: { type: 'staff' } },
+      select: PNL_ASSIGNMENT_SELECT,
+    }),
+    loadWageSettings(),
+  ]);
+
+  const vehicleIds = [...new Set(assignments.map(a => a.vehicle_asset_id).filter(Boolean))];
+  const vehicles = vehicleIds.length
+    ? await prisma.plannerAsset.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, is_lorry: true } })
+    : [];
+  const vehicleById = new Map(vehicles.map(v => [v.id, v]));
+
+  const wages_total = pnlCalc.sumAssignmentWages(assignments, {
+    vehicleById,
+    luxHourlyRate: settings.luxHourlyRate,
+    lorryBonus: settings.lorryBonus,
+  });
+
+  return {
+    job_id: jobId,
+    day_key: dayKey,
+    date,
+    wages_total,
+    expense_lines: lines,
+    expenses_total: pnlCalc.sumLines(lines, 'expense'),
+  };
+}
+
+router.get('/pnl/day', wrap(async (req, res) => {
+  const jobId = parseInt(req.query.id, 10);
+  const dayKey = String(req.query.day_key || '').trim();
+  const date = String(req.query.date || '').trim();
+  if (!Number.isFinite(jobId) || !dayKey || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'id, day_key and date (YYYY-MM-DD) are required' });
+  }
+  res.json(await computeDayPnl(jobId, dayKey, date));
+}));
+
 // Set/clear the base income. income null|'' clears → falls back to suggestion.
 router.put('/pnl/income', wrap(async (req, res) => {
   const { source, id, income } = req.body || {};
@@ -1048,6 +1140,14 @@ router.post('/pnl/line', wrap(async (req, res) => {
     return res.status(400).json({ error: 'amount must be a number ≥ 0' });
   }
 
+  // Optional day tag: null/'move' = the main move day; otherwise a move_schedule
+  // day id so extra-day expenses can be listed on their own card while still
+  // counting toward the job's total.
+  const rawDayKey = req.body?.day_key;
+  const dayKey = (typeof rawDayKey === 'string' && rawDayKey.trim() && rawDayKey !== 'move')
+    ? rawDayKey.trim().slice(0, 40)
+    : null;
+
   const where = source === 'job' ? { job_id: itemId } : { event_id: itemId };
   const maxRow = await prisma.jobLedgerLine.aggregate({ where, _max: { sort_order: true } });
   const sortOrder = (maxRow._max.sort_order ?? 0) + 1;
@@ -1057,7 +1157,7 @@ router.post('/pnl/line', wrap(async (req, res) => {
       job_id: source === 'job' ? itemId : null,
       event_id: source === 'event' ? itemId : null,
       kind, label: label || (kind === 'income' ? 'Income' : 'Expense'),
-      amount, sort_order: sortOrder,
+      amount, sort_order: sortOrder, day_key: dayKey,
     },
   });
   res.status(201).json(line);

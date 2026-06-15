@@ -5,6 +5,7 @@ import { getSurface } from './lib/surface';
 
 import Login from './pages/Login';
 import AuthHandoff from './pages/AuthHandoff';
+import AcceptQuote from './pages/AcceptQuote';
 import PartnerActivityTracker from './components/PartnerActivityTracker';
 
 // Partner pages
@@ -47,6 +48,9 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/auth/handoff" element={<AuthHandoff />} />
+
+          {/* Public customer-facing quote acceptance — no auth, token-gated */}
+          <Route path="/accept/:token" element={<AcceptQuote />} />
 
           {/* Partner routes */}
           {showPartnerPortal && (

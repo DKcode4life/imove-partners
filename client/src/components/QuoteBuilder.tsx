@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator, CreditCard, Plus, Download } from 'lucide-react';
+import { PlusCircle, Trash2, CheckCircle, Check, AlertCircle, Pencil, Mail, FileText, Receipt, Send, Calculator, CreditCard, Plus, Download, Lock } from 'lucide-react';
 import api from '../lib/api';
 import { loadCatalog } from '../lib/catalogStorage';
 import SendDocumentModal, { type DocumentType, type SendDocumentData } from './SendDocumentModal';
+import SentDocumentsList, { type SentDocument } from './SentDocumentsList';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,11 @@ type DepositSection = {
   depositPaidDate: string;
   balancePaid: boolean;
   balancePaidDate: string;
+  // Deposit amount frozen at the moment it was marked paid. Once set, the deposit
+  // no longer tracks the (recalculated) percentage of the quotation total — so
+  // adding services later does not inflate "how much was paid". Used as a fallback
+  // when no deposit invoice exists; an actual deposit invoice total takes priority.
+  depositPaidAmount?: number | null;
 };
 
 type QuoteBuilderState = {
@@ -142,6 +148,7 @@ function extractDepositSection(state: QuoteBuilderState): DepositSection {
     depositPaidDate: state.depositPaidDate,
     balancePaid: state.balancePaid,
     balancePaidDate: state.balancePaidDate,
+    depositPaidAmount: state.depositPaidAmount ?? null,
   };
 }
 
@@ -198,6 +205,7 @@ type ExistingDocs = {
   depositInvoiceId?: number;
   depositInvoiceNumber?: string;
   depositInvoicePaid?: boolean;
+  depositInvoiceTotal?: number;
   mainInvoiceId?: number;
   mainInvoiceNumber?: string;
   mainInvoicePaid?: boolean;
@@ -293,6 +301,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   const [activeModal, setActiveModal] = useState<DocumentType | null>(null);
   const [sendingToast, setSendingToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
   const [busyAction, setBusyAction] = useState<DocumentType | null>(null);
+  const [sentDocuments, setSentDocuments] = useState<SentDocument[]>([]);
 
   // Additional charges state
   const [additionalInvoices, setAdditionalInvoices] = useState<AdditionalInvoice[]>([]);
@@ -331,6 +340,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     setManualMiles('');
     setManualCuFt('');
     setAdditionalInvoices([]);
+    setSentDocuments([]);
     setShowNewChargeForm(false);
     setEditingChargeId(null);
     setActiveAdditionalModal(null);
@@ -355,11 +365,13 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
       // Load job + existing quotes + invoices for the send panel
       (async () => {
         try {
-          const [jobRes, quotesRes, invRes] = await Promise.all([
+          const [jobRes, quotesRes, invRes, sentRes] = await Promise.all([
             api.get(`/crm/jobs/${jobId}`),
             api.get(`/crm/jobs/${jobId}/quotes`).catch(() => ({ data: [] })),
             api.get(`/crm/jobs/${jobId}/invoices`).catch(() => ({ data: [] })),
+            api.get(`/crm/jobs/${jobId}/sent-documents`).catch(() => ({ data: [] })),
           ]);
+          setSentDocuments(Array.isArray(sentRes.data) ? sentRes.data : []);
           const j = jobRes.data;
           const fromPostcode: string | null = j.from_postcode ?? null;
           const toPostcode: string | null   = j.to_postcode   ?? null;
@@ -379,6 +391,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             depositInvoiceId: depInv?.id,
             depositInvoiceNumber: depInv?.invoice_number,
             depositInvoicePaid: depInv?.status === 'paid',
+            depositInvoiceTotal: typeof depInv?.total === 'number' ? depInv.total : undefined,
             mainInvoiceId: mainInv?.id,
             mainInvoiceNumber: mainInv?.invoice_number,
             mainInvoicePaid: mainInv?.status === 'paid',
@@ -597,7 +610,16 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     if (!depositDraft) return;
     const depositJustPaid = depositDraft.depositPaid && !committed.depositPaid;
     const balanceJustPaid = depositDraft.balancePaid && !committed.balancePaid;
-    const next = { ...committed, ...depositDraft };
+    // Freeze the deposit amount at the moment it's marked paid so later quote
+    // edits can't inflate it. Prefer the real invoiced amount when available.
+    const lockedAmt = typeof existingDocs.depositInvoiceTotal === 'number'
+      ? existingDocs.depositInvoiceTotal
+      : computedDepositAmount;
+    const next = {
+      ...committed,
+      ...depositDraft,
+      ...(depositJustPaid ? { depositPaidAmount: lockedAmt } : {}),
+    };
     setCommitted(next);
     setDepositDraft(null);
 
@@ -789,6 +811,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         ? { ...inv, status: 'sent', sent_at: new Date().toISOString() }
         : inv,
     ));
+    void reloadSentDocuments();
   }
 
   // ── Derived totals ────────────────────────────────────────────────────────
@@ -818,13 +841,28 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
   const fixGrandTotal   = fixQuotationTotal + fixVat;
 
   const depositValueNum = parseFloat(depositSection.depositValue) || 0;
-  const depositAmount = useMemo(() => {
+  // Live deposit derived from the (possibly changing) quotation total.
+  const computedDepositAmount = useMemo(() => {
     if (depositSection.depositType === 'none') return 0;
     if (depositSection.depositType === 'percentage') {
       return Math.max(0, (fixGrandTotal * depositValueNum) / 100);
     }
     return Math.max(0, depositValueNum);
   }, [depositSection.depositType, depositValueNum, fixGrandTotal]);
+
+  // Once the deposit is paid, freeze the amount. A paid deposit is a fixed sum of
+  // money that has changed hands — it must NOT re-track the percentage when the
+  // quotation total later changes (e.g. extra services added). Priority:
+  //   1. the actual deposit invoice total (what was invoiced & paid), else
+  //   2. the amount captured when the user marked it paid, else
+  //   3. the live computed value (deposit not paid yet).
+  const depositIsPaid = depositSection.depositPaid || !!existingDocs.depositInvoicePaid;
+  const lockedDepositAmount =
+    typeof existingDocs.depositInvoiceTotal === 'number' ? existingDocs.depositInvoiceTotal
+    : typeof depositSection.depositPaidAmount === 'number' ? depositSection.depositPaidAmount
+    : null;
+  const depositLocked = depositIsPaid && lockedDepositAmount != null;
+  const depositAmount = depositLocked ? lockedDepositAmount : computedDepositAmount;
   const remainingBalance = Math.max(0, fixGrandTotal - depositAmount);
   const fullyPaid =
     depositSection.balancePaid &&
@@ -905,8 +943,6 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
    */
   async function ensureInvoice(invoice_type: 'deposit' | 'main'): Promise<number | null> {
     if (!jobId) return null;
-    if (invoice_type === 'deposit' && existingDocs.depositInvoiceId) return existingDocs.depositInvoiceId;
-    if (invoice_type === 'main' && existingDocs.mainInvoiceId) return existingDocs.mainInvoiceId;
 
     const fixedQuoteId = await ensureQuote('fixed');
 
@@ -921,6 +957,23 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     const invoiceSubtotal = invoice_type === 'deposit' ? depositAmount : fixQuotationTotal;
     const invoiceTax = invoice_type === 'deposit' ? 0 : fixVat;
 
+    // If the invoice already exists: a deposit invoice stays fixed (it may already
+    // be paid), but a main/final invoice is refreshed to the LATEST quotation total
+    // so a re-send after the quote changed (e.g. packing added) bills the true amount.
+    const existingId = invoice_type === 'deposit' ? existingDocs.depositInvoiceId : existingDocs.mainInvoiceId;
+    if (existingId) {
+      if (invoice_type === 'main') {
+        await api.patch(`/crm/jobs/${jobId}/invoices/${existingId}/financials`, {
+          subtotal: invoiceSubtotal,
+          tax_rate: committed.fixedVatEnabled ? 20 : 0,
+          tax_amount: invoiceTax,
+          total: invoiceTotal,
+          items,
+        });
+      }
+      return existingId;
+    }
+
     const res = await api.post(`/crm/jobs/${jobId}/invoices`, {
       invoice_type,
       quote_id: fixedQuoteId,
@@ -933,7 +986,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     const newId: number = res.data.id;
     const newNumber: string | undefined = res.data.invoice_number;
     setExistingDocs(prev => invoice_type === 'deposit'
-      ? { ...prev, depositInvoiceId: newId, depositInvoiceNumber: newNumber }
+      ? { ...prev, depositInvoiceId: newId, depositInvoiceNumber: newNumber, depositInvoiceTotal: invoiceTotal }
       : { ...prev, mainInvoiceId: newId, mainInvoiceNumber: newNumber });
     return newId;
   }
@@ -1018,6 +1071,17 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
     }
   }
 
+  /** Refresh the Sent-to-Client history after a send so the new row appears. */
+  async function reloadSentDocuments() {
+    if (!jobId) return;
+    try {
+      const res = await api.get(`/crm/jobs/${jobId}/sent-documents`);
+      setSentDocuments(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      // Non-fatal — the email already went out; the list refreshes on next load.
+    }
+  }
+
   /** Modal onSend dispatcher — knows which endpoint to hit per document type */
   async function handleSend(documentType: DocumentType, data: SendDocumentData) {
     if (!jobId) throw new Error('No job ID');
@@ -1056,6 +1120,8 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         });
       }
       setSendingToast({ kind: 'success', msg: 'Email sent successfully ✉️' });
+      // Refresh the Sent-to-Client history so the new snapshot row shows.
+      void reloadSentDocuments();
       // Server may have auto-advanced the job's pipeline status — let the
       // parent page refetch so the chart + badge reflect the new stage.
       onJobUpdated?.();
@@ -1300,6 +1366,11 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
             color="emerald"
           />
         </div>
+
+        {/* ── Sent-to-Client history ──────────────────────────────────────── */}
+        <div className="px-3 pb-3">
+          <SentDocumentsList jobId={jobId ?? ''} documents={sentDocuments} />
+        </div>
       </div>
 
       <LineItemBlock
@@ -1351,6 +1422,7 @@ export default function QuoteBuilder({ jobId, onJobUpdated, distanceMiles, onDep
         depositAmount={depositAmount}
         remainingBalance={remainingBalance}
         fullyPaid={fullyPaid}
+        locked={depositLocked}
       />
 
       <AdditionalChargesBlock
@@ -2101,7 +2173,7 @@ const DEPOSIT_ACCENT = {
 function DepositBlock({
   section,
   editing, onEdit, onSave, onCancel, onChange,
-  quotationTotal, depositAmount, remainingBalance, fullyPaid,
+  quotationTotal, depositAmount, remainingBalance, fullyPaid, locked,
 }: {
   section: DepositSection;
   editing: boolean;
@@ -2113,6 +2185,7 @@ function DepositBlock({
   depositAmount: number;
   remainingBalance: number;
   fullyPaid: boolean;
+  locked: boolean;
 }) {
   const noDeposit = section.depositType === 'none';
 
@@ -2147,6 +2220,7 @@ function DepositBlock({
             depositAmount={depositAmount}
             remainingBalance={remainingBalance}
             noDeposit={noDeposit}
+            locked={locked}
           />
         )}
       </div>
@@ -2294,13 +2368,14 @@ function PaidEditRow({
 }
 
 function DepositReadView({
-  section, quotationTotal, depositAmount, remainingBalance, noDeposit,
+  section, quotationTotal, depositAmount, remainingBalance, noDeposit, locked,
 }: {
   section: DepositSection;
   quotationTotal: number;
   depositAmount: number;
   remainingBalance: number;
   noDeposit: boolean;
+  locked: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -2310,14 +2385,18 @@ function DepositReadView({
           <p className="text-sm font-semibold text-slate-800 mt-0.5 truncate">
             {noDeposit
               ? 'No deposit required'
-              : section.depositType === 'percentage'
-                ? `Percentage — ${section.depositValue || '0'}% of total`
-                : `Fixed amount — ${fmt(parseFloat(section.depositValue) || 0)}`}
+              : locked
+                ? 'Paid — amount locked'
+                : section.depositType === 'percentage'
+                  ? `Percentage — ${section.depositValue || '0'}% of total`
+                  : `Fixed amount — ${fmt(parseFloat(section.depositValue) || 0)}`}
           </p>
         </div>
         {!noDeposit && (
           <div className="text-right flex-shrink-0">
-            <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider">Deposit</p>
+            <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider flex items-center justify-end gap-1">
+              {locked && <Lock className="w-3 h-3" />} Deposit
+            </p>
             <p className="text-2xl font-bold text-amber-900 tabular-nums tracking-tight leading-none">{fmt(depositAmount)}</p>
           </div>
         )}

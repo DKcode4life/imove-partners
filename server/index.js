@@ -33,6 +33,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '5mb' }));
 
+app.use('/api/public',    require('./routes/public-quote'));  // Customer quote-acceptance (no auth — token-gated)
 app.use('/api/auth',      require('./routes/auth'));
 app.use('/api/leads',     require('./routes/leads'));
 app.use('/api/partners',  require('./routes/partners'));
@@ -41,6 +42,7 @@ app.use('/api/crm',       require('./routes/crm-ai'));   // AI routes first (API
 app.use('/api/crm',       require('./routes/crm'));      // Everything else (JWT protected)
 app.use('/api/crm',       require('./routes/crm-quotes'));   // Quote management
 app.use('/api/crm',       require('./routes/crm-invoices')); // Invoice & receipt management
+app.use('/api/crm',       require('./routes/crm-sent-documents')); // Sent-to-Clients history
 app.use('/api/crm-proxy',  require('./routes/crm-proxy'));   // Proxy to Railway API (avoids CORS)
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/planner',   require('./routes/planner'));

@@ -5,6 +5,9 @@ const wrap = require('../lib/async-handler');
 const { generateQuotePDF } = require('../services/pdf');
 const { sendTemplated } = require('../services/email');
 const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
+const { recordSentDocument } = require('../lib/sent-document');
+const { generateAcceptToken } = require('../lib/quote-acceptance');
+const config = require('../config');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -308,58 +311,77 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
 
     const job = quote.job;
 
-    // Generate PDF if requested
+    // Build the exact PDF argument object. Computed unconditionally (even when the
+    // user un-ticks "attach PDF") so the SentDocument snapshot can always recreate
+    // the document that matched this email.
+    const pdfData = {
+      quote_number: quote.quote_number,
+      quote_type: quote.quote_type,
+      customer_name: job.full_name,
+      customer_email: job.email,
+      customer_phone: job.phone,
+      from_address: job.from_line1
+        ? `${job.from_line1}${job.from_line2 ? ', ' + job.from_line2 : ''}, ${job.from_city || ''} ${job.from_postcode || ''}`.trim()
+        : null,
+      to_address: job.to_line1
+        ? `${job.to_line1}${job.to_line2 ? ', ' + job.to_line2 : ''}, ${job.to_city || ''} ${job.to_postcode || ''}`.trim()
+        : null,
+      // Property fields for "Property details" lines
+      property_type_from: job.property_type_from,
+      property_type_to: job.property_type_to,
+      bedrooms: job.bedrooms,
+      bedrooms_to: job.bedrooms_to,
+      floor_from: job.floor_from,
+      floor_to: job.floor_to,
+      has_lift_from: job.has_lift_from,
+      has_lift_to: job.has_lift_to,
+      move_date: job.confirmed_move_date || job.preferred_move_date,
+      items: quote.items.filter(item => !item.is_optional).map(item => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        total: item.total,
+      })),
+      optional_items: quote.items.filter(item => item.is_optional).map(item => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        total: item.total,
+      })),
+      subtotal: quote.subtotal,
+      tax_rate: quote.tax_rate,
+      tax_amount: quote.tax_amount,
+      total: quote.total,
+      deposit: quote.deposit,
+      notes: quote.notes,
+      valid_until: quote.valid_until,
+    };
+
+    // Generate PDF attachment if requested
     let pdfAttachment = null;
     if (attach_pdf) {
-      const pdfData = {
-        quote_number: quote.quote_number,
-        quote_type: quote.quote_type,
-        customer_name: job.full_name,
-        customer_email: job.email,
-        customer_phone: job.phone,
-        from_address: job.from_line1
-          ? `${job.from_line1}${job.from_line2 ? ', ' + job.from_line2 : ''}, ${job.from_city || ''} ${job.from_postcode || ''}`.trim()
-          : null,
-        to_address: job.to_line1
-          ? `${job.to_line1}${job.to_line2 ? ', ' + job.to_line2 : ''}, ${job.to_city || ''} ${job.to_postcode || ''}`.trim()
-          : null,
-        // Property fields for "Property details" lines
-        property_type_from: job.property_type_from,
-        property_type_to: job.property_type_to,
-        bedrooms: job.bedrooms,
-        bedrooms_to: job.bedrooms_to,
-        floor_from: job.floor_from,
-        floor_to: job.floor_to,
-        has_lift_from: job.has_lift_from,
-        has_lift_to: job.has_lift_to,
-        move_date: job.confirmed_move_date || job.preferred_move_date,
-        items: quote.items.filter(item => !item.is_optional).map(item => ({
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          total: item.total,
-        })),
-        optional_items: quote.items.filter(item => item.is_optional).map(item => ({
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          total: item.total,
-        })),
-        subtotal: quote.subtotal,
-        tax_rate: quote.tax_rate,
-        tax_amount: quote.tax_amount,
-        total: quote.total,
-        deposit: quote.deposit,
-        notes: quote.notes,
-        valid_until: quote.valid_until,
-      };
-
       const pdf = await generateQuotePDF(pdfData);
       pdfAttachment = {
         filename: pdf.filename,
         content: pdf.buffer,
         contentType: pdf.mimeType,
       };
+    }
+
+    // Fixed quotes carry an online-acceptance link. Mint the unguessable token
+    // on first send and reuse it on re-sends so the same URL stays valid.
+    let acceptUrl = '';
+    if (quote.quote_type === 'fixed') {
+      let token = quote.accept_token;
+      if (!token) {
+        token = generateAcceptToken();
+        try {
+          await prisma.quote.update({ where: { id: quote.id }, data: { accept_token: token } });
+        } catch (tokenErr) {
+          console.error('[Quote Email] Failed to persist accept token:', tokenErr.message);
+        }
+      }
+      acceptUrl = `${config.crmUrl.replace(/\/$/, '')}/accept/${token}`;
     }
 
     // Prepare email variables
@@ -373,6 +395,7 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
       move_date: job.confirmed_move_date || job.preferred_move_date || 'to be confirmed',
       from_address: job.from_line1 || 'TBC',
       to_address: job.to_line1 || 'TBC',
+      accept_url: acceptUrl,
     };
 
     // Pick the right template based on quote type
@@ -420,6 +443,23 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
         type: 'note',
         note: `Quote ${quote.quote_number} emailed to ${to}`,
       },
+    }));
+
+    // Immutable history snapshot — freezes the exact email + PDF data for this send.
+    await safeUpdate('sent-document snapshot', () => recordSentDocument(prisma, {
+      jobId,
+      docType: quote.quote_type === 'fixed' ? 'fixed-quote' : 'estimate-quote',
+      reference: quote.quote_number,
+      toEmail: to,
+      subject: emailResult?.subject || subject,
+      bodyHtml: emailResult?.html || body_html || '',
+      amount: quote.total,
+      total: quote.total,
+      deposit: quote.deposit || 0,
+      balance: 0,
+      pdfGenerator: 'quote',
+      pdfArgs: pdfData,
+      sourceQuoteId: quote.id,
     }));
 
     res.json({

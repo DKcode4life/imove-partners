@@ -23,7 +23,7 @@
  *   - kind=assignment → PATCH /planner/assignments/:id { asset_id } (reassign)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { Loader2, Users, Truck, X, Plus, Check, UserPlus } from 'lucide-react';
+import { Loader2, Users, Truck, X, Plus, Check, UserPlus, ExternalLink } from 'lucide-react';
 import api from '../lib/api';
 import { catColor } from '../lib/planner-colors';
 import ColorPickerPopover from './ColorPickerPopover';
@@ -47,6 +47,8 @@ export interface StaffWeekRow {
   vehicle_label: string | null;
   vehicle_is_lorry: boolean;
   assigned_role: string | null;
+  // Set when this assignment is on an additional move day (packing, delivery, …).
+  schedule_label?: string | null;
   start_time: string | null;
   finish_time: string | null;
   daily_rate: number | null;
@@ -79,6 +81,9 @@ interface DayJob {
   label: string;
   category: string | null;
   contract_name: string | null;
+  contract_id?: number | null;
+  // Linked CrmJob id for a survey event created from a job profile.
+  survey_job_id?: number | null;
   is_lux: boolean;
   men_needed: number | null;
   vans_needed: number | null;
@@ -87,6 +92,10 @@ interface DayJob {
   time: string | null;
   planner_color: string | null;
   effective_color: string;
+  // Set when this card is an additional move day (packing, delivery, …) rather
+  // than the main move. Crew assigned here are paid and roll into the job's P&L.
+  is_extra_day?: boolean;
+  schedule_label?: string | null;
 }
 
 interface VehicleOption {
@@ -198,6 +207,7 @@ export default function StaffWeekView({
   highlightDate = null,
   onHighlightConsumed,
   onAddJob,
+  onOpenJob,
   reloadKey,
 }: {
   weekStart: string;
@@ -209,6 +219,9 @@ export default function StaffWeekView({
   // Open the quick-job modal pre-filled with a day's date. Wired to the same
   // QuickJobModal the rest of the planner uses; the per-day "+" button calls it.
   onAddJob?: (date: string) => void;
+  // Open a job's profile/form from its tray card: removal → CRM detail, contract
+  // job → contractor page, quick job → edit modal. Parent decides the route.
+  onOpenJob?: (job: DayJob, date: string) => void;
   // Bumped by the parent after a quick job is saved so the grid refetches and
   // shows the new job without a manual reload.
   reloadKey?: number;
@@ -307,6 +320,7 @@ export default function StaffWeekView({
             onChange={load}
             luxRate={data.settings.lux_hourly_rate}
             onAddJob={onAddJob}
+            onOpenJob={onOpenJob}
             touch={touch}
           />
         ))}
@@ -318,7 +332,7 @@ export default function StaffWeekView({
 // ── Single day column ────────────────────────────────────────────────────────
 
 function StaffDayColumn({
-  date, dayName, staff, day_jobs, has_lux, vehicles, onChange, luxRate, onAddJob, touch,
+  date, dayName, staff, day_jobs, has_lux, vehicles, onChange, luxRate, onAddJob, onOpenJob, touch,
 }: {
   date: string;
   dayName: string;
@@ -329,6 +343,7 @@ function StaffDayColumn({
   onChange: () => void;
   luxRate: number;
   onAddJob?: (date: string) => void;
+  onOpenJob?: (job: DayJob, date: string) => void;
   // Touch device → show the tap-to-assign button + sheet instead of relying on
   // drag-and-drop, which doesn't work on phones/tablets.
   touch: boolean;
@@ -499,6 +514,7 @@ function StaffDayColumn({
                 setColorCurrent(current);
                 setOpenColorKey(`${j.source}|${j.id}`);
               }}
+              onOpen={onOpenJob ? () => onOpenJob(j, date) : undefined}
               onAssign={touch ? () => setAssignJob(j) : undefined}
             />
           ))}
@@ -686,10 +702,13 @@ function StaffDayColumn({
 // ── Top-of-column draggable job card ─────────────────────────────────────────
 
 function JobTrayCard({
-  job, onOpenColor, onAssign,
+  job, onOpenColor, onOpen, onAssign,
 }: {
   job: DayJob;
   onOpenColor: (anchor: DOMRect, currentPlannerColor: string | null) => void;
+  // Opens this job's profile/form (removal → CRM detail, contract → contractor
+  // page, quick job → edit modal). Rendered as a small icon button, top-right.
+  onOpen?: () => void;
   // Provided only on touch devices — renders an "Assign Staff" button that opens
   // the tap-to-pick sheet in place of drag-and-drop.
   onAssign?: () => void;
@@ -729,7 +748,14 @@ function JobTrayCard({
       />
       {job.is_lux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" title="Lux Move" />}
       <div className="min-w-0 flex-1">
-        <div className="text-[11.5px] font-semibold text-slate-800 truncate leading-tight">{job.label}</div>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {job.is_extra_day && (
+            <span className="flex-shrink-0 text-[8.5px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 ring-1 ring-amber-200/70 rounded px-1 py-0.5 leading-none">
+              {job.schedule_label || 'Extra'}
+            </span>
+          )}
+          <div className="text-[11.5px] font-semibold text-slate-800 truncate leading-tight">{job.label}</div>
+        </div>
         {(job.contract_name || job.time) && (
           <div className="text-[10px] text-slate-500 truncate leading-tight mt-0.5">
             {job.contract_name && <span>{job.contract_name}</span>}
@@ -768,6 +794,18 @@ function JobTrayCard({
         >
           <UserPlus className="w-3 h-3" />
           Assign
+        </button>
+      )}
+      {onOpen && (
+        <button
+          type="button"
+          draggable={false}
+          onClick={e => { e.stopPropagation(); onOpen(); }}
+          className="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-white hover:bg-blue-600 transition-colors"
+          title="Open this job"
+          aria-label="Open this job"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
         </button>
       )}
     </div>
