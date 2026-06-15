@@ -40,6 +40,9 @@ interface ExistingJob {
 interface Props {
   contract: Contract;
   editJob?: ExistingJob | null;
+  // Pre-select the job date when creating (e.g. the planner day the user
+  // clicked before picking a contractor). Ignored in edit mode.
+  defaultDate?: string;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -83,10 +86,10 @@ function inferAutoKind(line: { description: string; contract_item_id: number | n
   return null;
 }
 
-export default function CreateContractJobModal({ contract, editJob, onClose, onSaved }: Props) {
+export default function CreateContractJobModal({ contract, editJob, defaultDate, onClose, onSaved }: Props) {
   const [items, setItems] = useState<ContractItem[]>([]);
   const [itemsLoaded, setItemsLoaded] = useState(false);
-  const [jobDate, setJobDate] = useState(editJob?.job_date || todayISO());
+  const [jobDate, setJobDate] = useState(editJob?.job_date || defaultDate || todayISO());
   const [description, setDescription] = useState(editJob?.description || '');
   const [notes, setNotes] = useState(editJob?.notes || '');
   const [menNeeded, setMenNeeded] = useState<string>(String(editJob?.men_needed ?? ''));

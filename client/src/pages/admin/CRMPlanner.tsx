@@ -9,8 +9,9 @@ import Modal from '../../components/Modal';
 import JobPnlPanel from '../../components/JobPnlPanel';
 import StaffWeekView from '../../components/StaffWeekView';
 import ColorPickerPopover from '../../components/ColorPickerPopover';
+import CreateContractJobModal from '../../components/CreateContractJobModal';
 import api from '../../lib/api';
-import type { PlannerAsset, PlannerCalendarItem, PlannerAssignment, PlannerEvent } from '../../types';
+import type { PlannerAsset, PlannerCalendarItem, PlannerAssignment, PlannerEvent, Contract } from '../../types';
 import { fetchJobCategories, FALLBACK_CATEGORY_NAMES } from '../../lib/jobCategories';
 import { catColor } from '../../lib/planner-colors';
 
@@ -1417,16 +1418,21 @@ const EMPTY_QUICK: {
 } = { title: '', category: 'Quick Job', customer_name: '', contact_number: '', address: '', event_date: '', event_time: '', notes: '', contract_id: '' };
 
 function QuickJobModal({
-  open, onClose, defaultDate, editItem, onSaved,
+  open, onClose, defaultDate, editItem, onSaved, onPickContractor,
 }: {
   open: boolean;
   onClose: () => void;
   defaultDate: string;
   editItem?: PlannerCalendarItem | null;
   onSaved: (ev: PlannerEvent) => void;
+  // Create mode only: the user picked a contractor, so swap this quick-job
+  // form out for the full contractor-job form (price-list lines + crew/vans/HGV
+  // that sync to the contractor's weekly invoice). Passes the chosen date so the
+  // contractor job lands on the same day.
+  onPickContractor: (contract: Contract, date: string) => void;
 }) {
   const [form, setForm] = useState({ ...EMPTY_QUICK });
-  const [contracts, setContracts] = useState<{ id: number; company_name: string }[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
   const [categoryNames, setCategoryNames] = useState<string[]>(FALLBACK_CATEGORY_NAMES);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1496,10 +1502,29 @@ function QuickJobModal({
           {contracts.length > 0 && (
             <div className="col-span-2">
               <label className="block text-xs font-medium text-slate-600 mb-1">Contractor</label>
-              <select className="input" value={form.contract_id} onChange={e => set('contract_id', e.target.value)}>
+              <select
+                className="input"
+                value={form.contract_id}
+                onChange={e => {
+                  const v = e.target.value;
+                  // In create mode, picking a contractor swaps this form out for
+                  // the full contractor-job form (which syncs to the contractor's
+                  // weekly invoice). In edit mode we keep the simple tag behaviour.
+                  if (!editItem && v) {
+                    const c = contracts.find(x => String(x.id) === v);
+                    if (c) { onPickContractor(c, form.event_date); return; }
+                  }
+                  set('contract_id', v);
+                }}
+              >
                 <option value="">— None —</option>
                 {contracts.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
               </select>
+              {!editItem && (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Selecting a contractor opens the contractor job form (crew, vans &amp; price-list lines that feed the weekly invoice).
+                </p>
+              )}
             </div>
           )}
           <div className="col-span-2">
@@ -1808,6 +1833,11 @@ export default function CRMPlanner() {
   // data) refetches and shows the new job without a manual reload.
   const [staffReloadKey, setStaffReloadKey] = useState(0);
   const [editEvent,     setEditEvent]     = useState<PlannerCalendarItem | null>(null);
+  // Contractor job form, opened when a contractor is picked in the quick-job
+  // modal. Creating one here makes a real ContractJob that syncs to the planner
+  // and the contractor's weekly invoice (same flow as the Contract Jobs page).
+  const [contractJobTarget, setContractJobTarget] = useState<Contract | null>(null);
+  const [contractJobDate,   setContractJobDate]   = useState('');
   const [showAssetForm, setShowAssetForm] = useState(false);
   const [editAsset,     setEditAsset]     = useState<PlannerAsset | null>(null);
   const [assetInitType, setAssetInitType] = useState<'staff' | 'vehicle'>('staff');
@@ -2361,7 +2391,29 @@ export default function CRMPlanner() {
         defaultDate={quickJobDate}
         editItem={editEvent}
         onSaved={() => { loadData(); setStaffReloadKey(k => k + 1); showToast(editEvent ? 'Quick job updated' : 'Quick job added', 'success'); }}
+        onPickContractor={(contract, date) => {
+          // Swap the quick-job form for the full contractor-job form on the
+          // same day. The contractor job syncs to the planner + weekly invoice.
+          setShowQuickJob(false);
+          setEditEvent(null);
+          setContractJobDate(date || quickJobDate);
+          setContractJobTarget(contract);
+        }}
       />
+
+      {contractJobTarget && (
+        <CreateContractJobModal
+          contract={contractJobTarget}
+          defaultDate={contractJobDate}
+          onClose={() => setContractJobTarget(null)}
+          onSaved={() => {
+            setContractJobTarget(null);
+            loadData();
+            setStaffReloadKey(k => k + 1);
+            showToast('Contractor job added', 'success');
+          }}
+        />
+      )}
 
       <AssetFormModal
         open={showAssetForm}
