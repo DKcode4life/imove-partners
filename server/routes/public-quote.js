@@ -26,6 +26,7 @@ const {
   splitItems,
   computeAcceptedTotals,
   validateAcceptancePayload,
+  applyAcceptanceToQuoteState,
 } = require('../lib/quote-acceptance');
 
 const router = express.Router();
@@ -157,6 +158,14 @@ router.post('/quotes/:token/accept', wrap(async (req, res) => {
   const acceptedDate = new Date();
   const selectedSet = new Set(selectedOptionalIds);
 
+  // Reflect the chosen optional services back into the QuoteBuilder's quote_state
+  // so the CRM shows them ticked and the Fix Quotation total + deposit recompute.
+  const acceptedOptionalItems = acceptedItems
+    .filter((i) => i.is_optional)
+    .map((i) => ({ description: i.description, total: i.total }));
+  const { quoteState: updatedQuoteState, changed: quoteStateChanged } =
+    applyAcceptanceToQuoteState(quote.job.quote_state, acceptedOptionalItems);
+
   // Persist acceptance atomically. Mandatory items are untouched; optional items
   // get their `accepted` flag set to reflect the customer's tick boxes.
   await prisma.$transaction([
@@ -182,7 +191,12 @@ router.post('/quotes/:token/accept', wrap(async (req, res) => {
     }),
     prisma.crmJob.update({
       where: { id: quote.job_id },
-      data: { quote_accepted: true, status: 'Quote Accepted', quote_amount: total },
+      data: {
+        quote_accepted: true,
+        status: 'Quote Accepted',
+        quote_amount: total,
+        ...(quoteStateChanged ? { quote_state: updatedQuoteState } : {}),
+      },
     }),
     prisma.crmActivity.create({
       data: {

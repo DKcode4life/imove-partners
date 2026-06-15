@@ -6,6 +6,7 @@ const {
   splitItems,
   computeAcceptedTotals,
   validateAcceptancePayload,
+  applyAcceptanceToQuoteState,
   round2,
   MAX_DECLARED_VALUE,
 } = require('./quote-acceptance');
@@ -128,6 +129,69 @@ test('rejects selecting an id that is not an optional item on this quote', () =>
     ITEMS,
   );
   assert.strictEqual(r.ok, false);
+});
+
+// ── applyAcceptanceToQuoteState ───────────────────────────────────────────────
+const QUOTE_STATE = {
+  quotationItems: [{ id: 'm1', description: 'Full house move', price: 1000 }],
+  quotationAddons: [
+    { id: 'a1', description: 'Packing service', price: 300, selected: false },
+    { id: 'a2', description: 'Dismantling', price: 100, selected: false },
+  ],
+  depositType: 'percentage',
+  depositValue: '10',
+};
+
+test('accepting an optional service flips its addon to selected', () => {
+  const { quoteState, changed } = applyAcceptanceToQuoteState(QUOTE_STATE, [
+    { description: 'Packing service', total: 300 },
+  ]);
+  assert.strictEqual(changed, true);
+  const packing = quoteState.quotationAddons.find((a) => a.id === 'a1');
+  const dismantle = quoteState.quotationAddons.find((a) => a.id === 'a2');
+  assert.strictEqual(packing.selected, true);
+  assert.strictEqual(dismantle.selected, false);
+});
+
+test('does not mutate the original quote_state', () => {
+  applyAcceptanceToQuoteState(QUOTE_STATE, [{ description: 'Packing service', total: 300 }]);
+  assert.strictEqual(QUOTE_STATE.quotationAddons[0].selected, false);
+});
+
+test('matches case-insensitively and trims whitespace', () => {
+  const { quoteState, changed } = applyAcceptanceToQuoteState(QUOTE_STATE, [
+    { description: '  packing SERVICE ', total: 300 },
+  ]);
+  assert.strictEqual(changed, true);
+  assert.strictEqual(quoteState.quotationAddons.find((a) => a.id === 'a1').selected, true);
+});
+
+test('flips each duplicate-named addon at most once', () => {
+  const state = {
+    quotationAddons: [
+      { id: 'a1', description: 'Box bundle', price: 25, selected: false },
+      { id: 'a2', description: 'Box bundle', price: 25, selected: false },
+    ],
+  };
+  const { quoteState } = applyAcceptanceToQuoteState(state, [{ description: 'Box bundle', total: 25 }]);
+  const selectedCount = quoteState.quotationAddons.filter((a) => a.selected).length;
+  assert.strictEqual(selectedCount, 1);
+});
+
+test('returns unchanged when there is no quote_state or no addons', () => {
+  assert.deepStrictEqual(applyAcceptanceToQuoteState(null, [{ description: 'x', total: 1 }]), {
+    quoteState: null,
+    changed: false,
+  });
+  const noAddons = { quotationItems: [] };
+  assert.strictEqual(applyAcceptanceToQuoteState(noAddons, [{ description: 'x', total: 1 }]).changed, false);
+});
+
+test('returns unchanged when nothing matches', () => {
+  const { changed } = applyAcceptanceToQuoteState(QUOTE_STATE, [
+    { description: 'Storage', total: 50 },
+  ]);
+  assert.strictEqual(changed, false);
 });
 
 test('round2 avoids binary-float drift', () => {

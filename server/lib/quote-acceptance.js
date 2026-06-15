@@ -118,11 +118,64 @@ function validateAcceptancePayload(body, quoteItems) {
   };
 }
 
+/**
+ * Reflect the customer's accepted optional services back into the QuoteBuilder's
+ * `quote_state` JSON so the CRM UI shows them ticked, and the Fix Quotation total
+ * + deposit recalculate. Optional services live in `quotationAddons` as
+ * `{ id, description, price, selected }`; accepting one flips `selected` to true.
+ *
+ * Matching is by description (trimmed, case-insensitive), preferring an addon
+ * whose price also matches, and each addon is flipped at most once so duplicate
+ * descriptions are handled deterministically. Pure: returns a new object and
+ * never mutates the input.
+ *
+ * @param {Object|null} quoteState               the job's current quote_state
+ * @param {Array<{description:string,total:number}>} acceptedOptionalItems
+ * @returns {{ quoteState: Object|null, changed: boolean }}
+ */
+function applyAcceptanceToQuoteState(quoteState, acceptedOptionalItems) {
+  if (!quoteState || typeof quoteState !== 'object' || !Array.isArray(quoteState.quotationAddons)) {
+    return { quoteState, changed: false };
+  }
+
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const addons = quoteState.quotationAddons.map((a) => ({ ...a }));
+  const usedIdx = new Set();
+  let changed = false;
+
+  for (const item of acceptedOptionalItems || []) {
+    const desc = norm(item.description);
+    const price = Number(item.total);
+
+    // Prefer an unused, unselected addon matching description AND price; then
+    // fall back to description-only.
+    let idx = addons.findIndex(
+      (a, i) =>
+        !usedIdx.has(i) && !a.selected && norm(a.description) === desc &&
+        Math.abs((Number(a.price) || 0) - price) < 0.005,
+    );
+    if (idx === -1) {
+      idx = addons.findIndex(
+        (a, i) => !usedIdx.has(i) && !a.selected && norm(a.description) === desc,
+      );
+    }
+    if (idx !== -1) {
+      addons[idx] = { ...addons[idx], selected: true };
+      usedIdx.add(idx);
+      changed = true;
+    }
+  }
+
+  if (!changed) return { quoteState, changed: false };
+  return { quoteState: { ...quoteState, quotationAddons: addons }, changed: true };
+}
+
 module.exports = {
   MAX_DECLARED_VALUE,
   generateAcceptToken,
   splitItems,
   computeAcceptedTotals,
   validateAcceptancePayload,
+  applyAcceptanceToQuoteState,
   round2,
 };
