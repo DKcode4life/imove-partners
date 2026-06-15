@@ -58,6 +58,7 @@ const COMPANY = {
   sortCode:      '04-00-03',
   accountNumber: '66057796',
   signOffName:   'Daniel',
+  tiktokUrl:     'https://www.tiktok.com/@imoveuk',
 };
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
@@ -537,15 +538,16 @@ function drawFooterSocials(doc, centerY) {
 
   doc.font(F.regular).fontSize(FS);
 
-  // Resolve a logo's scaled width, or fall back to a text label.
-  const logoOrLabel = (logoPath, label) => {
+  // Resolve a logo's scaled width, or fall back to a text label. An optional
+  // `url` makes the badge clickable in the PDF.
+  const logoOrLabel = (logoPath, label, url) => {
     if (fs.existsSync(logoPath)) {
       try {
         const img = doc.openImage(logoPath);
-        return { kind: 'logo', path: logoPath, w: LOGO_H * (img.width / img.height) };
+        return { kind: 'logo', path: logoPath, w: LOGO_H * (img.width / img.height), url };
       } catch { /* fall through to label */ }
     }
-    return { kind: 'text', str: label, w: doc.widthOfString(label) };
+    return { kind: 'text', str: label, w: doc.widthOfString(label), url };
   };
 
   // Assemble the ordered list of drawable items with measured widths.
@@ -557,7 +559,7 @@ function drawFooterSocials(doc, centerY) {
 
   items.push(logoOrLabel(SOCIAL_LOGOS.google, 'Google'));   gap(); stars(); sep();
   items.push(logoOrLabel(SOCIAL_LOGOS.facebook, 'Facebook')); gap(); stars(); sep();
-  items.push(logoOrLabel(SOCIAL_LOGOS.tiktok, 'TikTok'));    sep();
+  items.push(logoOrLabel(SOCIAL_LOGOS.tiktok, 'TikTok', COMPANY.tiktokUrl)); sep();
   website();
 
   const totalW = items.reduce((s, it) => s + it.w, 0);
@@ -566,8 +568,10 @@ function drawFooterSocials(doc, centerY) {
   for (const it of items) {
     if (it.kind === 'logo') {
       try { doc.image(it.path, x, centerY - LOGO_H / 2, { height: LOGO_H }); } catch { /* skip */ }
+      if (it.url) doc.link(x, centerY - LOGO_H / 2, it.w, LOGO_H, it.url);
     } else if (it.kind === 'text') {
       doc.fillColor(C.gray).font(F.regular).fontSize(FS).text(it.str, x, centerY - FS / 2 - 1, { lineBreak: false });
+      if (it.url) doc.link(x, centerY - FS / 2 - 1, it.w, FS + 2, it.url);
     } else if (it.kind === 'link') {
       doc.fillColor(C.blue).font(F.regular).fontSize(FS).text(it.str, x, centerY - FS / 2 - 1, { lineBreak: false });
       doc.link(x, centerY - FS / 2 - 1, it.w, FS + 2, `https://${COMPANY.website}`);
