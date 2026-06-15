@@ -7,6 +7,7 @@ const { sendTemplated } = require('../services/email');
 const { nextReferenceNumberWithRetry } = require('../lib/reference-numbers');
 const { recordSentDocument } = require('../lib/sent-document');
 const { generateAcceptToken } = require('../lib/quote-acceptance');
+const { termsAttachment } = require('../lib/terms-file');
 const config = require('../config');
 
 const router = express.Router();
@@ -401,6 +402,16 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
     // Pick the right template based on quote type
     const templateSlug = quote.quote_type === 'fixed' ? 'fixed-quote' : 'estimate-quote';
 
+    // Build the attachment list. Fixed quotes also carry the Terms & Conditions
+    // PDF so the customer can read them before accepting online.
+    const attachments = [];
+    if (pdfAttachment) attachments.push(pdfAttachment);
+    if (quote.quote_type === 'fixed') {
+      const terms = termsAttachment();
+      if (terms) attachments.push(terms);
+      else console.warn('[Quote Email] Terms & Conditions PDF missing — sending without it');
+    }
+
     // Send email — pass user's edited subject/body from the modal as overrides
     // NOTE: From this point on, any failure in the DB bookkeeping below MUST NOT
     // cause this endpoint to return 5xx — otherwise the client shows
@@ -411,7 +422,7 @@ router.post('/jobs/:id/quotes/:quoteId/send-email', wrap(async (req, res) => {
       variables,
       subjectOverride: subject || undefined,
       bodyOverride: body_html || undefined,
-      attachments: pdfAttachment ? [pdfAttachment] : [],
+      attachments,
     });
 
     // Best-effort post-send bookkeeping. Each step is wrapped individually so

@@ -193,7 +193,8 @@ async function main() {
             </table>
 
             <p style="margin:0 0 16px;">This price is <strong>guaranteed and fixed</strong> — it will not change provided the inventory and access details remain as discussed during the survey.</p>
-            <p style="margin:0 0 24px;">To go ahead, tap the button below to review your quote, add any optional extras (such as packing), confirm the value of your items for insurance, and accept online — it only takes a minute. Once accepted, we'll send your deposit invoice with our bank details.</p>
+            <p style="margin:0 0 16px;">To go ahead, tap the button below to review your quote, add any optional extras (such as packing), confirm the value of your items for insurance, and accept online — it only takes a minute. Once accepted, we'll send your deposit invoice with our bank details.</p>
+            <p style="margin:0 0 24px;font-size:13px;color:#64748b;">Our full <strong>terms &amp; conditions</strong> are attached to this email for your review before accepting.</p>
 
             <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
               <tr>

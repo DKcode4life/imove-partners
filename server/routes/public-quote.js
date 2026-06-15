@@ -22,6 +22,7 @@ const wrap = require('../lib/async-handler');
 const { generateAcceptancePDF } = require('../services/pdf');
 const { sendTemplated, send } = require('../services/email');
 const { recordSentDocument } = require('../lib/sent-document');
+const { readTermsBuffer } = require('../lib/terms-file');
 const {
   splitItems,
   computeAcceptedTotals,
@@ -32,9 +33,11 @@ const {
 const router = express.Router();
 
 // Where acceptance notifications land internally, and the terms link shown to
-// the customer. Both overridable via env without a code change.
+// the customer. The terms link defaults to the hosted PDF served below; both
+// are overridable via env without a code change.
 const COMPANY_EMAIL = process.env.COMPANY_NOTIFICATION_EMAIL || 'info@myimove.co.uk';
-const TERMS_URL = process.env.TERMS_URL || 'https://www.myimove.co.uk/terms';
+const TERMS_URL = process.env.TERMS_URL
+  || `${(config.crmUrl || '').replace(/\/$/, '')}/api/public/terms`;
 
 /** "12 High St, Flat 2, London SW1A 1AA" from a job's from/to address columns. */
 function formatAddress(line1, line2, city, postcode) {
@@ -126,6 +129,16 @@ function serializeQuote(quote) {
     terms_url: TERMS_URL,
   };
 }
+
+// ─── GET: the hosted Terms & Conditions PDF ──────────────────────────────────
+router.get('/terms', wrap(async (_req, res) => {
+  const buffer = readTermsBuffer();
+  if (!buffer) return res.status(404).json({ error: 'Terms & Conditions are not available right now.' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="iMove-Terms-and-Conditions.pdf"');
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
+}));
 
 // ─── GET: the quote a customer is about to accept ────────────────────────────
 router.get('/quotes/:token', wrap(async (req, res) => {

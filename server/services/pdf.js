@@ -1053,6 +1053,105 @@ async function generateContractInvoicePDF(data) {
   });
 }
 
+/**
+ * generateTermsPDF()
+ *
+ * Renders the iMove Terms & Conditions (server/lib/terms-content.js) into a
+ * branded, multi-page PDF that matches the quote/invoice layout (logo header,
+ * watermark, green dividers, footer on every page). Hosted statically and
+ * attached to fixed-quote emails.
+ */
+async function generateTermsPDF() {
+  const { INTRO, SECTIONS, FOOTER_NOTE } = require('../lib/terms-content');
+
+  const doc = new PDFDocument({
+    size: 'A4',
+    margin: 0,
+    bufferPages: true,
+    info: {
+      Title: 'Terms & Conditions',
+      Author: COMPANY.name,
+      Subject: 'iMove Relocations — Terms & Conditions',
+      Keywords: 'terms, conditions, iMove, relocations, moving',
+      Creator: 'iMove CRM',
+    },
+  });
+
+  const buffers = [];
+  doc.on('data', (b) => buffers.push(b));
+
+  const BODY_FS = 8.5;
+  const LINE_GAP = 1.5;
+  const BOTTOM_LIMIT = FOOTER_Y - 16;
+
+  drawWatermark(doc);
+  let y = drawHeader(doc, 'Terms');
+
+  // Document title
+  doc.fillColor(C.dark).font(F.bold).fontSize(16).text('Terms & Conditions', LEFT, y);
+  y = doc.y + 10;
+
+  // Move to a fresh page when the next block won't fit.
+  const ensureSpace = (needed) => {
+    if (y + needed > BOTTOM_LIMIT) {
+      doc.addPage();
+      drawWatermark(doc);
+      y = 50;
+    }
+  };
+
+  // Render one wrapped paragraph at an indent, paging as needed.
+  const writePara = (text, { indent = 0, bold = false, gapAfter = 5, color = C.body, fontSize = BODY_FS } = {}) => {
+    const x = LEFT + indent;
+    const width = CONTENT_W - indent;
+    const font = bold ? F.bold : F.regular;
+    const height = doc.font(font).fontSize(fontSize).heightOfString(text, { width, lineGap: LINE_GAP });
+    ensureSpace(height);
+    doc.fillColor(color).font(font).fontSize(fontSize)
+       .text(text, x, y, { width, align: 'left', lineGap: LINE_GAP });
+    y = doc.y + gapAfter;
+  };
+
+  // Introduction
+  for (const para of INTRO) writePara(para, { gapAfter: 10 });
+
+  // Numbered sections
+  for (const section of SECTIONS) {
+    ensureSpace(28);
+    writePara(section.title, { bold: true, color: C.dark, fontSize: 10, gapAfter: 4 });
+    for (const [num, text] of section.lines) {
+      const level = num ? (num.match(/\./g) || []).length : 0;
+      const indent = 14 + level * 16;
+      writePara(num ? `${num}  ${text}` : text, { indent, gapAfter: 3 });
+    }
+    y += 6;
+  }
+
+  // Closing note
+  ensureSpace(20);
+  writePara(FOOTER_NOTE, { color: C.gray, fontSize: 8 });
+
+  // Footer on every page
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    drawFooter(doc);
+  }
+
+  doc.end();
+
+  return new Promise((resolve, reject) => {
+    doc.on('end', () => {
+      resolve({
+        buffer: Buffer.concat(buffers),
+        filename: 'iMove-Terms-and-Conditions.pdf',
+        mimeType: 'application/pdf',
+      });
+    });
+    doc.on('error', reject);
+  });
+}
+
 async function renderHTMLToPDF(html, filename) {
   console.log(`[pdf] HTML->PDF fallback invoked for: ${filename}`);
   return {
@@ -1066,6 +1165,7 @@ module.exports = {
   generateQuotePDF,
   generateInvoicePDF,
   generateAcceptancePDF,
+  generateTermsPDF,
   generateContractInvoicePDF,
   renderDocument,
   renderHTMLToPDF,
