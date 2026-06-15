@@ -496,7 +496,10 @@ function drawStamp(doc, text, color) {
   doc.opacity(1);
 }
 
-function drawFooter(doc) {
+// Pass the page number + total explicitly: PDFKit does NOT populate
+// `doc.page.number`, so deriving it here would print "Page 1" on every page.
+// Callers iterate the buffered range and pass `i - start + 1` and `count`.
+function drawFooter(doc, pageNumber, totalPages) {
   const y = FOOTER_Y;
 
   // Top separator
@@ -514,10 +517,10 @@ function drawFooter(doc) {
 
   // Right: page number
   const range = doc.bufferedPageRange ? doc.bufferedPageRange() : { start: 0, count: 1 };
-  const currentPage = (doc.page && doc.page.number) || 1;
-  const totalPages = range.count || 1;
+  const currentPage = pageNumber || 1;
+  const total = totalPages || range.count || 1;
   doc.fillColor(C.muted).font(F.regular).fontSize(8)
-     .text(`Page ${currentPage} of ${totalPages}`, RIGHT - 80, y + 20, { width: 80, align: 'right' });
+     .text(`Page ${currentPage} of ${total}`, RIGHT - 80, y + 20, { width: 80, align: 'right' });
 }
 
 // ── Contract invoice helpers ───────────────────────────────────────────────
@@ -802,7 +805,7 @@ async function renderDocument(data) {
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
-    drawFooter(doc);
+    drawFooter(doc, i - range.start + 1, range.count);
   }
 
   doc.end();
@@ -1036,7 +1039,7 @@ async function generateContractInvoicePDF(data) {
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
-    drawFooter(doc);
+    drawFooter(doc, i - range.start + 1, range.count);
   }
 
   doc.end();
@@ -1135,7 +1138,7 @@ async function generateTermsPDF() {
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
-    drawFooter(doc);
+    drawFooter(doc, i - range.start + 1, range.count);
   }
 
   doc.end();
