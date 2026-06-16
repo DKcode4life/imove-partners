@@ -231,8 +231,13 @@ export default function StaffWeekView({
   const [error, setError] = useState<string | null>(null);
   const touch = useCoarsePointer();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` refetches keep the grid mounted (no full-screen spinner) so an
+  // in-row edit — typing a start/finish time and tabbing to the next person —
+  // doesn't tear down and rebuild the grid, which would swallow the next click
+  // and force a double-click. Only the initial load and week navigation show
+  // the spinner.
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const r = await api.get<StaffWeekPayload>(`/planner/staff-week?start=${weekStart}`);
@@ -240,9 +245,11 @@ export default function StaffWeekView({
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to load staff week');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [weekStart]);
+
+  const reloadSilently = useCallback(() => { load(true); }, [load]);
 
   useEffect(() => { load(); }, [load, reloadKey]);
 
@@ -317,7 +324,7 @@ export default function StaffWeekView({
             day_jobs={data.day_jobs[date] || []}
             has_lux={!!data.has_lux[date]}
             vehicles={data.vehicles}
-            onChange={load}
+            onChange={reloadSilently}
             luxRate={data.settings.lux_hourly_rate}
             onAddJob={onAddJob}
             onOpenJob={onOpenJob}
