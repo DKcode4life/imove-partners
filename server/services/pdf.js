@@ -58,7 +58,7 @@ const COMPANY = {
   sortCode:      '04-00-03',
   accountNumber: '66057796',
   signOffName:   'Daniel',
-  googleUrl:     'https://share.google/WZbUP0ppfx6YRkstu',
+  googleUrl:     'https://maps.app.goo.gl/A3Rftr8qsfXdhY3f9',
   facebookUrl:   'https://www.facebook.com/imoveuk',
   tiktokUrl:     'https://www.tiktok.com/@imoveuk',
 };
