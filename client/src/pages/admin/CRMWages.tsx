@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Banknote, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Banknote, RefreshCw, CheckCircle2 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import api from '../../lib/api';
 import type { WeeklyPnlResponse } from '../../types';
@@ -471,11 +471,72 @@ function MoneyInput({
   );
 }
 
+type PnlSortKey = 'date' | 'label' | 'income' | 'wages' | 'expenses' | 'profit';
+type SortDir = 'asc' | 'desc';
+
+// Numeric columns lead with their largest value (e.g. most profitable job on
+// top) on first click; date/job lead ascending. Re-clicking a column flips it.
+const NUMERIC_KEYS: PnlSortKey[] = ['income', 'wages', 'expenses', 'profit'];
+function defaultDirFor(key: PnlSortKey): SortDir {
+  return NUMERIC_KEYS.includes(key) ? 'desc' : 'asc';
+}
+
+// Clickable column header with an asc/desc chevron. A faint placeholder chevron
+// keeps spacing stable and hints sortability on hover.
+function SortHeader({ label, columnKey, active, dir, onSort, align }: {
+  label: string;
+  columnKey: PnlSortKey;
+  active: boolean;
+  dir: SortDir;
+  onSort: (key: PnlSortKey) => void;
+  align: 'left' | 'right';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(columnKey)}
+      title={`Sort by ${label}`}
+      className={`group inline-flex items-center gap-1 font-semibold hover:text-slate-900 ${align === 'right' ? 'flex-row-reverse' : ''}`}
+    >
+      <span>{label}</span>
+      {active
+        ? (dir === 'asc' ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />)
+        : <ChevronUp className="w-3.5 h-3.5 opacity-0 group-hover:opacity-30" />}
+    </button>
+  );
+}
+
 function PnlPanel({
   pnl, onOpenJob,
 }: { pnl: WeeklyPnlResponse | null; onOpenJob: (row: WeeklyPnlResponse['jobs'][number]) => void }) {
   const jobs = pnl?.jobs ?? [];
   const totals = pnl?.totals ?? { income: 0, wages: 0, expenses: 0, profit: 0 };
+
+  const [sortKey, setSortKey] = useState<PnlSortKey>('date');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  const onSort = (key: PnlSortKey) => {
+    if (key === sortKey) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(defaultDirFor(key));
+    }
+  };
+
+  const sortedJobs = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...jobs].sort((a, b) => {
+      const primary = sortKey === 'label'
+        ? a.label.localeCompare(b.label)
+        : sortKey === 'date'
+          ? a.date.localeCompare(b.date) // ISO YYYY-MM-DD sorts lexicographically
+          : a[sortKey] - b[sortKey];
+      if (primary !== 0) return primary * dir;
+      // Stable tiebreak so equal values keep a sensible order.
+      return a.date.localeCompare(b.date) || a.label.localeCompare(b.label);
+    });
+  }, [jobs, sortKey, sortDir]);
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -493,14 +554,26 @@ function PnlPanel({
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
               <tr>
-                <th className="text-left px-4 py-2 font-semibold text-slate-600 whitespace-nowrap">Date</th>
-                <th className="text-left px-4 py-2 font-semibold text-slate-600">Job</th>
-                <th className="text-right px-3 py-2 font-semibold text-slate-600">Income</th>
-                <th className="text-right px-3 py-2 font-semibold text-slate-600">Wages</th>
-                <th className="text-right px-3 py-2 font-semibold text-slate-600">Expenses</th>
-                <th className="text-right px-3 py-2 font-semibold text-slate-700 bg-blue-50/50">Profit</th>
+                <th className="text-left px-4 py-2 whitespace-nowrap">
+                  <SortHeader label="Date" columnKey="date" active={sortKey === 'date'} dir={sortDir} onSort={onSort} align="left" />
+                </th>
+                <th className="text-left px-4 py-2">
+                  <SortHeader label="Job" columnKey="label" active={sortKey === 'label'} dir={sortDir} onSort={onSort} align="left" />
+                </th>
+                <th className="text-right px-3 py-2">
+                  <SortHeader label="Income" columnKey="income" active={sortKey === 'income'} dir={sortDir} onSort={onSort} align="right" />
+                </th>
+                <th className="text-right px-3 py-2">
+                  <SortHeader label="Wages" columnKey="wages" active={sortKey === 'wages'} dir={sortDir} onSort={onSort} align="right" />
+                </th>
+                <th className="text-right px-3 py-2">
+                  <SortHeader label="Expenses" columnKey="expenses" active={sortKey === 'expenses'} dir={sortDir} onSort={onSort} align="right" />
+                </th>
+                <th className="text-right px-3 py-2 text-slate-700 bg-blue-50/50">
+                  <SortHeader label="Profit" columnKey="profit" active={sortKey === 'profit'} dir={sortDir} onSort={onSort} align="right" />
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -509,7 +582,7 @@ function PnlPanel({
                   No jobs this week. Schedule jobs on the planner to see P&amp;L here.
                 </td></tr>
               )}
-              {jobs.map(row => (
+              {sortedJobs.map(row => (
                 <tr key={`${row.source}-${row.id}`}>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 tabular-nums">
                     {fmtPnlDate(row.date)}
