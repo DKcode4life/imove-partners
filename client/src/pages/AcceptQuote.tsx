@@ -345,7 +345,7 @@ function Shell({
       {company && (
         <p className="mx-auto mt-5 max-w-xl text-center text-xs text-slate-400">
           Questions? Call {company.phone} or email{' '}
-          <a href={`mailto:${company.email}`} className="underline">
+          <a href={`mailto:${company.email}`} target="_blank" rel="noopener noreferrer" className="underline">
             {company.email}
           </a>
         </p>
