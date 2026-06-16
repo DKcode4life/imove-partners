@@ -20,6 +20,17 @@ interface InvoiceItem {
   unit_price: number;
   total: number;
   sort_order?: number;
+  // Transient (client-only): tracks which price-list service was picked from the
+  // dropdown so the select reflects the choice. Not persisted — the invoice line
+  // stores only the resolved description + unit price.
+  contract_item_id?: number | null;
+}
+
+// Per-contractor price-list item (same source the job form uses).
+interface PriceItem {
+  id: number;
+  name: string;
+  unit_price: number;
 }
 
 interface ContractInvoice {
@@ -76,6 +87,7 @@ export default function CRMContractInvoice() {
   const [notes, setNotes] = useState('');
   const [taxRate, setTaxRate] = useState(20);
   const [items, setItems] = useState<InvoiceItem[]>([]);
+  const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -102,6 +114,15 @@ export default function CRMContractInvoice() {
 
   useEffect(() => { fetchInvoice(); }, [fetchInvoice]);
 
+  // Load the contractor's price list so new invoice lines can be filled from the
+  // same service dropdown the job form uses. Non-fatal if it fails.
+  useEffect(() => {
+    if (!Number.isFinite(cid)) return;
+    api.get<PriceItem[]>(`/contract-jobs/contractors/${cid}/items`)
+      .then(r => setPriceItems(r.data))
+      .catch(() => { /* contractor may have no price list yet */ });
+  }, [cid]);
+
   const isLocked = invoice?.status === 'paid';
 
   const totals = useMemo(() => {
@@ -113,6 +134,17 @@ export default function CRMContractInvoice() {
   const updateLine = (idx: number, patch: Partial<InvoiceItem>) => {
     setItems(prev => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
     setDirty(true);
+  };
+
+  // Picking a service from the dropdown fills in its description + unit price;
+  // the user then sets the quantity/amount. "— ad-hoc —" clears the link so the
+  // description can be typed freely.
+  const pickInvoiceItem = (idx: number, itemId: string) => {
+    const id = parseInt(itemId, 10);
+    const it = priceItems.find(x => x.id === id);
+    updateLine(idx, it
+      ? { contract_item_id: it.id, description: it.name, unit_price: it.unit_price }
+      : { contract_item_id: null });
   };
 
   const removeLine = (idx: number) => {
@@ -350,13 +382,29 @@ export default function CRMContractInvoice() {
                       />
                     </td>
                     <td className="px-4 py-2">
-                      <input
-                        value={item.description}
-                        onChange={e => updateLine(idx, { description: e.target.value })}
-                        disabled={isLocked}
-                        placeholder="e.g. 3 × Porter"
-                        className="input-field text-sm py-1 w-full"
-                      />
+                      <div className="flex items-center gap-2">
+                        {priceItems.length > 0 && (
+                          <select
+                            value={item.contract_item_id ?? ''}
+                            onChange={e => pickInvoiceItem(idx, e.target.value)}
+                            disabled={isLocked}
+                            title="Fill from the contractor's price list"
+                            className="input-field text-sm py-1 w-44 flex-shrink-0"
+                          >
+                            <option value="">— ad-hoc —</option>
+                            {priceItems.map(it => (
+                              <option key={it.id} value={it.id}>{it.name} (£{it.unit_price.toFixed(2)})</option>
+                            ))}
+                          </select>
+                        )}
+                        <input
+                          value={item.description}
+                          onChange={e => updateLine(idx, { description: e.target.value })}
+                          disabled={isLocked}
+                          placeholder="e.g. 3 × Porter"
+                          className="input-field text-sm py-1 flex-1"
+                        />
+                      </div>
                     </td>
                     <td className="px-4 py-2">
                       <input
