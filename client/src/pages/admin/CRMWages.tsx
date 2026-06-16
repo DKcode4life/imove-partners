@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Banknote, RefreshCw, CheckCircle2 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
 import api from '../../lib/api';
-import type { WeeklyPnlResponse } from '../../types';
+import type { WeeklyPnlResponse, WeeklyPnlRow } from '../../types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -474,6 +474,11 @@ function MoneyInput({
 type PnlSortKey = 'date' | 'label' | 'income' | 'wages' | 'expenses' | 'profit';
 type SortDir = 'asc' | 'desc';
 
+// Flat Rate VAT scheme: ticking a job uplifts its income by this fraction,
+// which flows straight into its profit (and the week totals).
+const FLAT_RATE_UPLIFT = 0.08;
+const pnlRowKey = (r: { source: string; id: number }) => `${r.source}-${r.id}`;
+
 // Numeric columns lead with their largest value (e.g. most profitable job on
 // top) on first click; date/job lead ascending. Re-clicking a column flips it.
 const NUMERIC_KEYS: PnlSortKey[] = ['income', 'wages', 'expenses', 'profit'];
@@ -510,10 +515,19 @@ function PnlPanel({
   pnl, onOpenJob,
 }: { pnl: WeeklyPnlResponse | null; onOpenJob: (row: WeeklyPnlResponse['jobs'][number]) => void }) {
   const jobs = pnl?.jobs ?? [];
-  const totals = pnl?.totals ?? { income: 0, wages: 0, expenses: 0, profit: 0 };
 
   const [sortKey, setSortKey] = useState<PnlSortKey>('date');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  // Local flat-rate flags layered over the server values so a tick updates
+  // instantly while it persists in the background. Reseeded whenever the
+  // underlying week data changes.
+  const [flatRate, setFlatRate] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const seed: Record<string, boolean> = {};
+    for (const j of pnl?.jobs ?? []) seed[pnlRowKey(j)] = j.vat_flat_rate;
+    setFlatRate(seed);
+  }, [pnl]);
 
   const onSort = (key: PnlSortKey) => {
     if (key === sortKey) {
@@ -524,9 +538,28 @@ function PnlPanel({
     }
   };
 
+  const toggleFlatRate = async (row: WeeklyPnlRow) => {
+    const key = pnlRowKey(row);
+    const next = !row.vat_flat_rate;
+    setFlatRate(f => ({ ...f, [key]: next })); // optimistic
+    try {
+      await api.patch('/wages/pnl/flat-rate', { source: row.source, id: row.id, vat_flat_rate: next });
+    } catch {
+      setFlatRate(f => ({ ...f, [key]: !next })); // rollback on failure
+    }
+  };
+
+  // Apply the 8% uplift to ticked rows; income and profit both rise by the same
+  // amount, untouched rows pass through unchanged.
+  const rows = useMemo<WeeklyPnlRow[]>(() => jobs.map(j => {
+    const on = flatRate[pnlRowKey(j)] ?? j.vat_flat_rate;
+    const uplift = on ? j.income * FLAT_RATE_UPLIFT : 0;
+    return { ...j, vat_flat_rate: on, income: j.income + uplift, profit: j.profit + uplift };
+  }), [jobs, flatRate]);
+
   const sortedJobs = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
-    return [...jobs].sort((a, b) => {
+    return [...rows].sort((a, b) => {
       const primary = sortKey === 'label'
         ? a.label.localeCompare(b.label)
         : sortKey === 'date'
@@ -536,7 +569,20 @@ function PnlPanel({
       // Stable tiebreak so equal values keep a sensible order.
       return a.date.localeCompare(b.date) || a.label.localeCompare(b.label);
     });
-  }, [jobs, sortKey, sortDir]);
+  }, [rows, sortKey, sortDir]);
+
+  // Totals reflect the uplift so the summary cards and footer stay consistent.
+  const totals = useMemo(() => {
+    const t = rows.reduce((acc, r) => {
+      acc.income += r.income; acc.wages += r.wages; acc.expenses += r.expenses; acc.profit += r.profit;
+      return acc;
+    }, { income: 0, wages: 0, expenses: 0, profit: 0 });
+    return {
+      income: +t.income.toFixed(2), wages: +t.wages.toFixed(2),
+      expenses: +t.expenses.toFixed(2), profit: +t.profit.toFixed(2),
+    };
+  }, [rows]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -574,11 +620,17 @@ function PnlPanel({
                 <th className="text-right px-3 py-2 text-slate-700 bg-blue-50/50">
                   <SortHeader label="Profit" columnKey="profit" active={sortKey === 'profit'} dir={sortDir} onSort={onSort} align="right" />
                 </th>
+                <th
+                  className="text-center px-3 py-2 font-semibold whitespace-nowrap"
+                  title="Flat Rate VAT — tick to add 8% to this job's income"
+                >
+                  8%
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {jobs.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-400">
                   No jobs this week. Schedule jobs on the planner to see P&amp;L here.
                 </td></tr>
               )}
@@ -603,6 +655,15 @@ function PnlPanel({
                   <td className={`text-right px-3 py-2 font-bold tabular-nums bg-blue-50/40 ${row.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                     {fmtMoney(row.profit)}
                   </td>
+                  <td className="text-center px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={row.vat_flat_rate}
+                      onChange={() => toggleFlatRate(row)}
+                      title="Flat Rate VAT — add 8% to this job's income"
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-400 cursor-pointer"
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -617,6 +678,7 @@ function PnlPanel({
                   <td className={`text-right px-3 py-2 font-bold tabular-nums bg-blue-100/60 ${totals.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                     {fmtMoney(totals.profit)}
                   </td>
+                  <td className="px-3 py-2" />
                 </tr>
               </tfoot>
             )}

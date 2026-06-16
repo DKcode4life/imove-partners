@@ -172,6 +172,9 @@ model CrmJob {
   planner_color           String?
   // Per-job P&L base income (manual; UI prefills a smart suggestion when null)
   pnl_income              Float?
+  // Flat Rate VAT scheme: when true, this job's P&L income is uplifted 8% to
+  // reflect the VAT margin kept under the scheme. Off by default.
+  vat_flat_rate           Boolean  @default(false)
   // Timestamps
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt
@@ -268,6 +271,7 @@ model PlannerEvent {
   contract_id    Int?
   planner_color  String?  // per-event color override (hex), beats contract + category defaults
   pnl_income     Float?   // per-job P&L base income (manual; UI prefills suggestion when null)
+  vat_flat_rate  Boolean  @default(false) // Flat Rate VAT: uplift P&L income 8% when true
   created_at     DateTime @default(now())
   updated_at     DateTime @default(now()) @updatedAt
 

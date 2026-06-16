@@ -585,6 +585,8 @@ export interface WeeklyPnlRow {
   wages: number;
   expenses: number;
   profit: number;
+  // Flat Rate VAT scheme: when true the P&L view uplifts this row's income 8%.
+  vat_flat_rate: boolean;
 }
 
 export interface WeeklyPnlResponse {

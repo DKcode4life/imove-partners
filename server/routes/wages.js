@@ -227,6 +227,7 @@ router.get('/pnl', wrap(async (req, res) => {
       },
       select: {
         id: true, full_name: true, quote_amount: true, pnl_income: true,
+        vat_flat_rate: true,
         confirmed_move_date: true, preferred_move_date: true,
       },
     }),
@@ -234,6 +235,7 @@ router.get('/pnl', wrap(async (req, res) => {
       where: { event_date: { gte: start, lte: endDate } },
       select: {
         id: true, title: true, event_date: true, pnl_income: true, category: true,
+        vat_flat_rate: true,
         contract_job: { select: { items: { select: { total: true } } } },
       },
     }),
@@ -318,6 +320,7 @@ router.get('/pnl', wrap(async (req, res) => {
       source: 'job', id: j.id, label: j.full_name,
       date: String(j.confirmed_move_date || j.preferred_move_date || '').slice(0, 10),
       income: totalIncome, wages, expenses: totalExpenses, profit,
+      vat_flat_rate: !!j.vat_flat_rate,
     });
   }
   for (const e of events) {
@@ -334,6 +337,7 @@ router.get('/pnl', wrap(async (req, res) => {
       source: 'event', id: e.id, label: e.title,
       date: String(e.event_date).slice(0, 10),
       income: totalIncome, wages, expenses: totalExpenses, profit,
+      vat_flat_rate: !!e.vat_flat_rate,
     });
   }
 
@@ -346,6 +350,23 @@ router.get('/pnl', wrap(async (req, res) => {
   for (const k of Object.keys(totals)) totals[k] = pnlCalc.round2(totals[k]);
 
   res.json({ week_start: start, jobs: rows, totals });
+}));
+
+// Toggle the Flat Rate VAT uplift flag for a single P&L row (a CRM job or a
+// planner event). The 8% uplift itself is applied client-side for the P&L view.
+router.patch('/pnl/flat-rate', wrap(async (req, res) => {
+  const { source, id, vat_flat_rate } = req.body;
+  const rowId = parseInt(id, 10);
+  if (!Number.isFinite(rowId) || (source !== 'job' && source !== 'event')) {
+    return res.status(400).json({ error: 'source (job|event) and numeric id are required' });
+  }
+  const data = { vat_flat_rate: !!vat_flat_rate };
+  if (source === 'job') {
+    await prisma.crmJob.update({ where: { id: rowId }, data });
+  } else {
+    await prisma.plannerEvent.update({ where: { id: rowId }, data });
+  }
+  res.json({ ok: true, source, id: rowId, vat_flat_rate: data.vat_flat_rate });
 }));
 
 module.exports = router;
