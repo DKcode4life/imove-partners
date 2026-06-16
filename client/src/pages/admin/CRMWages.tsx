@@ -78,6 +78,13 @@ function fmtDayLabel(iso: string): { day: string; date: string } {
   };
 }
 
+// Compact "Mon 12 Jun" label for the P&L date column.
+function fmtPnlDate(iso: string): string {
+  if (!iso) return '—';
+  const { day, date } = fmtDayLabel(iso);
+  return `${day} ${date}`;
+}
+
 function fmtWeekRange(start: string, end: string): string {
   const s = new Date(start + 'T00:00:00');
   const e = new Date(end + 'T00:00:00');
@@ -488,6 +495,7 @@ function PnlPanel({
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
+                <th className="text-left px-4 py-2 font-semibold text-slate-600 whitespace-nowrap">Date</th>
                 <th className="text-left px-4 py-2 font-semibold text-slate-600">Job</th>
                 <th className="text-right px-3 py-2 font-semibold text-slate-600">Income</th>
                 <th className="text-right px-3 py-2 font-semibold text-slate-600">Wages</th>
@@ -497,12 +505,15 @@ function PnlPanel({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {jobs.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-slate-400">
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
                   No jobs this week. Schedule jobs on the planner to see P&amp;L here.
                 </td></tr>
               )}
               {jobs.map(row => (
                 <tr key={`${row.source}-${row.id}`}>
+                  <td className="px-4 py-2 whitespace-nowrap text-slate-600 tabular-nums">
+                    {fmtPnlDate(row.date)}
+                  </td>
                   <td className="px-4 py-2">
                     <button
                       type="button"
@@ -525,6 +536,7 @@ function PnlPanel({
             {jobs.length > 0 && (
               <tfoot className="bg-slate-50 border-t-2 border-slate-200">
                 <tr>
+                  <td className="px-4 py-2" />
                   <td className="px-4 py-2 text-xs uppercase tracking-wider font-bold text-slate-500">Week totals</td>
                   <td className="text-right px-3 py-2 font-semibold text-slate-700 tabular-nums">{fmtMoney(totals.income)}</td>
                   <td className="text-right px-3 py-2 font-semibold text-slate-700 tabular-nums">{fmtMoney(totals.wages)}</td>
