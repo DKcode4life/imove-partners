@@ -555,12 +555,12 @@ function drawFooterSocials(doc, centerY) {
   const sep = () => items.push({ kind: 'sep', w: SEG_GAP });
   const stars = () => items.push({ kind: 'stars', w: starsW });
   const gap = () => items.push({ kind: 'gap', w: ITEM_GAP });
-  const website = () => items.push({ kind: 'link', str: COMPANY.website, w: doc.widthOfString(COMPANY.website) });
+  const handle = () => items.push({ kind: 'link', str: '@imoveuk', url: COMPANY.tiktokUrl, w: doc.widthOfString('@imoveuk') });
 
   items.push(logoOrLabel(SOCIAL_LOGOS.google, 'Google'));   gap(); stars(); sep();
   items.push(logoOrLabel(SOCIAL_LOGOS.facebook, 'Facebook')); gap(); stars(); sep();
   items.push(logoOrLabel(SOCIAL_LOGOS.tiktok, 'TikTok', COMPANY.tiktokUrl)); sep();
-  website();
+  handle();
 
   const totalW = items.reduce((s, it) => s + it.w, 0);
   let x = (PAGE_W - totalW) / 2;
@@ -574,7 +574,7 @@ function drawFooterSocials(doc, centerY) {
       if (it.url) doc.link(x, centerY - FS / 2 - 1, it.w, FS + 2, it.url);
     } else if (it.kind === 'link') {
       doc.fillColor(C.blue).font(F.regular).fontSize(FS).text(it.str, x, centerY - FS / 2 - 1, { lineBreak: false });
-      doc.link(x, centerY - FS / 2 - 1, it.w, FS + 2, `https://${COMPANY.website}`);
+      doc.link(x, centerY - FS / 2 - 1, it.w, FS + 2, it.url);
     } else if (it.kind === 'stars') {
       for (let s = 0; s < STAR_COUNT; s++) {
         const cx = x + STAR_R + s * (2 * STAR_R + STAR_GAP);
