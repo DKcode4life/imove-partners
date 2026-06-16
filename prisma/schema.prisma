@@ -783,6 +783,7 @@ model ContractJob {
   id               Int      @id @default(autoincrement())
   contract_id      Int
   job_date         String // YYYY-MM-DD
+  start_time       String? // "HH:MM" — seeds the planner event time so staff drops preset hours
   description      String?
   notes            String?
   men_needed       Int      @default(0)

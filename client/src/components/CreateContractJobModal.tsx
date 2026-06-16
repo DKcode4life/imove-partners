@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Minus, Plus, Trash2 } from 'lucide-react';
 import Modal from './Modal';
 import api from '../lib/api';
 import type { Contract } from '../types';
@@ -24,6 +24,7 @@ interface JobItemDraft {
 interface ExistingJob {
   id: number;
   job_date: string;
+  start_time?: string | null;
   description: string | null;
   notes: string | null;
   men_needed: number;
@@ -86,10 +87,53 @@ function inferAutoKind(line: { description: string; contract_item_id: number | n
   return null;
 }
 
+/**
+ * Big +/− stepper for a crew count (Men / Vans / HGV). Large round tap targets
+ * sit on either side of the value so repeated clicks never need re-aiming, and
+ * the control keeps a fixed size regardless of the value.
+ */
+function CounterField({ label, value, onStep, disabled }: {
+  label: string;
+  value: number;
+  onStep: (delta: number) => void;
+  disabled?: boolean;
+}) {
+  const btn =
+    'inline-flex items-center justify-center w-10 h-10 rounded-full border transition-colors ' +
+    'disabled:opacity-40 disabled:cursor-not-allowed';
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-500 mb-1 text-center">{label}</label>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onStep(-1)}
+          disabled={disabled || value <= 0}
+          aria-label={`Remove one ${label}`}
+          className={`${btn} border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600 hover:bg-red-50`}
+        >
+          <Minus className="w-5 h-5" />
+        </button>
+        <span className="flex-1 text-center text-lg font-bold tabular-nums text-slate-800 select-none">{value}</span>
+        <button
+          type="button"
+          onClick={() => onStep(1)}
+          disabled={disabled}
+          aria-label={`Add one ${label}`}
+          className={`${btn} border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50`}
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function CreateContractJobModal({ contract, editJob, defaultDate, onClose, onSaved }: Props) {
   const [items, setItems] = useState<ContractItem[]>([]);
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [jobDate, setJobDate] = useState(editJob?.job_date || defaultDate || todayISO());
+  const [startTime, setStartTime] = useState(editJob?.start_time || '');
   const [description, setDescription] = useState(editJob?.description || '');
   const [notes, setNotes] = useState(editJob?.notes || '');
   const [menNeeded, setMenNeeded] = useState<string>(String(editJob?.men_needed ?? ''));
@@ -158,6 +202,9 @@ export default function CreateContractJobModal({ contract, editJob, defaultDate,
   const onVansChange = (v: string) => { setVansNeeded(v); syncAuto('van', v); };
   const onHgvChange = (v: string) => { setHgvNeeded(v); syncAuto('hgv', v); };
 
+  const step = (cur: string, onChange: (v: string) => void) => (delta: number) =>
+    onChange(String(Math.max(0, (parseInt(cur, 10) || 0) + delta)));
+
   const subtotal = useMemo(
     () => lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_price) || 0), 0),
     [lines],
@@ -202,6 +249,7 @@ export default function CreateContractJobModal({ contract, editJob, defaultDate,
 
     const payload = {
       job_date: jobDate,
+      start_time: startTime || null,
       description: description.trim() || null,
       notes: notes.trim() || null,
       men_needed: parseInt(menNeeded, 10) || 0,
@@ -237,14 +285,15 @@ export default function CreateContractJobModal({ contract, editJob, defaultDate,
       onClose={onClose}
       title={editJob ? `Edit Job — ${contract.company_name}` : `New Job — ${contract.company_name}`}
       size="xl"
+      align="top"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
           <div className="bg-red-50 border border-red-100 text-red-700 px-3 py-2 rounded-lg text-sm">{error}</div>
         )}
 
-        {/* Date + crew/vans/hgv */}
-        <div className="grid grid-cols-5 gap-3">
+        {/* Date + start time */}
+        <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2">
             <label className="block text-xs font-medium text-slate-500 mb-1">Job Date</label>
             <input
@@ -255,41 +304,40 @@ export default function CreateContractJobModal({ contract, editJob, defaultDate,
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Men</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Start Time</label>
             <input
-              type="number" min="0"
-              value={menNeeded}
-              onChange={e => onMenChange(e.target.value)}
-              placeholder="0"
-              disabled={!itemsLoaded}
-              className="input-field w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Vans</label>
-            <input
-              type="number" min="0"
-              value={vansNeeded}
-              onChange={e => onVansChange(e.target.value)}
-              placeholder="0"
-              disabled={!itemsLoaded}
-              className="input-field w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">HGV</label>
-            <input
-              type="number" min="0"
-              value={hgvNeeded}
-              onChange={e => onHgvChange(e.target.value)}
-              placeholder="0"
-              disabled={!itemsLoaded}
+              type="time"
+              value={startTime}
+              onChange={e => setStartTime(e.target.value)}
               className="input-field w-full"
             />
           </div>
         </div>
-        <p className="-mt-3 text-xs text-slate-400">
+
+        {/* Crew counters — big +/− steppers so repeated clicks never need re-aiming */}
+        <div className="grid grid-cols-3 gap-3">
+          <CounterField
+            label="Men"
+            value={parseInt(menNeeded, 10) || 0}
+            onStep={step(menNeeded, onMenChange)}
+            disabled={!itemsLoaded}
+          />
+          <CounterField
+            label="Vans"
+            value={parseInt(vansNeeded, 10) || 0}
+            onStep={step(vansNeeded, onVansChange)}
+            disabled={!itemsLoaded}
+          />
+          <CounterField
+            label="HGV"
+            value={parseInt(hgvNeeded, 10) || 0}
+            onStep={step(hgvNeeded, onHgvChange)}
+            disabled={!itemsLoaded}
+          />
+        </div>
+        <p className="text-xs text-slate-400">
           Setting Men, Vans, or HGV adds a matching line below from this contractor's price list.
+          Start Time pre-fills each staff member's start when you drag them onto this job.
         </p>
 
         {/* Description */}

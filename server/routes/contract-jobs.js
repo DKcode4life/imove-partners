@@ -89,6 +89,7 @@ async function syncPlannerEvent(contractJob, contract) {
           customer_name: contract.company_name,
           address: contract.address || null,
           event_date: contractJob.job_date,
+          event_time: contractJob.start_time || null,
           notes: eventNotes,
           contract_id: contract.id,
         },
@@ -106,6 +107,7 @@ async function syncPlannerEvent(contractJob, contract) {
       customer_name: contract.company_name,
       address: contract.address || null,
       event_date: contractJob.job_date,
+      event_time: contractJob.start_time || null,
       notes: eventNotes,
       contract_id: contract.id,
     },
@@ -199,13 +201,14 @@ router.post('/contractors/:cid/jobs', wrap(async (req, res) => {
   const contract = await prisma.contract.findUnique({ where: { id: cid } });
   if (!contract) return res.status(404).json({ error: 'Contractor not found' });
 
-  const { job_date, description, notes, men_needed, vans_needed, hgv_needed, items = [] } = req.body;
+  const { job_date, start_time, description, notes, men_needed, vans_needed, hgv_needed, items = [] } = req.body;
   if (!job_date) return res.status(400).json({ error: 'job_date is required' });
 
   const job = await prisma.contractJob.create({
     data: {
       contract_id: cid,
       job_date: String(job_date),
+      start_time: start_time?.trim() || null,
       description: description?.trim() || null,
       notes: notes?.trim() || null,
       men_needed: intOrNull(men_needed) ?? 0,
@@ -248,13 +251,14 @@ router.put('/jobs/:id', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Cannot edit a job already on a finalised invoice' });
   }
 
-  const { job_date, description, notes, men_needed, vans_needed, hgv_needed, items } = req.body;
+  const { job_date, start_time, description, notes, men_needed, vans_needed, hgv_needed, items } = req.body;
 
   await prisma.$transaction(async (tx) => {
     await tx.contractJob.update({
       where: { id },
       data: {
         ...(job_date !== undefined ? { job_date: String(job_date) } : {}),
+        ...(start_time !== undefined ? { start_time: start_time?.trim() || null } : {}),
         ...(description !== undefined ? { description: description?.trim() || null } : {}),
         ...(notes !== undefined ? { notes: notes?.trim() || null } : {}),
         ...(men_needed !== undefined ? { men_needed: intOrNull(men_needed) ?? 0 } : {}),

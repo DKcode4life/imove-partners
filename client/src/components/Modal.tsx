@@ -7,9 +7,13 @@ interface Props {
   title: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  // 'center' (default) vertically centers the panel — fine for static content.
+  // 'top' anchors the panel near the top so it grows downward as content
+  // changes, keeping controls from shifting under the cursor.
+  align?: 'center' | 'top';
 }
 
-export default function Modal({ open, onClose, title, children, size = 'md' }: Props) {
+export default function Modal({ open, onClose, title, children, size = 'md', align = 'center' }: Props) {
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -22,7 +26,7 @@ export default function Modal({ open, onClose, title, children, size = 'md' }: P
   const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={`fixed inset-0 z-50 flex justify-center p-4 ${align === 'top' ? 'items-start pt-[6vh]' : 'items-center'}`}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/30 backdrop-blur-sm"
