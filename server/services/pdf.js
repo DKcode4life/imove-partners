@@ -58,6 +58,8 @@ const COMPANY = {
   sortCode:      '04-00-03',
   accountNumber: '66057796',
   signOffName:   'Daniel',
+  googleUrl:     'https://share.google/WZbUP0ppfx6YRkstu',
+  facebookUrl:   'https://www.facebook.com/imoveuk',
   tiktokUrl:     'https://www.tiktok.com/@imoveuk',
 };
 
@@ -557,8 +559,8 @@ function drawFooterSocials(doc, centerY) {
   const gap = () => items.push({ kind: 'gap', w: ITEM_GAP });
   const handle = () => items.push({ kind: 'link', str: '@imoveuk', url: COMPANY.tiktokUrl, w: doc.widthOfString('@imoveuk') });
 
-  items.push(logoOrLabel(SOCIAL_LOGOS.google, 'Google'));   gap(); stars(); sep();
-  items.push(logoOrLabel(SOCIAL_LOGOS.facebook, 'Facebook')); gap(); stars(); sep();
+  items.push(logoOrLabel(SOCIAL_LOGOS.google, 'Google', COMPANY.googleUrl));   gap(); stars(); sep();
+  items.push(logoOrLabel(SOCIAL_LOGOS.facebook, 'Facebook', COMPANY.facebookUrl)); gap(); stars(); sep();
   items.push(logoOrLabel(SOCIAL_LOGOS.tiktok, 'TikTok', COMPANY.tiktokUrl)); sep();
   handle();
 
