@@ -3,6 +3,7 @@ const prisma = require('../db/prisma');
 const { authenticateApiKey, requireScope } = require('../middleware/apiKey');
 const wrap = require('../lib/async-handler');
 const { send: sendEmail } = require('../services/email');
+const { syncSurveyEvent } = require('../lib/survey-event-sync');
 const config = require('../config');
 
 const router = express.Router();
@@ -21,6 +22,11 @@ const FORM_SOURCES = {
   survey: 'Website — Survey / Booking',
 };
 const DEFAULT_SOURCE = 'Website Enquiry';
+
+// Survey bookings are split by type: a survey_type matching /video|zoom/ is a
+// video survey, otherwise physical. Mirrors the CRM's own rule (crm.js) so the
+// website path behaves identically to a survey booked inside the CRM.
+const VIDEO_RE = /video|zoom/i;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -73,6 +79,10 @@ async function notifyAdmin({ job, sourceLabel }) {
   const row = (label, value) =>
     value ? `<tr><td style="padding:4px 0;color:#64748b;width:140px;">${label}</td><td style="padding:4px 0;">${value}</td></tr>` : '';
 
+  const surveyLine = job.survey_type
+    ? `${job.survey_type} survey${job.survey_date ? ` — ${job.survey_date}${job.survey_time ? ` at ${job.survey_time}` : ''}` : ''}`
+    : '';
+
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -97,9 +107,10 @@ async function notifyAdmin({ job, sourceLabel }) {
                   <tr><td style="padding:4px 0;color:#64748b;width:140px;">Name</td><td style="padding:4px 0;"><strong>${job.full_name}</strong></td></tr>
                   ${row('Email', job.email)}
                   ${row('Phone', job.phone)}
+                  ${row('Survey', surveyLine)}
                   ${row('Moving from', [job.from_line1, job.from_city, job.from_postcode].filter(Boolean).join(', '))}
                   ${row('Moving to', [job.to_line1, job.to_city, job.to_postcode].filter(Boolean).join(', '))}
-                  ${row('Preferred date', job.preferred_move_date)}
+                  ${row('Estimated date', job.preferred_move_date)}
                   ${row('Property', job.bedrooms)}
                   ${row('Message', job.client_notes)}
                 </table>
@@ -144,6 +155,9 @@ router.post('/', wrap(async (req, res) => {
     preferred_move_date,
     property_size,
     message,
+    survey_type,
+    survey_date,
+    survey_time,
   } = req.body || {};
 
   // ─── Validation ──────────────────────────────────────────────────────────
@@ -161,7 +175,22 @@ router.post('/', wrap(async (req, res) => {
     return res.status(400).json({ error: 'Invalid email address' });
   }
 
-  const sourceLabel = FORM_SOURCES[form] || DEFAULT_SOURCE;
+  // ─── Survey bookings ───────────────────────────────────────────────────────
+  // A `survey` form carrying a type creates a *scheduled* survey: the job is
+  // tagged video/physical, dropped into the matching pipeline stage, and (when a
+  // real date came through) a Survey event is auto-created on the planner below.
+  const isSurvey = form === 'survey' && typeof survey_type === 'string' && !!survey_type.trim();
+  const isVideoSurvey = isSurvey && VIDEO_RE.test(survey_type);
+  const surveyTypeLabel = isSurvey ? (isVideoSurvey ? 'Video' : 'Physical') : null;
+  const cleanSurveyDate = typeof survey_date === 'string' && survey_date.trim() ? survey_date.trim() : null;
+  const cleanSurveyTime = typeof survey_time === 'string' && survey_time.trim() ? survey_time.trim() : null;
+  const hasValidSurveyDate = !!cleanSurveyDate && !isNaN(new Date(cleanSurveyDate).getTime());
+
+  const sourceLabel = isSurvey ? `Survey — ${surveyTypeLabel}` : (FORM_SOURCES[form] || DEFAULT_SOURCE);
+  const status = isSurvey ? (isVideoSurvey ? 'Survey Video' : 'Survey Physical') : 'New Lead';
+  const activityNote = isSurvey
+    ? `Submitted via website — ${surveyTypeLabel} survey${hasValidSurveyDate ? ` booked for ${cleanSurveyDate}${cleanSurveyTime ? ` at ${cleanSurveyTime}` : ''}` : ' (date to be confirmed)'}`
+    : `Submitted via website — ${sourceLabel}`;
 
   // ─── Idempotency ─────────────────────────────────────────────────────────
   // If the website retries with the same submission_id, return the job we
@@ -196,7 +225,7 @@ router.post('/', wrap(async (req, res) => {
         phone: cleanPhone || null,
         client_notes: typeof message === 'string' && message.trim() ? message.trim() : null,
         lead_source: sourceLabel,
-        status: 'New Lead',
+        status,
         from_line1: from.line1,
         from_city: from.city,
         from_postcode: from.postcode,
@@ -207,11 +236,15 @@ router.post('/', wrap(async (req, res) => {
         preferred_move_date: typeof preferred_move_date === 'string' && preferred_move_date.trim()
           ? preferred_move_date.trim()
           : null,
+        survey_required: isSurvey || undefined,
+        survey_type: surveyTypeLabel || undefined,
+        survey_date: isSurvey ? cleanSurveyDate : undefined,
+        survey_time: isSurvey ? cleanSurveyTime : undefined,
       },
     });
 
     await prisma.crmActivity.create({
-      data: { job_id: job.id, type: 'created', note: `Submitted via website — ${sourceLabel}` },
+      data: { job_id: job.id, type: 'created', note: activityNote },
     });
 
     // Audit + idempotency record. We stash the created job id back into the
@@ -225,6 +258,16 @@ router.post('/', wrap(async (req, res) => {
         processed_at: new Date(),
       },
     });
+
+    // Survey booking → drop the scheduled survey onto the planner/calendar so
+    // crew can be assigned. Best-effort; only when a real date came through.
+    if (isSurvey && hasValidSurveyDate) {
+      try {
+        await syncSurveyEvent(prisma, job.id);
+      } catch (err) {
+        console.error('[intake] Survey planner sync failed for job', job.id, err.message);
+      }
+    }
 
     // Admin notification — best-effort, never blocks the response contract.
     try {
