@@ -29,13 +29,18 @@ function jobIncomeSuggestion(job) {
 
 /**
  * Smart suggestion for a contract event: the sum of that specific contract
- * job's line-item totals (the per-job slice of the weekly contract invoice).
- * Plain quick events (no linked contract job) suggest 0.
+ * job's line-item totals plus any overtime billed to this event (the per-job
+ * slice of the weekly contract invoice — which itself bills overtime on top of
+ * the line items). Plain quick events (no linked contract job) suggest 0 unless
+ * overtime is attributed to them.
  * @param {{ items?: {total:number}[] }|null} contractJob
+ * @param {number} [overtime] — overtime income attributed to this event (£)
  */
-function eventIncomeSuggestion(contractJob) {
-  if (!contractJob || !Array.isArray(contractJob.items)) return 0;
-  return round2(contractJob.items.reduce((s, it) => s + (Number(it.total) || 0), 0));
+function eventIncomeSuggestion(contractJob, overtime = 0) {
+  const items = contractJob && Array.isArray(contractJob.items)
+    ? contractJob.items.reduce((s, it) => s + (Number(it.total) || 0), 0)
+    : 0;
+  return round2(items + (Number(overtime) || 0));
 }
 
 function sumLines(lines, kind) {

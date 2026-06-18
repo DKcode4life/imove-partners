@@ -5,6 +5,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { computeAssignmentWage } = require('../lib/wage-calc');
 const pnlCalc = require('../lib/pnl-calc');
+const { computeOvertimeIncomeByEvent } = require('../lib/overtime-calc');
 const jobCats = require('../lib/job-categories');
 const { jobValidDates } = require('../lib/move-schedule');
 
@@ -216,7 +217,7 @@ router.get('/pnl', wrap(async (req, res) => {
   const dates = weekDates(start);
   const endDate = dates[dates.length - 1];
 
-  const [jobs, events, assignments, lines, settings] = await Promise.all([
+  const [jobs, events, assignments, lines, settings, overtimeByEvent] = await Promise.all([
     prisma.crmJob.findMany({
       where: {
         status: { not: 'Lost / Cancelled' },
@@ -262,6 +263,7 @@ router.get('/pnl', wrap(async (req, res) => {
       },
     }),
     loadWageSettings(),
+    computeOvertimeIncomeByEvent(prisma, start, endDate),
   ]);
 
   // Categories toggled out of the P&L are hidden from the list (and totals).
@@ -327,7 +329,10 @@ router.get('/pnl', wrap(async (req, res) => {
     if (e.category && excludedPnl.has(e.category)) continue;
     const key = `event|${e.id}`;
     const myLines = linesByKey.get(key) || [];
-    const baseIncome = pnlCalc.effectiveBaseIncome(e.pnl_income, pnlCalc.eventIncomeSuggestion(e.contract_job));
+    const baseIncome = pnlCalc.effectiveBaseIncome(
+      e.pnl_income,
+      pnlCalc.eventIncomeSuggestion(e.contract_job, overtimeByEvent.get(e.id) || 0),
+    );
     const wages = pnlCalc.round2(wagesByKey.get(key) || 0);
     const { totalIncome, totalExpenses, profit } = pnlCalc.rollup({
       baseIncome, incomeLines: pnlCalc.sumLines(myLines, 'income'),

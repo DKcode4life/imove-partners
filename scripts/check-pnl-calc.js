@@ -16,6 +16,13 @@ assert.strictEqual(
   149.99
 );
 assert.strictEqual(pnl.eventIncomeSuggestion(null), 0);
+// overtime folds on top of the line items (mirrors the invoice's overtime line)
+assert.strictEqual(
+  pnl.eventIncomeSuggestion({ items: [{ total: 100 }] }, 75),
+  175
+);
+assert.strictEqual(pnl.eventIncomeSuggestion(null, 50), 50); // overtime-only (empty job)
+assert.strictEqual(pnl.eventIncomeSuggestion({ items: [{ total: 100 }] }, 0), 100);
 
 // line sums by kind
 const lines = [

@@ -4,6 +4,7 @@ const prisma = require('../db/prisma');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const wrap = require('../lib/async-handler');
 const { syncDraftInvoiceForJobDate } = require('../lib/contract-invoice-sync');
+const { computeOvertimeIncomeByEvent } = require('../lib/overtime-calc');
 const { computeAssignmentWage } = require('../lib/wage-calc');
 const pnlCalc = require('../lib/pnl-calc');
 const { resolveItemColor } = require('../lib/planner-color');
@@ -993,11 +994,21 @@ async function computeJobPnl(source, id) {
   } else {
     const ev = await prisma.plannerEvent.findUnique({
       where: { id },
-      select: { id: true, pnl_income: true, contract_job: { select: { items: { select: { total: true } } } } },
+      select: {
+        id: true, pnl_income: true, contract_id: true, event_date: true,
+        contract_job: { select: { items: { select: { total: true } } } },
+      },
     });
     if (!ev) return null;
     savedIncome = ev.pnl_income;
-    suggestion = pnlCalc.eventIncomeSuggestion(ev.contract_job);
+    // Overtime is a per-day, per-contract figure attributed to a representative
+    // event — compute it for just this event's day to match the weekly P&L.
+    let overtime = 0;
+    if (ev.contract_id != null) {
+      const otByEvent = await computeOvertimeIncomeByEvent(prisma, ev.event_date, ev.event_date, { contractId: ev.contract_id });
+      overtime = otByEvent.get(ev.id) || 0;
+    }
+    suggestion = pnlCalc.eventIncomeSuggestion(ev.contract_job, overtime);
   }
 
   const vehicleIds = [...new Set(assignments.map(a => a.vehicle_asset_id).filter(Boolean))];
