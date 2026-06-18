@@ -425,7 +425,9 @@ function fmtDateTime(d: string) {
 }
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const dt = new Date(d + 'T00:00:00');
+  if (isNaN(dt.getTime())) return d; // free-text estimated date (e.g. "End of June")
+  return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 function fmt(n: number | null) {
   if (n == null) return '—';
@@ -1068,8 +1070,8 @@ export default function CRMDetailPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <F label="Preferred Move Date">
-                    <input type="date" className="input" value={prefMoveDate} onChange={e => setPrefMoveDate(e.target.value)} />
+                  <F label="Estimated Move Date">
+                    <input type="text" className="input" placeholder="e.g. End of June, mid-July, or a date" value={prefMoveDate} onChange={e => setPrefMoveDate(e.target.value)} />
                   </F>
                   <F label="Confirmed Move Date">
                     <input type="date" className="input" value={confMoveDate} onChange={e => setConfMoveDate(e.target.value)} />
@@ -1175,7 +1177,7 @@ export default function CRMDetailPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 pt-1">
-                  <ReadF label="Preferred Move Date" value={fmtDate(prefMoveDate)} />
+                  <ReadF label="Estimated Move Date" value={fmtDate(prefMoveDate)} />
                   <ReadF label="Confirmed Move Date" value={fmtDate(confMoveDate)} />
                 </div>
                 {moveSchedule.length > 0 && (

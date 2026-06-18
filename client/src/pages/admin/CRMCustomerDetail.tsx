@@ -39,7 +39,9 @@ const STATUS_CFG: Record<string, { dot: string; bg: string; text: string }> = {
 
 function fmtDate(d: string | null) {
   if (!d) return null;
-  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return d; // free-text estimated date (e.g. "End of June")
+  return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // ── Job row ───────────────────────────────────────────────────────────────────

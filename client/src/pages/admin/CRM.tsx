@@ -62,7 +62,7 @@ function buildCalEvents(jobs: CrmJob[]): CalEvent[] {
     if (j.survey_date)        events.push({ date: j.survey_date.slice(0,10),        label: j.full_name, type: 'survey', job: j });
     if (j.quote_sent_date)    events.push({ date: j.quote_sent_date.slice(0,10),    label: j.full_name, type: 'quote',  job: j });
     if (j.confirmed_move_date)events.push({ date: j.confirmed_move_date.slice(0,10),label: j.full_name, type: 'move',   job: j });
-    else if (j.preferred_move_date) events.push({ date: j.preferred_move_date.slice(0,10), label: j.full_name, type: 'move', job: j });
+    else if (j.preferred_move_date && !isNaN(new Date(j.preferred_move_date).getTime())) events.push({ date: j.preferred_move_date.slice(0,10), label: j.full_name, type: 'move', job: j });
   }
   return events;
 }
@@ -222,7 +222,9 @@ export default function CRMPage() {
 
   function fmtDate(d: string | null) {
     if (!d) return '—';
-    return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return d; // free-text estimated date (e.g. "End of June")
+    return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
   function shortAddr(line1: string | null, postcode: string | null) {
     return [line1, postcode].filter(Boolean).join(', ') || '—';
@@ -452,7 +454,7 @@ export default function CRMPage() {
                       <td className="px-4 py-3.5 hidden sm:table-cell">
                         <p className="text-xs text-slate-700 font-semibold tabular-nums">{fmtDate(j.confirmed_move_date || j.preferred_move_date)}</p>
                         {j.preferred_move_date && !j.confirmed_move_date && (
-                          <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Preferred</p>
+                          <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Estimated</p>
                         )}
                       </td>
                       <td className="px-4 py-3.5">
@@ -607,8 +609,8 @@ export default function CRMPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Preferred Move Date</label>
-                  <input type="date" className="input"
+                  <label className="label">Estimated Move Date</label>
+                  <input type="text" className="input" placeholder="e.g. End of June, mid-July, or a date"
                     value={form.preferred_move_date} onChange={set('preferred_move_date')} />
                 </div>
                 <div>

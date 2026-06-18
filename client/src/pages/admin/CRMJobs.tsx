@@ -19,7 +19,9 @@ function jobRef(id: number) {
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return null;
-  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return d; // free-text estimated date (e.g. "End of June")
+  return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function shortAddr(line1: string | null, postcode: string | null) {
@@ -544,7 +546,7 @@ export default function CRMJobsPage() {
                               {fmtDate(moveDate)}
                             </p>
                             <p className={`text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isConfirmed ? 'text-emerald-600' : 'text-slate-400'}`}>
-                              {isConfirmed ? 'Confirmed' : 'Preferred'}
+                              {isConfirmed ? 'Confirmed' : 'Estimated'}
                             </p>
                           </>
                         ) : (
@@ -646,8 +648,8 @@ export default function CRMJobsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Preferred Move Date</label>
-                  <input type="date" className="input" value={form.preferred_move_date} onChange={set('preferred_move_date')} />
+                  <label className="label">Estimated Move Date</label>
+                  <input type="text" className="input" placeholder="e.g. End of June, mid-July, or a date" value={form.preferred_move_date} onChange={set('preferred_move_date')} />
                 </div>
                 <div>
                   <label className="label">Bedrooms / Size</label>
