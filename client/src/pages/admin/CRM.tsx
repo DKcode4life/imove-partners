@@ -430,10 +430,18 @@ export default function CRMPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100/70">
                   {filtered.map(j => (
-                    <tr key={j.id} className="hover:bg-gradient-to-r hover:from-brand-50/40 hover:to-transparent transition-colors group cursor-pointer"
+                    <tr key={j.id} className={`hover:bg-gradient-to-r hover:from-brand-50/40 hover:to-transparent transition-colors group cursor-pointer ${!j.seen_at ? 'bg-red-50/60' : ''}`}
                       onClick={() => navigate(`/admin/crm/${j.id}`)}>
-                      <td className="px-5 py-3.5">
-                        <p className="text-sm font-semibold text-slate-900 group-hover:text-brand-700 transition-colors tracking-tight">{j.full_name}</p>
+                      <td className={`px-5 py-3.5 ${!j.seen_at ? 'border-l-2 border-red-500' : ''}`}>
+                        <p className="text-sm font-semibold text-slate-900 group-hover:text-brand-700 transition-colors tracking-tight flex items-center gap-2">
+                          {!j.seen_at && (
+                            <span title="New — not yet opened" className="inline-block w-2 h-2 rounded-full bg-red-500 flex-shrink-0 animate-pulse" />
+                          )}
+                          <span>{j.full_name}</span>
+                          {!j.seen_at && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold uppercase tracking-wide flex-shrink-0">New</span>
+                          )}
+                        </p>
                         <p className="text-xs text-slate-400 mt-0.5 hidden sm:block tabular-nums">{j.phone || j.email || '—'}</p>
                       </td>
                       <td className="px-4 py-3.5 hidden lg:table-cell">

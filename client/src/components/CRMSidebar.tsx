@@ -48,6 +48,7 @@ export default function CRMSidebar() {
   );
 
   const [summary, setSummary] = useState<Record<string, number>>({});
+  const [unseen, setUnseen] = useState<Record<string, number>>({});
   const [statuses, setStatuses] = useState<JobStatusSetting[]>(FALLBACK_STATUSES);
 
   // Refresh pipeline statuses on every route change; fall back to hardcoded list on error
@@ -61,8 +62,13 @@ export default function CRMSidebar() {
     api.get('/crm/jobs/summary')
       .then(r => {
         const map: Record<string, number> = {};
-        for (const row of r.data.by_status) map[row.status] = row.count;
+        const unseenMap: Record<string, number> = {};
+        for (const row of r.data.by_status) {
+          map[row.status] = row.count;
+          unseenMap[row.status] = row.unseen || 0;
+        }
         setSummary(map);
+        setUnseen(unseenMap);
       })
       .catch(() => {});
   }, [location.pathname, location.search]);
@@ -157,6 +163,7 @@ export default function CRMSidebar() {
             </p>
             {statuses.map(s => {
               const count = summary[s.name] ?? 0;
+              const newCount = unseen[s.name] ?? 0;
               const isActive = isOnOverview && activeStatus === s.name;
               return (
                 <Link
@@ -172,10 +179,20 @@ export default function CRMSidebar() {
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
                     <span className="truncate">{s.name}</span>
                   </span>
-                  <span className={`ml-2 text-xs font-bold tabular-nums flex-shrink-0 ${
-                    isActive ? 'text-white' : count > 0 ? 'text-slate-300' : 'text-slate-600'
-                  }`}>
-                    {count}
+                  <span className="ml-2 flex items-center gap-1.5 flex-shrink-0">
+                    {newCount > 0 && (
+                      <span
+                        title={`${newCount} new lead${newCount > 1 ? 's' : ''} not yet opened`}
+                        className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold tabular-nums ring-2 ring-red-400/40 animate-pulse"
+                      >
+                        {newCount}
+                      </span>
+                    )}
+                    <span className={`text-xs font-bold tabular-nums ${
+                      isActive ? 'text-white' : count > 0 ? 'text-slate-300' : 'text-slate-600'
+                    }`}>
+                      {count}
+                    </span>
                   </span>
                 </Link>
               );

@@ -107,9 +107,19 @@ router.get('/jobs/summary', wrap(async (_req, res) => {
   const rows = await prisma.crmJob.groupBy({ by: ['status'], _count: true, where: VISIBLE_PARTNER_FILTER });
   const map = Object.fromEntries(rows.map(r => [r.status, r._count]));
   const total = rows.reduce((s, r) => s + r._count, 0);
+
+  // Unseen (never-opened) jobs per status → drives the red "new lead" badge.
+  const unseenRows = await prisma.crmJob.groupBy({
+    by: ['status'],
+    _count: true,
+    where: { AND: [VISIBLE_PARTNER_FILTER, { seen_at: null }] },
+  });
+  const unseenMap = Object.fromEntries(unseenRows.map(r => [r.status, r._count]));
+
   res.json({
     total,
-    by_status: CRM_STATUSES.map(s => ({ status: s, count: map[s] || 0 })),
+    unseen_total: unseenRows.reduce((s, r) => s + r._count, 0),
+    by_status: CRM_STATUSES.map(s => ({ status: s, count: map[s] || 0, unseen: unseenMap[s] || 0 })),
   });
 }));
 
@@ -164,6 +174,13 @@ router.get('/jobs/:id', wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const job = await prisma.crmJob.findUnique({ where: { id } });
   if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  // Opening a job profile marks it as seen, clearing the "new lead" indicator.
+  if (!job.seen_at) {
+    const now = new Date();
+    await prisma.crmJob.update({ where: { id }, data: { seen_at: now } });
+    job.seen_at = now;
+  }
 
   const activities = await prisma.crmActivity.findMany({
     where: { job_id: id },

@@ -284,6 +284,8 @@ export interface CrmJob {
   lost_notes: string | null;
   // Partner portal sync
   partner_commission_rate: number | null;
+  // New-lead indicator: null until the job is first opened in the CRM
+  seen_at: string | null;
   // Timestamps
   created_at: string;
   updated_at: string;

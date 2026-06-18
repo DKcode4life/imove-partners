@@ -88,6 +88,15 @@ prisma.$connect()
     const customers = await syncCustomers();
     if (customers > 0) console.log(`✅ Created ${customers} customer profile(s) from jobs`);
 
+    // One-time: treat every existing job as already "seen" so the new-lead
+    // indicator only flags jobs that arrive from now on. Guarded by a flag.
+    const seenFlag = await prisma.companySetting.findUnique({ where: { key: 'seen_backfill_done' } });
+    if (!seenFlag) {
+      const backfilled = await prisma.crmJob.updateMany({ where: { seen_at: null }, data: { seen_at: new Date() } });
+      await prisma.companySetting.create({ data: { key: 'seen_backfill_done', value: 'true' } });
+      if (backfilled.count > 0) console.log(`✅ Marked ${backfilled.count} existing job(s) as seen (new-lead indicator backfill)`);
+    }
+
     if (config.env !== 'test') {
       jobRunner.start({ intervalMs: 10000 });
     }

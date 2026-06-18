@@ -175,6 +175,9 @@ model CrmJob {
   // Flat Rate VAT scheme: when true, this job's P&L income is uplifted 8% to
   // reflect the VAT margin kept under the scheme. Off by default.
   vat_flat_rate           Boolean  @default(false)
+  // New-lead indicator: null until an admin first opens the job profile, then
+  // set to the open time. Drives the red "unseen leads" badge in the pipeline.
+  seen_at                 DateTime?
   // Timestamps
   created_at              DateTime @default(now())
   updated_at              DateTime @default(now()) @updatedAt
