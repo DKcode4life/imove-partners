@@ -34,6 +34,7 @@ app.use(cors({
 app.use(express.json({ limit: '5mb' }));
 
 app.use('/api/public',    require('./routes/public-quote'));  // Customer quote-acceptance (no auth — token-gated)
+app.use('/api/intake',    require('./routes/website-intake')); // Public website forms → CRM (API key, server-to-server)
 app.use('/api/auth',      require('./routes/auth'));
 app.use('/api/leads',     require('./routes/leads'));
 app.use('/api/partners',  require('./routes/partners'));
