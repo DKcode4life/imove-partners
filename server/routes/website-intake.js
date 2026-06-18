@@ -37,14 +37,16 @@ function parseAddress(raw) {
 
 /** Find an existing customer by email, then by name; create one if neither hits. */
 async function resolveCustomer({ full_name, email, phone, from }) {
+  // NOTE: production runs on SQLite, which does NOT support Prisma's
+  // `mode: 'insensitive'`. Match on the exact (trimmed) value instead.
   if (email) {
     const byEmail = await prisma.crmCustomer.findFirst({
-      where: { email: { equals: email, mode: 'insensitive' } },
+      where: { email },
     });
     if (byEmail) return byEmail.id;
   }
   const byName = await prisma.crmCustomer.findFirst({
-    where: { full_name: { equals: full_name, mode: 'insensitive' } },
+    where: { full_name },
   });
   if (byName) return byName.id;
 
