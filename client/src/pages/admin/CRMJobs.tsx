@@ -24,6 +24,16 @@ function fmtDate(d: string | null | undefined) {
   return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function fmtDateTime(d: string | null | undefined) {
+  if (!d) return { date: null as string | null, time: null as string | null };
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return { date: d, time: null };
+  return {
+    date: dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+    time: dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
 function shortAddr(line1: string | null, postcode: string | null) {
   return [line1, postcode].filter(Boolean).join(', ') || null;
 }
@@ -127,7 +137,7 @@ function PerfCard({ label, value, sub, icon, iconBg, iconColor, accent, highligh
 
 // ── Sort control ──────────────────────────────────────────────────────────────
 
-type SortKey = 'updated_at' | 'confirmed_move_date' | 'full_name' | 'status' | 'id';
+type SortKey = 'created_at' | 'confirmed_move_date' | 'full_name' | 'status' | 'id';
 
 function SortBtn({
   col, label, sortKey, sortDir, onSort,
@@ -489,7 +499,7 @@ export default function CRMJobsPage() {
                     <SortBtn col="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </th>
                   <th className="text-left px-4 py-3 hidden xl:table-cell">
-                    <SortBtn col="updated_at" label="Updated" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortBtn col="created_at" label="Added" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </th>
                   <th className="w-16 px-4 py-3" />
                 </tr>
@@ -570,9 +580,19 @@ export default function CRMJobsPage() {
                         <StatusBadge status={j.status} />
                       </td>
 
-                      {/* Updated */}
+                      {/* Added */}
                       <td className="px-4 py-3.5 hidden xl:table-cell">
-                        <span className="text-xs text-slate-400 tabular-nums">{fmtDate(j.updated_at)}</span>
+                        {(() => {
+                          const added = fmtDateTime(j.created_at);
+                          return added.date ? (
+                            <>
+                              <p className="text-xs font-medium text-slate-500 tabular-nums">{added.date}</p>
+                              {added.time && <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{added.time}</p>}
+                            </>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          );
+                        })()}
                       </td>
 
                       {/* Actions */}
