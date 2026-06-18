@@ -222,6 +222,9 @@ router.post('/jobs', wrap(async (req, res) => {
     data: {
       lead_id: b.lead_id || null,
       customer_id: b.customer_id || null,
+      // Manually-created jobs are "seen" on creation — only inbound leads
+      // (website, partner) stay unseen to drive the new-lead indicator.
+      seen_at: new Date(),
       full_name: b.full_name.trim(), email: b.email || null, phone: b.phone || null,
       alt_phone: b.alt_phone || null, client_notes: b.client_notes || null,
       lead_source: b.lead_source || 'Direct Enquiry', estate_agent_name: b.estate_agent_name || null,
@@ -508,6 +511,7 @@ router.post('/jobs/:id/duplicate', wrap(async (req, res) => {
   const copy = await prisma.crmJob.create({
     data: {
       customer_id: job.customer_id, referred_by_customer_id: job.referred_by_customer_id,
+      seen_at: new Date(), // duplicating is an admin action — mark seen immediately
       full_name: job.full_name, email: job.email, alt_email: job.alt_email,
       phone: job.phone, alt_phone: job.alt_phone, client_notes: job.client_notes,
       lead_source: job.lead_source, estate_agent_name: job.estate_agent_name,
