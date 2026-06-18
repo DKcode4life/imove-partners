@@ -32,9 +32,9 @@ router.get('/', wrap(async (req, res) => {
     if (partner_id) where.partner_id = parseInt(partner_id, 10);
     if (search) {
       where.OR = [
-        { client_name: { contains: search, mode: 'insensitive' } },
-        { current_address: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
+        { client_name: { contains: search } },
+        { current_address: { contains: search } },
+        { email: { contains: search } },
       ];
     }
     where.partner = { leads_visible: true };
@@ -59,8 +59,8 @@ router.get('/', wrap(async (req, res) => {
   if (status) where.status = status;
   if (search) {
     where.OR = [
-      { client_name: { contains: search, mode: 'insensitive' } },
-      { current_address: { contains: search, mode: 'insensitive' } },
+      { client_name: { contains: search } },
+      { current_address: { contains: search } },
     ];
   }
 
@@ -123,13 +123,13 @@ router.post('/', wrap(async (req, res) => {
     let customerId = null;
     if (lead.email) {
       const existing = await prisma.crmCustomer.findFirst({
-        where: { email: { equals: lead.email, mode: 'insensitive' } },
+        where: { email: { equals: lead.email } },
       });
       if (existing) customerId = existing.id;
     }
     if (!customerId) {
       const existing = await prisma.crmCustomer.findFirst({
-        where: { full_name: { equals: lead.client_name, mode: 'insensitive' } },
+        where: { full_name: { equals: lead.client_name } },
       });
       if (existing) customerId = existing.id;
     }

@@ -124,14 +124,14 @@ router.get('/jobs', wrap(async (req, res) => {
 
   if (search) {
     where.OR = [
-      { full_name: { contains: search, mode: 'insensitive' } },
-      { email: { contains: search, mode: 'insensitive' } },
-      { phone: { contains: search, mode: 'insensitive' } },
-      { from_line1: { contains: search, mode: 'insensitive' } },
-      { from_postcode: { contains: search, mode: 'insensitive' } },
-      { to_line1: { contains: search, mode: 'insensitive' } },
-      { to_postcode: { contains: search, mode: 'insensitive' } },
-      { estate_agent_name: { contains: search, mode: 'insensitive' } },
+      { full_name: { contains: search } },
+      { email: { contains: search } },
+      { phone: { contains: search } },
+      { from_line1: { contains: search } },
+      { from_postcode: { contains: search } },
+      { to_line1: { contains: search } },
+      { to_postcode: { contains: search } },
+      { estate_agent_name: { contains: search } },
     ];
   }
 
