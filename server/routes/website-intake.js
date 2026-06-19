@@ -4,6 +4,7 @@ const { authenticateApiKey, requireScope } = require('../middleware/apiKey');
 const wrap = require('../lib/async-handler');
 const { send: sendEmail } = require('../services/email');
 const { syncSurveyEvent } = require('../lib/survey-event-sync');
+const { evaluateSubmission } = require('../lib/spam-filter');
 const config = require('../config');
 
 const router = express.Router();
@@ -173,6 +174,34 @@ router.post('/', wrap(async (req, res) => {
   }
   if (cleanEmail && !EMAIL_RE.test(cleanEmail)) {
     return res.status(400).json({ error: 'Invalid email address' });
+  }
+
+  // ─── Spam filtering ────────────────────────────────────────────────────────
+  // The public form is a bot magnet. A filled honeypot field or random-letter
+  // name/email/message gets dropped here, before it reaches the pipeline or
+  // fires an admin email. The block is still recorded in webhook_events so a
+  // false positive can be reviewed — nothing is silently lost. We return a 2xx
+  // so bots can't tell their submission was filtered and probe around it.
+  const spam = evaluateSubmission({
+    full_name: name,
+    email: cleanEmail,
+    message: typeof message === 'string' ? message : '',
+    body: req.body,
+  });
+  if (spam.blocked) {
+    console.warn(`[intake] Blocked suspected spam (${spam.reason}): "${name}" <${cleanEmail || cleanPhone}>`);
+    try {
+      await prisma.webhookEvent.create({
+        data: {
+          provider: 'website',
+          event_type: form || 'unknown',
+          payload: JSON.stringify({ ...req.body, _spam_reason: spam.reason }),
+          status: 'spam_blocked',
+          processed_at: new Date(),
+        },
+      });
+    } catch { /* best-effort audit — never block the response */ }
+    return res.status(200).json({ status: 'received' });
   }
 
   // ─── Survey bookings ───────────────────────────────────────────────────────
