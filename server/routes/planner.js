@@ -424,21 +424,52 @@ router.patch('/assignments/:id', wrap(async (req, res) => {
     }
   }
 
+  // Move to a different job/event on the same day (Staff View: drag an assigned
+  // staff member onto another job's card). A PATCH move preserves the row's
+  // vehicle, start/finish times and wage override, which a delete + re-create
+  // would lose. Exactly one of job_id/event_id must be set; the other side is
+  // cleared. Guards against duplicates for (asset, date, target job/event).
+  if ('job_id' in req.body || 'event_id' in req.body) {
+    const nextJobId = req.body.job_id == null ? null : Number(req.body.job_id);
+    const nextEventId = req.body.event_id == null ? null : Number(req.body.event_id);
+    if ((nextJobId == null) === (nextEventId == null)) {
+      return res.status(400).json({ error: 'Exactly one of job_id or event_id is required' });
+    }
+    if (nextJobId != null && !Number.isInteger(nextJobId)) return res.status(400).json({ error: 'Invalid job_id' });
+    if (nextEventId != null && !Number.isInteger(nextEventId)) return res.status(400).json({ error: 'Invalid event_id' });
+    if (nextJobId !== a.job_id || nextEventId !== a.event_id) {
+      const targetAssetId = data.asset_id ?? a.asset_id;
+      const dupWhere = { asset_id: targetAssetId, assigned_date: a.assigned_date, id: { not: a.id } };
+      if (nextJobId != null) dupWhere.job_id = nextJobId; else dupWhere.event_id = nextEventId;
+      const existing = await prisma.plannerAssignment.findFirst({ where: dupWhere });
+      if (existing) return res.status(409).json({ error: 'Staff member is already on that job', id: existing.id });
+      data.job_id = nextJobId;
+      data.event_id = nextEventId;
+    }
+  }
+
   const updated = await prisma.plannerAssignment.update({ where: { id }, data, select: ASSIGNMENT_SELECT });
   res.json(flattenAssignment(updated));
 
-  // Times drive overtime billing — if they changed, refresh this contractor's
-  // draft invoice for the day so the overtime line tracks the new hours live.
+  // Times drive overtime billing — if they changed, or the assignment moved
+  // onto/off a contract event, refresh the affected contractors' draft invoices
+  // for the day so the overtime lines track the change live. A move touches up
+  // to two contracts (the event left and the event joined), so sync both.
   // Best-effort and after the response: must never affect the planner edit.
-  if (('start_time' in req.body || 'finish_time' in req.body) && a.event_id) {
-    try {
-      const ev = await prisma.plannerEvent.findUnique({
-        where: { id: a.event_id },
-        select: { contract_id: true },
-      });
-      if (ev?.contract_id) await syncDraftInvoiceForJobDate(ev.contract_id, a.assigned_date);
-    } catch (e) {
-      console.error('[Planner] overtime draft sync failed:', e.message);
+  const timesChanged = 'start_time' in req.body || 'finish_time' in req.body;
+  const movedItem = 'job_id' in data || 'event_id' in data;
+  if (timesChanged || movedItem) {
+    const eventIds = [...new Set([a.event_id, updated.event_id].filter(Boolean))];
+    for (const eventId of eventIds) {
+      try {
+        const ev = await prisma.plannerEvent.findUnique({
+          where: { id: eventId },
+          select: { contract_id: true },
+        });
+        if (ev?.contract_id) await syncDraftInvoiceForJobDate(ev.contract_id, a.assigned_date);
+      } catch (e) {
+        console.error('[Planner] overtime draft sync failed:', e.message);
+      }
     }
   }
 }));

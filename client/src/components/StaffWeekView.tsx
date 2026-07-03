@@ -2,25 +2,34 @@
  * Staff View — per-staff weekly grid with drag-and-drop assignment.
  *
  * Layout per day column:
- *   1. "Jobs" tray at the top — every CrmJob and PlannerEvent scheduled that
- *      day. Each card shows needed staff/vans (when available) and how many
- *      are already assigned. Cards are draggable onto staff rows below.
- *   2. Assignment rows grouped by job. The job description shows once in the
- *      group header; each row shows Staff · Vehicle · Start · Finish · Hours ·
- *      Wage. Finish + Hours appear on every job (not just Lux) so overtime can
- *      be reconciled by total hours worked. Picking a vehicle promotes the row
- *      to driver wage (a lorry adds the lorry bonus); clearing it reverts to
- *      porter.
- *   3. Available staff (no assignment, no time off).
- *   4. Day-off staff (red rows).
+ *   1. "Jobs" — ONE merged card per CrmJob/PlannerEvent scheduled that day.
+ *      The card header shows the job's identity plus needed staff/vans and a
+ *      staffing chip; the staff assigned to the job are listed directly on
+ *      the card beneath the header (Staff · Vehicle · Start · Finish · Hours ·
+ *      Wage rows), followed by one dashed "Drop staff here" slot per missing
+ *      crew member. The header accepts staff drops (assign) and stays
+ *      draggable onto staff rows (the original direction still works).
+ *      Picking a vehicle on a row promotes it to driver wage (a lorry adds
+ *      the lorry bonus); clearing it reverts to porter.
+ *   2. Available staff (no assignment, no time off) — each row is draggable.
+ *   3. Day-off staff (red rows).
  *
  * Drag sources:
- *   - Top-tray job card: payload {kind:'job', source, id}
+ *   - Available staff row: payload {kind:'staff', asset_id}
  *   - An assigned-row's staff name: payload {kind:'assignment', assignment_id}
+ *   - Top-tray job card: payload {kind:'job', source, id}
  *
- * Drop target = any staff row for that date. The handler decides:
- *   - kind=job → POST /planner/assignments (create)
- *   - kind=assignment → PATCH /planner/assignments/:id { asset_id } (reassign)
+ * Drop semantics (the intuitive direction is staff → job):
+ *   - staff → job card / group / empty slot: POST create — blocked once the
+ *     job's men_needed crew target is met
+ *   - staff → assigned staff row: PATCH asset_id — the dragged person takes
+ *     over that spot; the previous person becomes available
+ *   - assignment → assigned staff row on a different job: swap the two people
+ *   - assignment → available staff row: PATCH asset_id (hand the job over)
+ *   - assignment → another job's card/group: PATCH job/event — move, keeping
+ *     vehicle/times/wage
+ *   - assignment → empty space: DELETE (drag away to remove from the job)
+ *   - job card → staff row: POST create (legacy direction, still capped)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Loader2, Users, Truck, X, Plus, Check, UserPlus, ExternalLink } from 'lucide-react';
@@ -118,9 +127,80 @@ interface StaffWeekPayload {
 
 type DragPayload =
   | { kind: 'job'; source: 'job' | 'event'; id: number; label: string }
-  | { kind: 'assignment'; assignment_id: number; source: 'job' | 'event' | null; source_id: number | null; from_asset_id: number };
+  | { kind: 'assignment'; assignment_id: number; source: 'job' | 'event' | null; source_id: number | null; from_asset_id: number }
+  | { kind: 'staff'; asset_id: number; name: string };
 
 const DRAG_MIME = 'application/x-staffview-payload';
+
+// Module-scoped mirror of the payload currently being dragged. The HTML5 spec
+// hides dataTransfer.getData() during dragover, so drop targets can't know
+// WHAT is hovering them until the drop lands — but we want the hover highlight
+// to preview the outcome (assign / swap / blocked). Every drag source writes
+// its payload here on dragstart and clears it on dragend; targets read it via
+// useDropTarget's `dragPayload`.
+let currentDrag: DragPayload | null = null;
+
+// What a drop would do on a given target — drives the hover tint so the user
+// can see the outcome before releasing. null = drop would be ignored.
+type DropMode = 'add' | 'move' | 'takeover' | 'swap' | 'blocked';
+
+// Row-level hover tints per outcome. Blue = adds an assignment, violet = moves
+// an existing one, amber = replaces/swaps people, red = job is at capacity.
+const OVER_ROW_CLASS: Record<DropMode, string> = {
+  add: 'bg-blue-50/80 ring-1 ring-blue-300/70 ring-inset',
+  move: 'bg-violet-50/80 ring-1 ring-violet-300/70 ring-inset',
+  takeover: 'bg-amber-50/80 ring-1 ring-amber-300/80 ring-inset',
+  swap: 'bg-amber-50/80 ring-1 ring-amber-300/80 ring-inset',
+  blocked: 'bg-red-50/70 ring-1 ring-red-300/70 ring-inset',
+};
+
+// Outcome of dropping the in-flight payload onto a JOB target (tray card,
+// group card, or empty crew slot).
+function classifyJobDrop(
+  p: DragPayload | null,
+  source: 'job' | 'event' | null,
+  id: number | null,
+  full: boolean,
+): DropMode | null {
+  if (!p || source == null || id == null) return null;
+  if (p.kind === 'staff') return full ? 'blocked' : 'add';
+  if (p.kind === 'assignment') {
+    if (p.source === source && p.source_id === id) return null; // already on this job
+    return full ? 'blocked' : 'move';
+  }
+  return null; // job-on-job means nothing
+}
+
+// Outcome of dropping onto an ASSIGNED staff row.
+function classifyAssignedRowDrop(
+  p: DragPayload | null,
+  row: StaffWeekRow,
+  staffAssetId: number,
+  jobFull: (source: 'job' | 'event', id: number) => boolean,
+): DropMode | null {
+  if (!p) return null;
+  if (p.kind === 'job') {
+    if (p.source === row.source && p.id === row.source_id) return null; // already on it
+    return jobFull(p.source, p.id) ? 'blocked' : 'add';
+  }
+  if (p.kind === 'staff') return p.asset_id === staffAssetId ? null : 'takeover';
+  if (p.assignment_id === row.assignment_id) return null; // dropped on itself
+  if (p.source === row.source && p.source_id === row.source_id) return null; // same job
+  if (p.from_asset_id === staffAssetId) return null; // same person, two jobs
+  return 'swap';
+}
+
+// Outcome of dropping onto an AVAILABLE staff row.
+function classifyAvailableDrop(
+  p: DragPayload | null,
+  assetId: number,
+  jobFull: (source: 'job' | 'event', id: number) => boolean,
+): DropMode | null {
+  if (!p) return null;
+  if (p.kind === 'job') return jobFull(p.source, p.id) ? 'blocked' : 'add';
+  if (p.kind === 'assignment') return p.from_asset_id === assetId ? null : 'takeover';
+  return null; // free staff dropped on free staff means nothing
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -365,7 +445,7 @@ function StaffDayColumn({
     return t.getFullYear() === dt.getFullYear() && t.getMonth() === dt.getMonth() && t.getDate() === dt.getDate();
   })();
   // Split into 3 buckets for this day: assigned / available / day off.
-  const { byJob, available, dayOff } = useMemo(() => {
+  const { cards, available, dayOff } = useMemo(() => {
     const assigned: { staff: StaffEntry; row: StaffWeekRow }[] = [];
     const available: StaffEntry[] = [];
     const dayOff: { staff: StaffEntry; reason: string | null }[] = [];
@@ -383,34 +463,46 @@ function StaffDayColumn({
       for (const r of bucket.rows) assigned.push({ staff: s, row: r });
     }
 
-    // Group assigned rows by job_id/event_id for clustered display.
-    const groups = new Map<string, {
-      label: string;
-      category: string | null;
-      isLux: boolean;
-      source: 'job' | 'event' | null;
-      sourceId: number | null;
-      effectiveColor: string;
-      plannerColor: string | null;
-      rows: { staff: StaffEntry; row: StaffWeekRow }[];
-    }>();
+    // Cluster assigned rows by job/event, then pair each of the day's jobs
+    // with its rows (tray order) — every job renders as ONE card: header +
+    // its staff listed directly beneath. An assignment whose job is NOT
+    // scheduled on this day (e.g. the move date shifted after crew was
+    // assigned) gets a synthesized card appended so it stays visible and
+    // removable.
+    const rowsByKey = new Map<string, { staff: StaffEntry; row: StaffWeekRow }[]>();
     for (const a of assigned) {
-      const key = `${a.row.source ?? 'x'}-${a.row.source_id ?? 0}-${a.row.job_label ?? ''}`;
-      const g = groups.get(key) ?? {
-        label: a.row.job_label || '(untitled)',
-        category: a.row.job_category,
-        isLux: a.row.is_lux_job,
-        source: a.row.source,
-        sourceId: a.row.source_id,
-        effectiveColor: a.row.effective_color,
-        plannerColor: a.row.planner_color,
-        rows: [],
-      };
-      g.rows.push(a);
-      groups.set(key, g);
+      const key = `${a.row.source ?? 'x'}|${a.row.source_id ?? 0}`;
+      const list = rowsByKey.get(key);
+      if (list) list.push(a); else rowsByKey.set(key, [a]);
     }
-    return { byJob: Array.from(groups.values()), available, dayOff };
-  }, [date, staff]);
+    const cards: { job: DayJob; rows: { staff: StaffEntry; row: StaffWeekRow }[] }[] =
+      day_jobs.map(j => ({ job: j, rows: rowsByKey.get(`${j.source}|${j.id}`) ?? [] }));
+    const scheduled = new Set(day_jobs.map(j => `${j.source}|${j.id}`));
+    for (const [key, rows] of rowsByKey) {
+      if (scheduled.has(key)) continue;
+      const r0 = rows[0].row;
+      if (r0.source == null || r0.source_id == null) continue; // unlinkable remnant
+      cards.push({
+        job: {
+          source: r0.source,
+          id: r0.source_id,
+          label: r0.job_label || '(untitled)',
+          category: r0.job_category,
+          contract_name: r0.contract_name,
+          is_lux: r0.is_lux_job,
+          men_needed: null,
+          vans_needed: null,
+          hgv_needed: null,
+          assigned_count: rows.length,
+          time: null,
+          planner_color: r0.planner_color,
+          effective_color: r0.effective_color,
+        },
+        rows,
+      });
+    }
+    return { cards, available, dayOff };
+  }, [date, staff, day_jobs]);
 
   // Color popover state — only one open at a time across the column.
   // Identified by `${source}|${id}`. Used by both tray cards and group headers.
@@ -434,35 +526,137 @@ function StaffDayColumn({
   // moment a job lands on the day it expands back to the full grid.
   const collapsed = day_jobs.length === 0;
 
-  // Centralized drop handler so all staff rows route through one place.
-  // Reads the JSON payload off the dataTransfer and dispatches to the right
-  // API call. Errors bubble up via the parent's onChange refetch.
-  //
+  // ── Centralized drop handlers ──────────────────────────────────────────────
+  // Every drop routes through one of these so the API calls live in one place.
+  // 409 (already assigned) is benign — the UI stays put and the refetch
+  // reconciles whatever actually landed.
+
+  // Staffing capacity for a day job. A contract crew target of 0 means "not
+  // specified", so only a positive men_needed caps assignment.
+  function jobCapacity(source: 'job' | 'event' | null, id: number | null) {
+    const j = day_jobs.find(x => x.source === source && x.id === id);
+    const needed = j?.men_needed != null && j.men_needed > 0 ? j.men_needed : null;
+    const assigned = j?.assigned_count ?? 0;
+    return { needed, assigned, full: needed != null && assigned >= needed };
+  }
+  const isJobFull = (source: 'job' | 'event', id: number) => jobCapacity(source, id).full;
+
   // New assignments always start as a PORTER (porter wage) regardless of the
   // staff member's default role. The Staff View workflow is: assign → porter,
   // then pick a vehicle on the row to promote them to driver (and a lorry adds
   // the lorry bonus). daily_rate is left null so the server derives the wage
   // from the role (per-staff porter rate, else the porter default).
-  async function dropOnStaff(assetId: number, _staffRole: string | null, payload: DragPayload) {
+  async function createAssignment(assetId: number, source: 'job' | 'event', id: number) {
+    await api.post('/planner/assignments', {
+      asset_id: assetId,
+      assigned_date: date,
+      assigned_role: 'porter',
+      daily_rate: null,
+      [source === 'job' ? 'job_id' : 'event_id']: id,
+    });
+  }
+
+  function logDropError(e: any) {
+    if (e?.response?.status !== 409) {
+      console.error('[StaffView] drop failed', e?.response?.data || e);
+    }
+  }
+
+  // Drop on an AVAILABLE staff row: a job card assigns them (old direction),
+  // a dragged assignment hands that job over to them.
+  async function dropOnAvailable(assetId: number, payload: DragPayload) {
     try {
       if (payload.kind === 'job') {
-        await api.post('/planner/assignments', {
-          asset_id: assetId,
-          assigned_date: date,
-          assigned_role: 'porter',
-          daily_rate: null,
-          [payload.source === 'job' ? 'job_id' : 'event_id']: payload.id,
-        });
-      } else {
+        if (isJobFull(payload.source, payload.id)) return; // crew target met
+        await createAssignment(assetId, payload.source, payload.id);
+      } else if (payload.kind === 'assignment') {
         if (payload.from_asset_id === assetId) return; // dropped on self
         await api.patch(`/planner/assignments/${payload.assignment_id}`, { asset_id: assetId });
+      } else {
+        return; // free staff dropped on free staff: nothing to do
       }
       onChange();
     } catch (e: any) {
-      // 409 = duplicate (target already on this job). Silent — UI stays put.
-      if (e?.response?.status !== 409) {
-        console.error('[StaffView] drop failed', e?.response?.data || e);
+      logDropError(e);
+      onChange();
+    }
+  }
+
+  // Drop on an ASSIGNED row: a dragged free staff member takes over the row's
+  // spot (previous person becomes available); a dragged assignment from a
+  // different job swaps the two people around.
+  async function dropOnAssignedRow(target: StaffWeekRow, targetAssetId: number, payload: DragPayload) {
+    try {
+      if (payload.kind === 'job') {
+        // Old direction (job card onto a person) still works: also put this
+        // person on the dragged job — unless that job's crew is already full.
+        if (payload.source === target.source && payload.id === target.source_id) return;
+        if (isJobFull(payload.source, payload.id)) return;
+        await createAssignment(targetAssetId, payload.source, payload.id);
+      } else if (payload.kind === 'staff') {
+        if (payload.asset_id === targetAssetId) return; // dropped on self
+        // Guard cross-day drags: don't hand a job to someone on their day off.
+        const entry = staff.find(s => s.asset_id === payload.asset_id);
+        if (entry?.days[date]?.day_off) return;
+        await api.patch(`/planner/assignments/${target.assignment_id}`, { asset_id: payload.asset_id });
+      } else {
+        if (payload.assignment_id === target.assignment_id) return; // itself
+        if (payload.source === target.source && payload.source_id === target.source_id) return; // same job
+        if (payload.from_asset_id === targetAssetId) return; // same person, two jobs
+        await swapAssignments(payload, target.assignment_id, targetAssetId);
       }
+      onChange();
+    } catch (e: any) {
+      logDropError(e);
+      onChange();
+    }
+  }
+
+  // Swap two assignments' people (drag assigned B onto assigned A → B takes
+  // A's job, A takes B's). Sequential PATCHes with a rollback: if the second
+  // half fails we put the first back, so a half-swap never leaves one person
+  // holding both jobs.
+  async function swapAssignments(
+    dragged: { assignment_id: number; from_asset_id: number },
+    targetAssignmentId: number,
+    targetAssetId: number,
+  ) {
+    await api.patch(`/planner/assignments/${dragged.assignment_id}`, { asset_id: targetAssetId });
+    try {
+      await api.patch(`/planner/assignments/${targetAssignmentId}`, { asset_id: dragged.from_asset_id });
+    } catch (e) {
+      try {
+        await api.patch(`/planner/assignments/${dragged.assignment_id}`, { asset_id: dragged.from_asset_id });
+      } catch { /* rollback failed — the refetch shows the true state */ }
+      throw e;
+    }
+  }
+
+  // Drop on a JOB target (tray card, group card, or an empty crew slot):
+  // staff → assign, assignment → move that assignment to this job (a PATCH
+  // move keeps the row's vehicle, times and wage override).
+  async function dropOnJob(source: 'job' | 'event', id: number, payload: DragPayload) {
+    try {
+      if (payload.kind === 'staff') {
+        if (isJobFull(source, id)) return; // crew target met
+        // Guard cross-day drags: don't assign someone on a day they're off.
+        const entry = staff.find(s => s.asset_id === payload.asset_id);
+        if (entry?.days[date]?.day_off) return;
+        await createAssignment(payload.asset_id, source, id);
+      } else if (payload.kind === 'assignment') {
+        if (payload.source === source && payload.source_id === id) return; // already here
+        if (isJobFull(source, id)) return;
+        await api.patch(`/planner/assignments/${payload.assignment_id}`, {
+          job_id: source === 'job' ? id : null,
+          event_id: source === 'event' ? id : null,
+        });
+      } else {
+        return; // job dropped on job: nothing to do
+      }
+      onChange();
+    } catch (e: any) {
+      logDropError(e);
+      onChange();
     }
   }
 
@@ -504,18 +698,44 @@ function StaffDayColumn({
         </div>
       </div>
 
-      {/* Jobs tray — compact title chip + draggable job cards. Hidden entirely
-          on a collapsed (no-jobs) day; the day-header "+" is the add path. */}
-      {!collapsed && (
-        <div className="px-2 pt-2 pb-1.5 space-y-1">
+      {/* Jobs — ONE merged card per job: the header carries the job's identity
+          and counts, the assigned staff list sits directly beneath it, plus a
+          dashed slot per missing crew member. Hidden when the day has nothing
+          to show; the day-header "+" is the add path. */}
+      {cards.length > 0 && (
+        <div className="px-2 pt-2 pb-1.5 space-y-1.5">
           <div className="flex items-center gap-1.5 px-1">
             <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Jobs</span>
-            <span className="text-[10px] font-semibold text-slate-500 tabular-nums">{day_jobs.length}</span>
+            <span className="text-[10px] font-semibold text-slate-500 tabular-nums">{cards.length}</span>
           </div>
-          {day_jobs.map(j => (
-            <JobTrayCard
+          {/* Column header — soft chip-style band labelling the row cells
+              inside the cards below. Skipped when collapsed (thin rail). */}
+          {!collapsed && (
+            <div
+              className="grid items-center gap-1 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400 px-3 pt-0.5"
+              style={{ gridTemplateColumns: cols }}
+            >
+              <span className="truncate">Staff</span>
+              <span className="truncate">Vehicle</span>
+              <span className="truncate">Start</span>
+              <span className="truncate">Finish</span>
+              <span className="truncate">Hours</span>
+              <span className="truncate text-right">Wage</span>
+            </div>
+          )}
+          {cards.map(({ job: j, rows }) => (
+            <JobCard
               key={`${j.source}-${j.id}`}
               job={j}
+              rows={rows}
+              date={date}
+              cols={cols}
+              vehicles={vehicles}
+              luxRate={luxRate}
+              onChange={onChange}
+              jobFull={isJobFull}
+              onDropJob={p => dropOnJob(j.source, j.id, p)}
+              onDropOnAssignedRow={dropOnAssignedRow}
               onOpenColor={(rect, current) => {
                 setColorAnchor(rect);
                 setColorCurrent(current);
@@ -528,86 +748,7 @@ function StaffDayColumn({
         </div>
       )}
 
-      {/* Column header — soft chip-style band. Skipped when collapsed: with no
-          jobs there are no Vehicle/Start/Finish/Hours/Wage cells to label. */}
-      {!collapsed && (
-        <div
-          className="grid items-center gap-1 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400 px-5 py-1.5 mt-1"
-          style={{ gridTemplateColumns: cols }}
-        >
-          <span className="truncate">Staff</span>
-          <span className="truncate">Vehicle</span>
-          <span className="truncate">Start</span>
-          <span className="truncate">Finish</span>
-          <span className="truncate">Hours</span>
-          <span className="truncate text-right">Wage</span>
-        </div>
-      )}
-
       <div className={`px-2 pb-2 space-y-2 ${collapsed ? 'pt-2' : ''}`}>
-        {/* By-job groups — each group is its own subtle card with the item's
-            effective color as a left accent. Click the accent to recolor. */}
-        {byJob.map((g, gi) => {
-          const key = g.source && g.sourceId != null ? `${g.source}|${g.sourceId}` : null;
-          return (
-            <div
-              key={gi}
-              className="relative rounded-xl ring-1 ring-slate-200/50 overflow-hidden"
-              style={{ boxShadow: `inset 3px 0 0 0 ${g.effectiveColor}`, background: groupTintBg(g.effectiveColor) }}
-            >
-              {/* Clickable color accent — wider hit area than the visible stripe */}
-              {key && g.source && g.sourceId != null && (
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setColorAnchor(rect);
-                    setColorCurrent(g.plannerColor);
-                    setOpenColorKey(key);
-                  }}
-                  title="Click to change color"
-                  className="absolute left-0 top-0 bottom-0 w-2 hover:w-3 transition-all"
-                  style={{ backgroundColor: 'transparent' }}
-                  aria-label="Change color"
-                />
-              )}
-              <div className="flex items-center gap-1.5 pl-3 pr-2.5 py-1.5">
-                {g.isLux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" title="Lux Move" />}
-                <span className="text-[11px] font-semibold text-slate-700 truncate">{g.label}</span>
-                {touch && g.source && g.sourceId != null && (() => {
-                  const gj = day_jobs.find(j => j.source === g.source && j.id === g.sourceId);
-                  return gj ? (
-                    <button
-                      type="button"
-                      onClick={() => setAssignJob(gj)}
-                      className="ml-auto flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 bg-blue-50 ring-1 ring-blue-200/70 rounded-full px-2 py-0.5 active:bg-blue-100"
-                    >
-                      <UserPlus className="w-3 h-3" />
-                      Staff
-                    </button>
-                  ) : null;
-                })()}
-              </div>
-              {g.rows.map(({ staff, row }) => (
-                <AssignmentGridRow
-                  key={row.assignment_id}
-                  staffName={staff.name}
-                  staffAssetId={staff.asset_id}
-                  date={date}
-                  staffRole={row.assigned_role || staff.role}
-                  row={row}
-                  cols={cols}
-                  vehicles={vehicles}
-                  onChange={onChange}
-                  luxRate={luxRate}
-                  onDropOnRow={p => dropOnStaff(staff.asset_id, staff.role, p)}
-                />
-              ))}
-            </div>
-          );
-        })}
-
         {/* Available staff — split into Drivers / Porters / Other based on role */}
         {available.length > 0 && (() => {
           const drivers: StaffEntry[] = [];
@@ -634,7 +775,8 @@ function StaffDayColumn({
                   cols={cols}
                   collapsed={collapsed}
                   onChange={onChange}
-                  onDropOnRow={p => dropOnStaff(s.asset_id, s.role, p)}
+                  jobFull={isJobFull}
+                  onDropOnRow={p => dropOnAvailable(s.asset_id, p)}
                 />
               ))}
             </div>
@@ -670,7 +812,7 @@ function StaffDayColumn({
           </div>
         )}
 
-        {byJob.length === 0 && available.length === 0 && dayOff.length === 0 && (
+        {cards.length === 0 && available.length === 0 && dayOff.length === 0 && (
           <div className="px-3 py-6 text-xs text-slate-400 text-center italic">No staff data</div>
         )}
       </div>
@@ -706,12 +848,54 @@ function StaffDayColumn({
   );
 }
 
-// ── Top-of-column draggable job card ─────────────────────────────────────────
+// Dashed placeholder for an unfilled crew slot on a job that still needs
+// people. One renders per missing person, so "how many more do we need" is
+// visible at a glance — and each slot is itself a drop target, making the
+// affordance the action.
+function EmptySlotRow({ onDropSlot }: { onDropSlot: (p: DragPayload) => void }) {
+  const { over, dragPayload, handlers } = useDropTarget(onDropSlot);
+  const active = over && dragPayload != null && dragPayload.kind !== 'job';
+  return (
+    <div
+      {...handlers}
+      className={`mx-2 my-1 flex items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-[10px] font-medium transition-colors ${
+        active
+          ? 'border-blue-400 bg-blue-50/80 text-blue-600'
+          : 'border-slate-300/80 bg-white/40 text-slate-400'
+      }`}
+      title="Drag a staff member here to assign them to this job"
+    >
+      <UserPlus className="w-3 h-3" />
+      Drop staff here
+    </div>
+  );
+}
 
-function JobTrayCard({
-  job, onOpenColor, onOpen, onAssign,
+// ── Job card — the single merged entry per job ───────────────────────────────
+//
+// One card per job per day: the header carries the job's identity (label,
+// contract, time, crew/van counts) and the assigned staff rows sit directly
+// beneath it, followed by a dashed slot per missing crew member. No separate
+// tray/group duplication. Only the HEADER is a drag source (legacy job→staff
+// direction) so the time inputs and staff-name drags on the rows below stay
+// unaffected; the whole card is a drop target (staff → assign, assignment →
+// move here), with rows/slots stopping propagation for their own drops.
+function JobCard({
+  job, rows, date, cols, vehicles, luxRate, onChange, jobFull,
+  onDropJob, onDropOnAssignedRow, onOpenColor, onOpen, onAssign,
 }: {
   job: DayJob;
+  rows: { staff: StaffEntry; row: StaffWeekRow }[];
+  date: string;
+  cols: string;
+  vehicles: VehicleOption[];
+  luxRate: number;
+  onChange: () => void;
+  jobFull: (source: 'job' | 'event', id: number) => boolean;
+  // Drop handler: staff dropped on the card are assigned to this job, a
+  // dragged assignment is moved onto it (both capped at men_needed).
+  onDropJob: (p: DragPayload) => void;
+  onDropOnAssignedRow: (row: StaffWeekRow, assetId: number, p: DragPayload) => void;
   onOpenColor: (anchor: DOMRect, currentPlannerColor: string | null) => void;
   // Opens this job's profile/form (removal → CRM detail, contract → contractor
   // page, quick job → edit modal). Rendered as a small icon button, top-right.
@@ -722,7 +906,27 @@ function JobTrayCard({
 }) {
   const dotColor = job.effective_color || catColor(job.category).dot;
   const haveNeeds = job.men_needed != null || job.vans_needed != null || job.hgv_needed != null;
-  const needsMet = job.men_needed != null && job.assigned_count >= job.men_needed;
+  // Crew maths for the staffing pill, the empty slots and drop blocking. A
+  // target of 0 means "not specified" → no colouring, no slots, no cap. Counts
+  // use the rows actually listed on the card so the pill always matches what
+  // the user sees.
+  const crewTarget = job.men_needed != null && job.men_needed > 0 ? job.men_needed : null;
+  const crewShort = crewTarget != null && rows.length < crewTarget;
+  const crewOver = crewTarget != null && rows.length > crewTarget;
+  const crewFull = crewTarget != null && rows.length >= crewTarget;
+  const missing = crewTarget != null ? Math.max(0, crewTarget - rows.length) : 0;
+
+  const { over, dragPayload, handlers } = useDropTarget(onDropJob);
+  const dropMode = classifyJobDrop(dragPayload, job.source, job.id, crewFull);
+  // outline (not ring) for the drop highlight: the card's inline boxShadow
+  // stripe overrides Tailwind ring classes, which are box-shadows themselves.
+  const overClass = dropMode === 'add'
+    ? 'outline outline-2 -outline-offset-1 outline-blue-400'
+    : dropMode === 'move'
+      ? 'outline outline-2 -outline-offset-1 outline-violet-400'
+      : dropMode === 'blocked'
+        ? 'outline outline-2 -outline-offset-1 outline-red-300'
+        : '';
 
   function onDragStart(e: DragEvent<HTMLDivElement>) {
     const payload: DragPayload = { kind: 'job', source: job.source, id: job.id, label: job.label };
@@ -730,17 +934,16 @@ function JobTrayCard({
     // Also stash on a plain text MIME — some browsers expose `types` more reliably for built-ins.
     e.dataTransfer.setData('text/plain', JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'all';
+    currentDrag = payload;
   }
 
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
-      className="relative cursor-grab active:cursor-grabbing select-none flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-lg ring-1 ring-slate-200/60 bg-white hover:ring-blue-300/70 hover:shadow-[0_4px_12px_-4px_rgba(59,130,246,0.25)] hover:-translate-y-px transition-all"
-      style={{ boxShadow: `inset 2px 0 0 0 ${dotColor}` }}
-      title={`${job.label}${job.is_lux ? ' · Lux Move' : ''}${job.contract_name ? `\n${job.contract_name}` : ''}\nDrag onto a staff row to assign`}
+      {...handlers}
+      className={`relative rounded-xl ring-1 ring-slate-200/50 overflow-hidden transition-all ${over && overClass ? overClass : ''}`}
+      style={{ boxShadow: `inset 3px 0 0 0 ${dotColor}`, background: groupTintBg(job.effective_color) }}
     >
-      {/* Clickable color hotspot covering the left accent area */}
+      {/* Clickable color hotspot covering the left accent stripe, full height */}
       <button
         type="button"
         draggable={false}
@@ -750,71 +953,118 @@ function JobTrayCard({
           onOpenColor(rect, job.planner_color);
         }}
         title="Click to change color"
-        className="absolute left-0 top-0 bottom-0 w-2 hover:bg-slate-900/5"
+        className="absolute left-0 top-0 bottom-0 w-2 hover:w-3 transition-all z-10"
+        style={{ backgroundColor: 'transparent' }}
         aria-label="Change color"
       />
-      {job.is_lux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" title="Lux Move" />}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          {job.is_extra_day && (
-            <span className="flex-shrink-0 text-[8.5px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 ring-1 ring-amber-200/70 rounded px-1 py-0.5 leading-none">
-              {job.schedule_label || 'Extra'}
-            </span>
+      {/* Header — drag source for the job */}
+      <div
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={() => { currentDrag = null; }}
+        className="cursor-grab active:cursor-grabbing select-none flex items-center gap-2 pl-3 pr-2 py-1.5"
+        title={`${job.label}${job.is_lux ? ' · Lux Move' : ''}${job.contract_name ? `\n${job.contract_name}` : ''}\nDrag a staff member onto this card to assign them${crewFull ? ' (crew is full)' : ''}`}
+      >
+        {job.is_lux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" title="Lux Move" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {job.is_extra_day && (
+              <span className="flex-shrink-0 text-[8.5px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 ring-1 ring-amber-200/70 rounded px-1 py-0.5 leading-none">
+                {job.schedule_label || 'Extra'}
+              </span>
+            )}
+            <div className="text-[11.5px] font-semibold text-slate-800 truncate leading-tight">{job.label}</div>
+          </div>
+          {(job.contract_name || job.time) && (
+            <div className="text-[10px] text-slate-500 truncate leading-tight mt-0.5">
+              {job.contract_name && <span>{job.contract_name}</span>}
+              {job.contract_name && job.time && <span className="text-slate-300"> · </span>}
+              {job.time && <span className="tabular-nums">{job.time}</span>}
+            </div>
           )}
-          <div className="text-[11.5px] font-semibold text-slate-800 truncate leading-tight">{job.label}</div>
         </div>
-        {(job.contract_name || job.time) && (
-          <div className="text-[10px] text-slate-500 truncate leading-tight mt-0.5">
-            {job.contract_name && <span>{job.contract_name}</span>}
-            {job.contract_name && job.time && <span className="text-slate-300"> · </span>}
-            {job.time && <span className="tabular-nums">{job.time}</span>}
+        {haveNeeds && (
+          <div className="flex items-center gap-1 text-[10px] tabular-nums flex-shrink-0">
+            {job.men_needed != null && (
+              <span
+                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-semibold ring-1 ${
+                  crewShort
+                    ? 'text-amber-700 bg-amber-50 ring-amber-200/70'
+                    : crewOver
+                      ? 'text-rose-700 bg-rose-50 ring-rose-200/70'
+                      : crewTarget != null
+                        ? 'text-emerald-700 bg-emerald-50 ring-emerald-200/60'
+                        : 'text-slate-600 bg-slate-100/80 ring-slate-200/60'
+                }`}
+                title={
+                  crewShort
+                    ? `${crewTarget! - rows.length} more staff needed`
+                    : crewOver
+                      ? `${rows.length - crewTarget!} over the crew target of ${crewTarget}`
+                      : crewTarget != null
+                        ? 'Fully staffed'
+                        : 'No crew target set'
+                }
+              >
+                <Users className="w-2.5 h-2.5" />
+                {rows.length}/{job.men_needed}
+              </span>
+            )}
+            {job.vans_needed != null && job.vans_needed > 0 && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-semibold text-slate-600 bg-slate-100/80 ring-1 ring-slate-200/60">
+                <Truck className="w-2.5 h-2.5" />
+                {job.vans_needed}
+              </span>
+            )}
           </div>
         )}
+        {onAssign && (
+          <button
+            type="button"
+            draggable={false}
+            onClick={e => { e.stopPropagation(); onAssign(); }}
+            className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-white bg-blue-600 active:bg-blue-700 rounded-full px-2.5 py-1 shadow-sm"
+            title="Assign staff to this job"
+          >
+            <UserPlus className="w-3 h-3" />
+            Assign
+          </button>
+        )}
+        {onOpen && (
+          <button
+            type="button"
+            draggable={false}
+            onClick={e => { e.stopPropagation(); onOpen(); }}
+            className="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-white hover:bg-blue-600 transition-colors"
+            title="Open this job"
+            aria-label="Open this job"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
-      {haveNeeds && (
-        <div className="flex items-center gap-1 text-[10px] tabular-nums flex-shrink-0">
-          {job.men_needed != null && (
-            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-semibold ${
-              needsMet
-                ? 'text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200/60'
-                : 'text-slate-600 bg-slate-100/80 ring-1 ring-slate-200/60'
-            }`}>
-              <Users className="w-2.5 h-2.5" />
-              {job.assigned_count}/{job.men_needed}
-            </span>
-          )}
-          {job.vans_needed != null && job.vans_needed > 0 && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-semibold text-slate-600 bg-slate-100/80 ring-1 ring-slate-200/60">
-              <Truck className="w-2.5 h-2.5" />
-              {job.vans_needed}
-            </span>
-          )}
-        </div>
-      )}
-      {onAssign && (
-        <button
-          type="button"
-          draggable={false}
-          onClick={e => { e.stopPropagation(); onAssign(); }}
-          className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-white bg-blue-600 active:bg-blue-700 rounded-full px-2.5 py-1 shadow-sm"
-          title="Assign staff to this job"
-        >
-          <UserPlus className="w-3 h-3" />
-          Assign
-        </button>
-      )}
-      {onOpen && (
-        <button
-          type="button"
-          draggable={false}
-          onClick={e => { e.stopPropagation(); onOpen(); }}
-          className="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-white hover:bg-blue-600 transition-colors"
-          title="Open this job"
-          aria-label="Open this job"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </button>
-      )}
+      {/* Assigned staff — listed directly on the job card */}
+      {rows.map(({ staff, row }) => (
+        <AssignmentGridRow
+          key={row.assignment_id}
+          staffName={staff.name}
+          staffAssetId={staff.asset_id}
+          date={date}
+          staffRole={row.assigned_role || staff.role}
+          row={row}
+          cols={cols}
+          vehicles={vehicles}
+          onChange={onChange}
+          luxRate={luxRate}
+          jobFull={jobFull}
+          onDropOnRow={p => onDropOnAssignedRow(row, staff.asset_id, p)}
+        />
+      ))}
+      {/* One dashed slot per missing crew member — a visible "we still need N
+          people" affordance that is itself a drop target. */}
+      {Array.from({ length: missing }, (_, i) => (
+        <EmptySlotRow key={`slot-${i}`} onDropSlot={onDropJob} />
+      ))}
     </div>
   );
 }
@@ -840,28 +1090,39 @@ function useDropTarget(onDrop: (p: DragPayload) => void) {
   const depthRef = useRef(0);
   return {
     over,
+    // The payload hovering this target (null while no drag is over it). Read
+    // from the module-level mirror because dataTransfer.getData() is sealed
+    // during dragover — used to color the highlight by drop outcome.
+    dragPayload: over ? currentDrag : null,
     handlers: {
+      // stopPropagation on every handler: drop targets nest (assignment rows
+      // and empty slots sit inside a droppable job group), and without it a
+      // single drop would fire both the row's and the group's handlers.
       onDragOver: (e: DragEvent<HTMLDivElement>) => {
         e.preventDefault();
+        e.stopPropagation();
       },
       onDragEnter: (e: DragEvent<HTMLDivElement>) => {
         e.preventDefault();
+        e.stopPropagation();
         depthRef.current += 1;
         if (depthRef.current === 1) setOver(true);
       },
-      onDragLeave: () => {
+      onDragLeave: (e: DragEvent<HTMLDivElement>) => {
+        e.stopPropagation();
         depthRef.current = Math.max(0, depthRef.current - 1);
         if (depthRef.current === 0) setOver(false);
       },
       onDrop: (e: DragEvent<HTMLDivElement>) => {
         e.preventDefault();
+        e.stopPropagation();
         depthRef.current = 0;
         setOver(false);
         const raw = e.dataTransfer.getData(DRAG_MIME) || e.dataTransfer.getData('text/plain');
         if (!raw) return;
         try {
           const p = JSON.parse(raw) as DragPayload;
-          if (p && (p.kind === 'job' || p.kind === 'assignment')) onDrop(p);
+          if (p && (p.kind === 'job' || p.kind === 'assignment' || p.kind === 'staff')) onDrop(p);
         } catch { /* malformed — ignore */ }
       },
     },
@@ -871,7 +1132,7 @@ function useDropTarget(onDrop: (p: DragPayload) => void) {
 // ── Assigned row (editable, drag source for its job, drop target) ────────────
 
 function AssignmentGridRow({
-  staffName, staffAssetId, date, staffRole, row, cols, vehicles, onChange, luxRate, onDropOnRow,
+  staffName, staffAssetId, date, staffRole, row, cols, vehicles, onChange, luxRate, jobFull, onDropOnRow,
 }: {
   staffName: string;
   staffAssetId: number;
@@ -882,6 +1143,9 @@ function AssignmentGridRow({
   vehicles: VehicleOption[];
   onChange: () => void;
   luxRate: number;
+  // Whether a job's crew target is already met — used to preview a blocked
+  // drop when a full job card is dragged over this row.
+  jobFull: (source: 'job' | 'event', id: number) => boolean;
   onDropOnRow: (p: DragPayload) => void;
 }) {
   const [startTime, setStartTime] = useState(row.start_time || '');
@@ -954,8 +1218,9 @@ function AssignmentGridRow({
   }
 
   // This row is a drag source for its own assignment — grab the staff name and
-  // drop on another staff row to reassign the job to that person, or drop onto
-  // empty space (any non-row area) to remove them from the job entirely.
+  // drop on another assigned person to swap the two around, on a free person
+  // to hand the job over, on another job's card to move, or onto empty space
+  // (any non-target area) to remove them from the job entirely.
   function onJobDragStart(e: DragEvent<HTMLSpanElement>) {
     const payload: DragPayload = {
       kind: 'assignment',
@@ -969,30 +1234,38 @@ function AssignmentGridRow({
     // Use 'all' so the drop target's effect doesn't have to match exactly —
     // Chromium otherwise silently rejects copy→move (and vice-versa) drops.
     e.dataTransfer.effectAllowed = 'all';
+    currentDrag = payload;
     // Stop the row's drag handlers (if any) from also firing — only the
     // <span> is supposed to be the drag source.
     e.stopPropagation();
   }
 
-  // Released over empty space → unassign. A drop that lands on a real staff row
-  // is handled by that row's drop target (which calls preventDefault), so the
-  // browser reports a concrete dropEffect ('move'/'copy'). Only a drop that
-  // landed on no valid target reports 'none' — that's our "drag to remove".
+  // Released over empty space → unassign. A drop that lands on a real target
+  // is handled by that target (which calls preventDefault), so the browser
+  // reports a concrete dropEffect ('move'/'copy'). Only a drop that landed on
+  // no valid target reports 'none' — that's our "drag away to remove".
   function onJobDragEnd(e: DragEvent<HTMLSpanElement>) {
+    currentDrag = null;
     if (e.dataTransfer.dropEffect === 'none') unassign();
   }
 
-  const { over, handlers } = useDropTarget(onDropOnRow);
+  const { over, dragPayload, handlers } = useDropTarget(onDropOnRow);
+  const dropMode = classifyAssignedRowDrop(dragPayload, row, staffAssetId, jobFull);
 
   return (
     <div
       {...handlers}
       className={`group grid items-center gap-1 px-3 py-0.5 text-xs transition-colors ${
-        over
-          ? 'bg-blue-50/80 ring-1 ring-blue-300/70 ring-inset'
-          : 'hover:bg-slate-50/70'
+        over && dropMode ? OVER_ROW_CLASS[dropMode] : 'hover:bg-slate-50/70'
       }`}
       style={{ gridTemplateColumns: cols }}
+      title={
+        dropMode === 'takeover' && over
+          ? `Release to have them take over from ${staffName}`
+          : dropMode === 'swap' && over
+            ? `Release to swap jobs with ${staffName}`
+            : undefined
+      }
     >
       <span
         draggable
@@ -1001,7 +1274,7 @@ function AssignmentGridRow({
         data-staff-asset-id={staffAssetId}
         data-staff-date={date}
         className="min-w-0 cursor-grab active:cursor-grabbing text-slate-800 font-medium flex items-center gap-1.5"
-        title={`Drag ${staffName} onto another staff row to reassign, or onto empty space to remove from this job`}
+        title={`Drag ${staffName} onto another assigned person to swap, onto a free person to hand the job over, onto another job to move — or onto empty space to remove from this job`}
       >
         {row.is_lux_job && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
         <span className="truncate">{staffName}</span>
@@ -1150,10 +1423,14 @@ function VehicleSelect({
 // ── Available row (drop target + mark-day-off) ──────────────────────────────
 
 function AvailableRow({
-  staff, date, cols, collapsed = false, onChange, onDropOnRow,
+  staff, date, cols, collapsed = false, onChange, jobFull, onDropOnRow,
 }: {
   staff: StaffEntry; date: string; cols: string; collapsed?: boolean;
-  onChange: () => void; onDropOnRow: (p: DragPayload) => void;
+  onChange: () => void;
+  // Whether a job's crew target is already met — used to preview a blocked
+  // drop when a full job card is dragged over this row.
+  jobFull: (source: 'job' | 'event', id: number) => boolean;
+  onDropOnRow: (p: DragPayload) => void;
 }) {
   const [busy, setBusy] = useState(false);
   async function markOff() {
@@ -1168,7 +1445,23 @@ function AvailableRow({
       onChange();
     } finally { setBusy(false); }
   }
-  const { over, handlers } = useDropTarget(onDropOnRow);
+  const { over, dragPayload, handlers } = useDropTarget(onDropOnRow);
+  const dropMode = classifyAvailableDrop(dragPayload, staff.asset_id, jobFull);
+
+  // This row is a drag source: pick the person up and drop them on a job (or
+  // one of its empty slots) to assign, or on an assigned person to take over.
+  function onStaffDragStart(e: DragEvent<HTMLSpanElement>) {
+    const payload: DragPayload = { kind: 'staff', asset_id: staff.asset_id, name: staff.name };
+    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
+    e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'all';
+    currentDrag = payload;
+    e.stopPropagation();
+  }
+  function onStaffDragEnd() {
+    currentDrag = null;
+  }
+  const dragTitle = `Drag ${staff.name} onto a job to assign them, or onto an assigned person to take their spot`;
 
   // Compact rail layout for a collapsed (no-jobs) day: just the name + OFF
   // toggle in a simple flex row, no Vehicle/Start/Finish/Hours/Wage cells.
@@ -1177,14 +1470,17 @@ function AvailableRow({
       <div
         {...handlers}
         className={`flex items-center gap-1 px-3 py-0.5 text-xs transition-colors ${
-          over ? 'bg-blue-100/70 ring-1 ring-blue-400/70 ring-inset' : 'hover:bg-white/50'
+          over && dropMode ? OVER_ROW_CLASS[dropMode] : 'hover:bg-white/50'
         }`}
-        title="Drop a job here to assign this staff member"
       >
         <span
+          draggable
+          onDragStart={onStaffDragStart}
+          onDragEnd={onStaffDragEnd}
           data-staff-asset-id={staff.asset_id}
           data-staff-date={date}
-          className="min-w-0 flex-1 text-slate-700 font-medium leading-tight flex items-center gap-1.5"
+          className="min-w-0 flex-1 cursor-grab active:cursor-grabbing text-slate-700 font-medium leading-tight flex items-center gap-1.5"
+          title={dragTitle}
         >
           <span className="truncate">{staff.name}</span>
           <span className="text-emerald-600/70 italic text-[10px] font-normal flex-shrink-0">Free</span>
@@ -1205,17 +1501,18 @@ function AvailableRow({
     <div
       {...handlers}
       className={`grid items-center gap-1 px-3 py-0.5 text-xs transition-colors ${
-        over
-          ? 'bg-blue-100/70 ring-1 ring-blue-400/70 ring-inset'
-          : 'hover:bg-white/50'
+        over && dropMode ? OVER_ROW_CLASS[dropMode] : 'hover:bg-white/50'
       }`}
       style={{ gridTemplateColumns: cols }}
-      title="Drop a job here to assign this staff member"
     >
       <span
+        draggable
+        onDragStart={onStaffDragStart}
+        onDragEnd={onStaffDragEnd}
         data-staff-asset-id={staff.asset_id}
         data-staff-date={date}
-        className="min-w-0 text-slate-700 font-medium leading-tight flex items-center gap-1.5"
+        className="min-w-0 cursor-grab active:cursor-grabbing text-slate-700 font-medium leading-tight flex items-center gap-1.5"
+        title={dragTitle}
       >
         <span className="truncate">{staff.name}</span>
         <span className="text-emerald-600/70 italic text-[10px] font-normal flex-shrink-0">Free</span>
@@ -1421,13 +1718,22 @@ function MobileAssignSheet({
     onClose();
   }
 
+  // Crew target from the contract job (0 = not specified → uncapped). Once the
+  // selection reaches the target, unchecked names disable so the sheet enforces
+  // the same "only as many as the contract asks for" cap as drag-and-drop —
+  // swap by unticking someone first.
+  const crewTarget = job.men_needed != null && job.men_needed > 0 ? job.men_needed : null;
+  const capReached = crewTarget != null && selected.size >= crewTarget;
+
   function StaffToggle({ s, subtitle }: { s: StaffEntry; subtitle?: string }) {
     const checked = selected.has(s.asset_id);
+    const capBlocked = !checked && capReached;
     return (
       <button
         type="button"
         onClick={() => toggle(s)}
-        disabled={saving}
+        disabled={saving || capBlocked}
+        title={capBlocked ? `Crew is full (${crewTarget} needed) — untick someone first` : undefined}
         className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-slate-50 disabled:opacity-60 transition-colors"
       >
         <span
@@ -1464,6 +1770,27 @@ function MobileAssignSheet({
             <div className="flex items-center gap-1.5">
               {job.is_lux && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
               <span className="text-base font-semibold text-slate-900 truncate">{job.label}</span>
+              {crewTarget != null && (
+                <span
+                  className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ring-1 ${
+                    selected.size < crewTarget
+                      ? 'text-amber-700 bg-amber-50 ring-amber-200/70'
+                      : selected.size > crewTarget
+                        ? 'text-rose-700 bg-rose-50 ring-rose-200/70'
+                        : 'text-emerald-700 bg-emerald-50 ring-emerald-200/60'
+                  }`}
+                  title={
+                    selected.size < crewTarget
+                      ? `${crewTarget - selected.size} more staff needed`
+                      : selected.size > crewTarget
+                        ? `${selected.size - crewTarget} over the crew target`
+                        : 'Fully staffed'
+                  }
+                >
+                  <Users className="w-3 h-3" />
+                  {selected.size}/{crewTarget}
+                </span>
+              )}
             </div>
             {(job.contract_name || job.time) && (
               <div className="text-[12px] text-slate-500 truncate mt-0.5">
