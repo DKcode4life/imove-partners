@@ -62,6 +62,9 @@ export interface StaffWeekRow {
   finish_time: string | null;
   daily_rate: number | null;
   wage_override: number | null;
+  // Staff member replied "yes" to the shift text. Toggled via the circular
+  // tick to the left of their name; gray = still needs chasing up.
+  confirmed: boolean;
   wage_total: number;
   wage_mode: 'lux' | 'daily' | 'override';
   wage_bonus: number;
@@ -1153,11 +1156,31 @@ function AssignmentGridRow({
   const [saving, setSaving] = useState(false);
   const [editingWage, setEditingWage] = useState(false);
   const [wageInput, setWageInput] = useState('');
+  // Optimistic mirror of row.confirmed so the tick flips the instant it's
+  // clicked instead of waiting for the save + silent refetch round-trip.
+  const [confirmed, setConfirmed] = useState(row.confirmed);
 
   useEffect(() => {
     setStartTime(row.start_time || '');
     setFinishTime(row.finish_time || '');
   }, [row.start_time, row.finish_time]);
+
+  useEffect(() => { setConfirmed(row.confirmed); }, [row.confirmed]);
+
+  // Toggle "has this person confirmed the shift?". Deliberately skips the
+  // shared `saving` flag so flipping the tick doesn't blank the wage button;
+  // on failure the optimistic flip is reverted.
+  async function toggleConfirmed() {
+    const next = !confirmed;
+    setConfirmed(next);
+    try {
+      await api.patch(`/planner/assignments/${row.assignment_id}`, { confirmed: next });
+      onChange();
+    } catch (e: any) {
+      setConfirmed(!next);
+      console.error('[StaffView] confirm toggle failed', e?.response?.data || e);
+    }
+  }
 
   // Live wage preview while editing times. A manual override always wins;
   // otherwise for Lux jobs recompute from start/finish so the user sees the
@@ -1276,6 +1299,22 @@ function AssignmentGridRow({
         className="min-w-0 cursor-grab active:cursor-grabbing text-slate-800 font-medium flex items-center gap-1.5"
         title={`Drag ${staffName} onto another assigned person to swap, onto a free person to hand the job over, onto another job to move — or onto empty space to remove from this job`}
       >
+        <button
+          type="button"
+          draggable={false}
+          onClick={e => { e.stopPropagation(); toggleConfirmed(); }}
+          title={confirmed
+            ? `${staffName} confirmed this shift — click to mark as unconfirmed`
+            : `${staffName} hasn't confirmed yet — click once they reply to the shift text`}
+          aria-label={confirmed ? 'Mark shift as not confirmed' : 'Mark shift as confirmed'}
+          className={`flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center ring-1 transition-colors ${
+            confirmed
+              ? 'bg-emerald-500 ring-emerald-500 text-white hover:bg-emerald-600 hover:ring-emerald-600'
+              : 'bg-white ring-slate-300 text-slate-300 hover:ring-slate-400 hover:text-slate-500'
+          }`}
+        >
+          <Check className="w-2.5 h-2.5" strokeWidth={3} />
+        </button>
         {row.is_lux_job && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
         <span className="truncate">{staffName}</span>
         {staffRole && (

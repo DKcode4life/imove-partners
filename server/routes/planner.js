@@ -321,7 +321,7 @@ router.patch('/items/color', wrap(async (req, res) => {
 const ASSIGNMENT_SELECT = {
   id: true, asset_id: true, job_id: true, event_id: true,
   assigned_date: true, assigned_role: true, daily_rate: true, vehicle_asset_id: true,
-  start_time: true, finish_time: true, wage_override: true,
+  start_time: true, finish_time: true, wage_override: true, confirmed: true,
   notes: true, created_at: true,
   asset: { select: { name: true, type: true, role: true } },
 };
@@ -332,7 +332,7 @@ function flattenAssignment(a) {
     assigned_date: a.assigned_date, assigned_role: a.assigned_role,
     daily_rate: a.daily_rate, vehicle_asset_id: a.vehicle_asset_id,
     start_time: a.start_time, finish_time: a.finish_time,
-    wage_override: a.wage_override,
+    wage_override: a.wage_override, confirmed: a.confirmed,
     notes: a.notes, created_at: a.created_at,
     asset_name: a.asset.name, asset_type: a.asset.type, asset_role: a.asset.role,
   };
@@ -410,6 +410,9 @@ router.patch('/assignments/:id', wrap(async (req, res) => {
       data.wage_override = n;
     }
   }
+  // Shift confirmation — the staff member replied "yes" to the shift text.
+  // Toggled from the tick next to their name on the Staff View.
+  if ('confirmed' in req.body) data.confirmed = !!req.body.confirmed;
   // Reassign to a different staff member (used by Staff View drag-and-drop
   // between rows). Guards against creating duplicates for (asset, date, job/event).
   if ('asset_id' in req.body) {
@@ -719,7 +722,7 @@ router.get('/staff-week', wrap(async (req, res) => {
         id: true, asset_id: true, assigned_date: true, daily_rate: true,
         assigned_role: true, job_id: true, event_id: true,
         start_time: true, finish_time: true, vehicle_asset_id: true,
-        wage_override: true,
+        wage_override: true, confirmed: true,
         asset: {
           select: {
             id: true, name: true, role: true,
@@ -837,6 +840,7 @@ router.get('/staff-week', wrap(async (req, res) => {
       finish_time: a.finish_time,
       daily_rate: a.daily_rate,
       wage_override: a.wage_override,
+      confirmed: !!a.confirmed,
       wage_total: wage.total,
       wage_mode: wage.mode,
       wage_bonus: wage.bonus,

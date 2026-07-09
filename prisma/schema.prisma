@@ -299,6 +299,7 @@ model PlannerAssignment {
   start_time       String? // "HH:MM" per-assignment start, editable on Staff View grid
   finish_time      String? // "HH:MM" per-assignment finish — shown on Lux days; drives Lux wage calc together with start_time
   wage_override    Float? // manual wage from Staff View — replaces both Lux (hours×rate) and daily-rate calc; lorry bonus is NOT added on top
+  confirmed        Boolean  @default(false) // staff member replied "yes" to the shift text — toggled via the tick next to their name in Staff View
   notes            String?
   created_at       DateTime @default(now())
 
