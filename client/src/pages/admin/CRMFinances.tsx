@@ -90,6 +90,23 @@ function monthLabel(ym: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 }
 
+// Year-based week numbering: week 1 is the Monday-week containing 1 January,
+// so e.g. Mon 29 Dec 2025 – Sun 4 Jan 2026 is W1 of 2026 and the numbers run
+// to the end of the year (W52/W53). Not ISO — ISO assigns week 1 by the first
+// Thursday, which would push some new-year weeks back into the old year.
+function week1Monday(year: number): Date {
+  return mondayOf(new Date(year, 0, 1));
+}
+
+function weekNumberOf(mondayIso: string): number {
+  const [y, m, d] = mondayIso.split('-').map(Number);
+  const monday = new Date(y, m - 1, d);
+  const nextW1 = week1Monday(monday.getFullYear() + 1);
+  const base = monday >= nextW1 ? nextW1 : week1Monday(monday.getFullYear());
+  // round() absorbs the ±1h DST drift inside the ms division.
+  return Math.round((monday.getTime() - base.getTime()) / (7 * 24 * 3600 * 1000)) + 1;
+}
+
 function fmtMoney(n: number): string {
   return `£${(Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
@@ -299,7 +316,8 @@ export default function CRMFinances() {
             <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" title="Previous week">
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <div className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 min-w-[200px] text-center tabular-nums">
+            <div className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 min-w-[220px] text-center tabular-nums">
+              <span className="text-xs font-bold text-slate-400 mr-1.5">W{weekNumberOf(weekStart)}</span>
               {fmtWeekRange(weekStart)}
             </div>
             <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" title="Next week">
@@ -435,7 +453,7 @@ export default function CRMFinances() {
                   {overview && monthWeeks.length === 0 && (
                     <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">No weeks recorded in this month.</td></tr>
                   )}
-                  {monthWeeks.map((w, i) => {
+                  {monthWeeks.map(w => {
                     const extras = extrasByWeek.get(w.week_start) ?? [];
                     const extraIncome = extras.reduce((s, e) => s + e.income, 0);
                     const extraProfit = extras.reduce((s, e) => s + e.profit, 0);
@@ -444,7 +462,12 @@ export default function CRMFinances() {
                     return (
                       <tr key={w.week_start} className="hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-2.5 whitespace-nowrap">
-                          <span className="inline-flex items-center justify-center w-9 h-5 rounded-full bg-slate-100 text-[11px] font-bold text-slate-600 mr-2">W{i + 1}</span>
+                          <span
+                            className="inline-flex items-center justify-center min-w-[2.25rem] h-5 px-1 rounded-full bg-slate-100 text-[11px] font-bold text-slate-600 mr-2 tabular-nums"
+                            title={`Week ${weekNumberOf(w.week_start)} of the year`}
+                          >
+                            W{weekNumberOf(w.week_start)}
+                          </span>
                           <span className="text-slate-700 tabular-nums">{fmtWeekRange(w.week_start)}</span>
                         </td>
                         <td className="text-right px-3 py-2.5 tabular-nums text-slate-500">{w.job_count}</td>
