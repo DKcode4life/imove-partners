@@ -17,6 +17,11 @@ const prisma = new PrismaClient();
 
 // ── Shared blocks ─────────────────────────────────────────────────────────────
 
+// Public logo URL — must be an absolute production URL so the image loads
+// inside recipients' email clients (a relative or localhost URL would not).
+// The Express server serves client/dist statically, which includes logo.png.
+const LOGO_URL = 'https://crm.myimove.co.uk/logo.png';
+
 const SIGNATURE = `
             <table width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #16a34a;margin-top:28px;padding-top:20px;">
               <tr>
@@ -72,9 +77,25 @@ function buildEmail({ headerGradient, headerTitle, headerSubtitle, body }) {
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;max-width:600px;width:100%;">
 
         <tr>
-          <td style="background:${headerGradient};padding:32px 40px;text-align:center;">
-            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">${headerTitle}</h1>
-            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">${headerSubtitle}</p>
+          <td style="background:${headerGradient};padding:24px 28px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:112px;vertical-align:middle;">
+                  <table cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="background:#ffffff;border-radius:10px;padding:7px 9px;">
+                        <img src="${LOGO_URL}" alt="iMove Removals &amp; Storage" width="88" style="display:block;width:88px;height:auto;border:0;">
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                <td style="text-align:center;vertical-align:middle;padding:0 8px;">
+                  <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">${headerTitle}</h1>
+                  <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:13px;">${headerSubtitle}</p>
+                </td>
+                <td style="width:112px;">&nbsp;</td>
+              </tr>
+            </table>
           </td>
         </tr>
 
@@ -107,7 +128,7 @@ async function main() {
       body_html: buildEmail({
         headerGradient: 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)',
         headerTitle: 'Your Moving Estimate',
-        headerSubtitle: 'iMove Relocations Ltd',
+        headerSubtitle: 'iMove Removals & Storage',
         body: `
             <p style="margin:0 0 20px;font-size:16px;">Dear <strong>{{customer_name}}</strong>,</p>
             <p style="margin:0 0 20px;">Thank you for getting in touch with <strong>iMove Relocations</strong>. Please find attached your estimate quote for your proposed move.</p>
@@ -157,7 +178,7 @@ async function main() {
       body_html: buildEmail({
         headerGradient: 'linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%)',
         headerTitle: 'Your Fixed Quote',
-        headerSubtitle: 'iMove Relocations Ltd',
+        headerSubtitle: 'iMove Removals & Storage',
         body: `
             <p style="margin:0 0 20px;font-size:16px;">Dear <strong>{{customer_name}}</strong>,</p>
             <p style="margin:0 0 20px;">Further to our recent survey, please find attached your <strong>fixed price quote</strong> for your upcoming move.</p>
@@ -218,7 +239,7 @@ async function main() {
       body_html: buildEmail({
         headerGradient: 'linear-gradient(135deg,#16a34a 0%,#15803d 100%)',
         headerTitle: 'Quote Accepted — Thank You!',
-        headerSubtitle: 'iMove Relocations Ltd',
+        headerSubtitle: 'iMove Removals & Storage',
         body: `
             <p style="margin:0 0 20px;font-size:16px;">Dear <strong>{{customer_name}}</strong>,</p>
             <p style="margin:0 0 20px;">Thank you for accepting your quote with <strong>iMove Relocations</strong>. Your signed acceptance form is attached for your records — please keep it safe.</p>
@@ -264,7 +285,7 @@ async function main() {
       body_html: buildEmail({
         headerGradient: 'linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%)',
         headerTitle: 'Deposit Invoice',
-        headerSubtitle: 'iMove Relocations Ltd',
+        headerSubtitle: 'iMove Removals & Storage',
         body: `
             <p style="margin:0 0 20px;font-size:16px;">Dear <strong>{{customer_name}}</strong>,</p>
             <p style="margin:0 0 20px;">Thank you for choosing <strong>iMove Relocations</strong>. Please find attached your deposit invoice to secure your confirmed moving date.</p>
@@ -358,7 +379,7 @@ async function main() {
       body_html: buildEmail({
         headerGradient: 'linear-gradient(135deg,#475569 0%,#334155 100%)',
         headerTitle: 'Final Invoice',
-        headerSubtitle: 'iMove Relocations Ltd',
+        headerSubtitle: 'iMove Removals & Storage',
         body: `
             <p style="margin:0 0 20px;font-size:16px;">Dear <strong>{{customer_name}}</strong>,</p>
             <p style="margin:0 0 20px;">Please find attached the <strong>final invoice</strong> for your upcoming move. Thank you for your continued trust in iMove Relocations.</p>
