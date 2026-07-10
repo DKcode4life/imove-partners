@@ -162,6 +162,9 @@ export default function CRMWages() {
       await load();
     } catch (err) {
       console.error('Failed to save wage period', err);
+      // The Paid tick flips optimistically before the save — put it back if
+      // the save didn't land so the UI doesn't claim someone was paid.
+      if ('paid' in patch) setEdit(row.asset_id, { paid: row.paid });
     } finally {
       setSavingId(null);
     }
@@ -179,7 +182,9 @@ export default function CRMWages() {
       t.total    += s.total;
       t.expenses += expenses;
       t.advances += advances;
-      t.balance  += s.total + expenses - advances;
+      // A paid row is settled — it no longer owes anything, so it doesn't
+      // count towards "Balance to pay". Tick everyone green → balance £0.
+      if (!paid) t.balance += s.total + expenses - advances;
       if (paid) t.paidCount += 1;
     }
     return t;
@@ -306,7 +311,10 @@ export default function CRMWages() {
                     const advances = Number(getField(row, 'advances')) || 0;
                     const notes    = (getField(row, 'notes') as string) ?? '';
                     const paid     = !!getField(row, 'paid');
-                    const balance  = row.total + expenses - advances;
+                    // Marking someone paid settles their row: the balance
+                    // reads £0 and the pre-payment amount moves to the tooltip.
+                    const owed     = row.total + expenses - advances;
+                    const balance  = paid ? 0 : owed;
                     return (
                       <tr key={row.asset_id} className={paid ? 'bg-emerald-50/30' : ''}>
                         <td className="px-4 py-2 font-semibold text-slate-800 whitespace-nowrap">
@@ -353,7 +361,12 @@ export default function CRMWages() {
                             onCommit={v => persist(row, { advances: v })}
                           />
                         </td>
-                        <td className="text-right px-3 py-2 font-bold text-blue-700 tabular-nums bg-blue-50/40">
+                        <td
+                          className={`text-right px-3 py-2 font-bold tabular-nums ${
+                            paid ? 'text-emerald-600 bg-emerald-50/40' : 'text-blue-700 bg-blue-50/40'
+                          }`}
+                          title={paid ? `Paid — settled ${fmtMoney(owed)}` : undefined}
+                        >
                           {fmtMoney(balance)}
                         </td>
                         <td className="px-1 py-1.5">
@@ -370,7 +383,13 @@ export default function CRMWages() {
                         </td>
                         <td className="text-center px-2 py-2">
                           <button
-                            onClick={() => persist(row, { paid: !paid })}
+                            onClick={() => {
+                              const next = !paid;
+                              // Optimistic: the tick greens and the balance
+                              // zeroes immediately; persist reconciles after.
+                              setEdit(row.asset_id, { paid: next });
+                              persist(row, { paid: next });
+                            }}
                             disabled={savingId === row.asset_id}
                             className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-colors ${
                               paid
