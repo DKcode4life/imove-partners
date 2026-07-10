@@ -8,6 +8,7 @@ const { send: sendEmail } = require('../services/email');
 const storage = require('../services/storage');
 const { normalizeSchedule } = require('../lib/move-schedule');
 const { syncSurveyEvent } = require('../lib/survey-event-sync');
+const { settleInvoiceFromQuoteState } = require('../lib/invoice-settle');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -1003,6 +1004,9 @@ router.put('/jobs/:id/quote-state', wrap(async (req, res) => {
   const isDepositPaid = newState?.depositPaid === true;
   const depositJustPaid = isDepositPaid && !wasDepositPaid;
 
+  const wasBalancePaid = existing.quote_state?.balancePaid === true;
+  const balanceJustPaid = newState?.balancePaid === true && !wasBalancePaid;
+
   const jobUpdates = { quote_state: newState };
 
   if (depositJustPaid) {
@@ -1011,30 +1015,29 @@ router.put('/jobs/:id/quote-state', wrap(async (req, res) => {
       jobUpdates.status = 'Confirmed Deposit';
     }
 
-    // Mark the deposit invoice as paid so the receipt can be sent
-    const depositInvoice = await prisma.invoice.findFirst({
-      where: { job_id: id, invoice_type: 'deposit' },
-      include: { payments: true },
-    });
-    if (depositInvoice && depositInvoice.status !== 'paid') {
-      const paidAt = newState?.depositPaidDate ? new Date(newState.depositPaidDate) : new Date();
-      await prisma.invoice.update({
-        where: { id: depositInvoice.id },
-        data: { status: 'paid', paid_at: paidAt },
-      });
-      // Create a payment record so the receipt PDF shows the correct amount and date
-      const alreadyPaid = depositInvoice.payments.reduce((s, p) => s + p.amount, 0);
-      const remaining = depositInvoice.total - alreadyPaid;
-      if (remaining > 0) {
-        await prisma.payment.create({
-          data: { invoice_id: depositInvoice.id, amount: remaining, method: 'bank_transfer', paid_at: paidAt },
-        });
-      }
-    }
+    // Mark the deposit invoice as paid (with a covering payment record) so
+    // the deposit receipt can be sent.
+    const paidAt = newState?.depositPaidDate ? new Date(newState.depositPaidDate) : new Date();
+    await settleInvoiceFromQuoteState(prisma, { jobId: id, invoiceType: 'deposit', paidAt });
 
     if (jobUpdates.status && jobUpdates.status !== existing.status) {
       await prisma.crmActivity.create({
         data: { job_id: id, type: 'note', note: 'Deposit marked as paid — status advanced to Confirmed Deposit' },
+      });
+    }
+  }
+
+  // Ticking "balance paid" must settle the FINAL (main) invoice too, or the
+  // move-receipt email is rejected with "invoice is not yet marked paid" even
+  // though the dashboard shows the balance as paid. Job status is advanced to
+  // Confirmed Paid by the client's onBalancePaid callback, so only the
+  // invoice is touched here.
+  if (balanceJustPaid) {
+    const paidAt = newState?.balancePaidDate ? new Date(newState.balancePaidDate) : new Date();
+    const settled = await settleInvoiceFromQuoteState(prisma, { jobId: id, invoiceType: 'main', paidAt });
+    if (settled) {
+      await prisma.crmActivity.create({
+        data: { job_id: id, type: 'note', note: `Balance marked as paid — ${settled.invoice_number} marked PAID` },
       });
     }
   }
