@@ -121,11 +121,12 @@ function boxBlur(map, w, h, radius, passes) {
 }
 
 // ── Build ────────────────────────────────────────────────────────────────────
-const PAD = 14;          // room for the glow to breathe
+const PAD = 14;          // room for the shadow to breathe
 const GLOW_RADIUS = 5;   // box radius per pass
 const GLOW_PASSES = 3;
 const GLOW_STRENGTH = 2.2; // amplifies the blurred silhouette before clamping
-const GLOW_MAX = 0.85;     // peak glow opacity
+const GLOW_MAX = 0.6;      // peak shadow opacity — black needs less than white did
+const GLOW_COLOR = { r: 0, g: 0, b: 0 }; // soft black drop shadow
 
 const logo = decodePng(fs.readFileSync(path.join(ROOT, 'client/public/logo.png')));
 const W = logo.w + PAD * 2, H = logo.h + PAD * 2;
@@ -138,13 +139,13 @@ for (let y = 0; y < logo.h; y++)
 
 const glow = boxBlur(sil, W, H, GLOW_RADIUS, GLOW_PASSES);
 
-// Compose: white glow underneath, logo on top (source-over)
+// Compose: shadow underneath, logo on top (source-over)
 const out = Buffer.alloc(W * H * 4);
 for (let y = 0; y < H; y++) {
   for (let x = 0; x < W; x++) {
     const gi = y * W + x;
     const ga = Math.min(GLOW_MAX, glow[gi] * GLOW_STRENGTH);
-    let r = 255, g = 255, b = 255, a = ga;
+    let r = GLOW_COLOR.r, g = GLOW_COLOR.g, b = GLOW_COLOR.b, a = ga;
     const lx = x - PAD, ly = y - PAD;
     if (lx >= 0 && lx < logo.w && ly >= 0 && ly < logo.h) {
       const o = (ly * logo.w + lx) * 4;

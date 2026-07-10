@@ -82,14 +82,14 @@ function buildEmail({ headerGradient, headerTitle, headerSubtitle, body }) {
           <td style="background:${headerGradient};padding:24px 28px;">
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="width:112px;vertical-align:middle;">
-                  <img src="${LOGO_URL}" alt="iMove Removals &amp; Storage" width="104" style="display:block;width:104px;height:auto;border:0;">
+                <td style="width:128px;vertical-align:middle;">
+                  <img src="${LOGO_URL}" alt="iMove Removals &amp; Storage" width="120" style="display:block;width:120px;height:auto;border:0;">
                 </td>
                 <td style="text-align:center;vertical-align:middle;padding:0 8px;">
                   <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">${headerTitle}</h1>
                   <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:13px;">${headerSubtitle}</p>
                 </td>
-                <td style="width:112px;">&nbsp;</td>
+                <td style="width:128px;">&nbsp;</td>
               </tr>
             </table>
           </td>
