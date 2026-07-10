@@ -19,8 +19,10 @@ const prisma = new PrismaClient();
 
 // Public logo URL — must be an absolute production URL so the image loads
 // inside recipients' email clients (a relative or localhost URL would not).
-// The Express server serves client/dist statically, which includes logo.png.
-const LOGO_URL = 'https://crm.myimove.co.uk/logo.png';
+// logo-email.png is the transparent logo with a soft white glow baked into
+// the pixels (generated from logo.png): email clients strip CSS shadows, so
+// the glow that lifts it off the coloured header must live in the image.
+const LOGO_URL = 'https://crm.myimove.co.uk/logo-email.png';
 
 const SIGNATURE = `
             <table width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #16a34a;margin-top:28px;padding-top:20px;">
@@ -81,13 +83,7 @@ function buildEmail({ headerGradient, headerTitle, headerSubtitle, body }) {
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td style="width:112px;vertical-align:middle;">
-                  <table cellpadding="0" cellspacing="0">
-                    <tr>
-                      <td style="background:#ffffff;border-radius:10px;padding:7px 9px;">
-                        <img src="${LOGO_URL}" alt="iMove Removals &amp; Storage" width="88" style="display:block;width:88px;height:auto;border:0;">
-                      </td>
-                    </tr>
-                  </table>
+                  <img src="${LOGO_URL}" alt="iMove Removals &amp; Storage" width="104" style="display:block;width:104px;height:auto;border:0;">
                 </td>
                 <td style="text-align:center;vertical-align:middle;padding:0 8px;">
                   <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">${headerTitle}</h1>
