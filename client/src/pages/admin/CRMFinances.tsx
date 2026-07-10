@@ -13,9 +13,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronRight, Loader2, PiggyBank, Plus, RefreshCw, Trash2, TrendingUp,
+  Calculator, ChevronLeft, ChevronRight, Loader2, PiggyBank, Plus, RefreshCw, Trash2, TrendingUp,
 } from 'lucide-react';
 import CRMLayout from '../../components/CRMLayout';
+import Modal from '../../components/Modal';
 import PnlPanel from '../../components/PnlPanel';
 import { MonthlyBarsChart, WeeklyTrendChart, type ChartPoint } from '../../components/finance/TrendCharts';
 import api from '../../lib/api';
@@ -122,6 +123,7 @@ export default function CRMFinances() {
 
   const [weekStart, setWeekStart] = useState(currentMonday);
   const [month, setMonth] = useState(currentMonth);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   // Selected week's P&L (fast, refetched on week change).
   const [pnl, setPnl] = useState<WeeklyPnlResponse | null>(null);
@@ -309,6 +311,16 @@ export default function CRMFinances() {
             <button onClick={refreshAfterEdit} className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" title="Refresh">
               <RefreshCw className={`w-4 h-4 ${pnlLoading ? 'animate-spin' : ''}`} />
             </button>
+            <button
+              onClick={() => setAdminOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-600 hover:bg-slate-50"
+              title="Edit the fixed monthly admin costs"
+            >
+              <Calculator className="w-4 h-4 text-amber-600" />
+              Admin costs
+              <span className="font-bold text-amber-700 tabular-nums">{fmtMoney(adminTotal)}</span>
+              <span className="text-xs text-slate-400">/mo</span>
+            </button>
           </div>
         </div>
 
@@ -471,9 +483,13 @@ export default function CRMFinances() {
           </div>
         </div>
 
-        {/* Admin costs */}
-        <AdminCostsCard costs={adminCosts} onChanged={() => loadOverview(true)} />
       </div>
+
+      {/* Admin costs editor — opened from the header button; edits recalculate
+          the month cards (net profit) as soon as they save. */}
+      <Modal open={adminOpen} onClose={() => setAdminOpen(false)} title="Monthly admin costs" size="lg" align="top">
+        <AdminCostsEditor costs={adminCosts} onChanged={() => loadOverview(true)} />
+      </Modal>
     </CRMLayout>
   );
 }
@@ -627,9 +643,9 @@ function ExtraIncomeCard({
   );
 }
 
-// ── Admin costs editor ───────────────────────────────────────────────────────
+// ── Admin costs editor (modal body) ──────────────────────────────────────────
 
-function AdminCostsCard({ costs, onChanged }: { costs: AdminCostRow[]; onChanged: () => void }) {
+function AdminCostsEditor({ costs, onChanged }: { costs: AdminCostRow[]; onChanged: () => void }) {
   const [label, setLabel] = useState('');
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
@@ -671,18 +687,18 @@ function AdminCostsCard({ costs, onChanged }: { costs: AdminCostRow[]; onChanged
   }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden max-w-2xl">
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h3 className="text-sm font-bold text-slate-800">Monthly admin costs</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Fixed overheads taken off every month's profit — rent, software, insurance, accountancy…</p>
-        </div>
-        <div className="text-sm text-slate-600">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-xs text-slate-400 max-w-sm">
+          Fixed overheads taken off every month's profit — rent, software, insurance, accountancy…
+          Changes recalculate the net profit figures immediately.
+        </p>
+        <div className="text-sm text-slate-600 whitespace-nowrap">
           Total: <span className="font-bold text-amber-700 tabular-nums">{fmtMoney(total)}</span>
           <span className="text-xs text-slate-400"> /month</span>
         </div>
       </div>
-      <div className="divide-y divide-slate-50">
+      <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-50">
         {costs.map(c => (
           <div key={c.id} className="px-4 py-2 flex items-center gap-3">
             <span className="min-w-0 flex-1 text-sm font-medium text-slate-800 truncate">{c.label}</span>
