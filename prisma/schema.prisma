@@ -364,6 +364,33 @@ model WagePeriod {
   @@map("wage_periods")
 }
 
+// Manual side-business income entered per week on the Finances page (e.g. van
+// rental, delivery work). Rolls into weekly/monthly totals alongside job P&L.
+model ExtraIncome {
+  id         Int      @id @default(autoincrement())
+  week_start String // YYYY-MM-DD (Monday) — the week this income belongs to
+  label      String // e.g. "Van rental"
+  income     Float    @default(0)
+  profit     Float    @default(0)
+  created_at DateTime @default(now())
+
+  @@index([week_start])
+  @@map("extra_income")
+}
+
+// Fixed monthly overheads (rent, software, insurance, …) entered on the
+// Finances page. Subtracted from each month's operational profit to show the
+// net figure; edits apply to every month (values are not date-effective).
+model AdminCost {
+  id           Int      @id @default(autoincrement())
+  label        String
+  monthly_cost Float    @default(0)
+  sort_order   Int      @default(0)
+  created_at   DateTime @default(now())
+
+  @@map("admin_costs")
+}
+
 // ─── New entities ───────────────────────────────────────────────────────────
 
 model Quote {

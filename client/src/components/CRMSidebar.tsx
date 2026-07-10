@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, LogOut, ArrowLeftCircle, UserCircle2, ClipboardList, CalendarDays,
-  ChevronLeft, ChevronRight, Settings, Banknote, Briefcase,
+  ChevronLeft, ChevronRight, Settings, Banknote, Briefcase, TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
@@ -34,7 +34,8 @@ const MAIN_NAV = [
   { to: '/admin/crm/jobs',           label: 'Jobs',           icon: <ClipboardList className="w-5 h-5" />,   end: false },
   { to: '/admin/crm/planner',        label: 'Planner',        icon: <CalendarDays className="w-5 h-5" />,    end: false },
   { to: '/admin/crm/contract-jobs',  label: 'Contract Jobs',  icon: <Briefcase className="w-5 h-5" />,       end: false },
-  { to: '/admin/crm/wages',          label: 'Wages / P&L',    icon: <Banknote className="w-5 h-5" />,        end: false },
+  { to: '/admin/crm/wages',          label: 'Wages',          icon: <Banknote className="w-5 h-5" />,        end: false },
+  { to: '/admin/crm/finances',       label: 'Finances',       icon: <TrendingUp className="w-5 h-5" />,      end: false },
   { to: '/admin/crm/customers',      label: 'Customers',      icon: <UserCircle2 className="w-5 h-5" />,     end: false },
 ];
 

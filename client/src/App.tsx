@@ -28,6 +28,7 @@ import AdminCRMCustomerDetail from './pages/admin/CRMCustomerDetail';
 import AdminCRMJobs from './pages/admin/CRMJobs';
 import AdminCRMPlanner from './pages/admin/CRMPlanner';
 import AdminCRMWages from './pages/admin/CRMWages';
+import AdminCRMFinances from './pages/admin/CRMFinances';
 import AdminCRMSettings from './pages/admin/CRMSettings';
 import AdminCRMContractJobs from './pages/admin/CRMContractJobs';
 import AdminCRMContractor from './pages/admin/CRMContractor';
@@ -85,6 +86,7 @@ export default function App() {
                 <Route path="/admin/crm/contract-jobs/:id" element={<AdminCRMContractor />} />
                 <Route path="/admin/crm/contract-jobs/:id/invoices/:invoiceId" element={<AdminCRMContractInvoice />} />
                 <Route path="/admin/crm/wages" element={<AdminCRMWages />} />
+                <Route path="/admin/crm/finances" element={<AdminCRMFinances />} />
                 <Route path="/admin/crm/customers" element={<AdminCRMCustomers />} />
                 <Route path="/admin/crm/customers/:id" element={<AdminCRMCustomerDetail />} />
                 <Route path="/admin/crm/settings" element={<AdminCRMSettings />} />
